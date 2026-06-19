@@ -12,8 +12,12 @@ object DebugLogManager {
     private const val MAX_LOGS = 1000
     private val logQueue = ConcurrentLinkedQueue<String>()
     private val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US)
+    
+    var isLoggingEnabled: Boolean = false
 
     fun log(tag: String, msg: String, tr: Throwable? = null) {
+        if (!isLoggingEnabled) return
+        
         val timestamp = dateFormat.format(Date())
         val formattedMsg = "[$timestamp] [$tag] $msg" + (tr?.let { "\n${Log.getStackTraceString(it)}" } ?: "")
         

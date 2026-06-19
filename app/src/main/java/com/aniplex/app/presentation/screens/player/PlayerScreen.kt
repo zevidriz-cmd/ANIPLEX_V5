@@ -175,7 +175,8 @@ data class PlayerScreenState(
     val showSubtitleStyleDialog: Boolean,
     val showEpisodesSelector: Boolean,
     val selectedServer: String = "s-1",
-    val showServerDialog: Boolean = false
+    val showServerDialog: Boolean = false,
+    val isDiagnosticsEnabled: Boolean = false
 )
 
 data class PlayerCallbacks(
@@ -226,7 +227,8 @@ data class PlayerCallbacks(
     val onEpisodeSelect: (Episode) -> Unit,
     val onServerSelected: (String) -> Unit,
     val onShowServerDialogChange: (Boolean) -> Unit,
-    val onDebugClick: () -> Unit
+    val onDebugClick: () -> Unit,
+    val onDiagnosticsChange: (Boolean) -> Unit
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -239,9 +241,9 @@ fun PlayerScreen(
     category: String,
     onBackClick: () -> Unit,
     onAnimeClick: (String) -> Unit,
-    modifier: Modifier = Modifier,
-    resumePlayback: Boolean = false,
-    initialProgressParam: Long = 0L,
+    modifier: Modifier,
+    resumePlayback: Boolean,
+    initialProgressParam: Long,
     viewModel: PlayerViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
@@ -314,6 +316,7 @@ fun PlayerScreen(
     var showServerDialog by remember { mutableStateOf(false) }
     var showDownloadServerDialog by remember { mutableStateOf(false) }
     var autoStartDownloadAfterExtraction by remember { mutableStateOf(false) }
+    var isDiagnosticsEnabled by remember { mutableStateOf(DebugLogManager.isLoggingEnabled) }
 
     val availableServers = remember { listOf("s-1", "s-2", "s-3") }
 
@@ -1277,7 +1280,8 @@ fun PlayerScreen(
         showSubtitleStyleDialog = showSubtitleStyleDialog,
         showEpisodesSelector = showEpisodesSelector,
         selectedServer = selectedServer,
-        showServerDialog = showServerDialog
+        showServerDialog = showServerDialog,
+        isDiagnosticsEnabled = isDiagnosticsEnabled
     )
 
     val callbacks = PlayerCallbacks(
@@ -1485,6 +1489,15 @@ fun PlayerScreen(
         onDebugClick = {
             DebugLogManager.log("USER_ACTION", "Tapped diagnostics debugger trigger button")
             showDebugExportDialog = true
+        },
+        onDiagnosticsChange = { enabled ->
+            isDiagnosticsEnabled = enabled
+            DebugLogManager.isLoggingEnabled = enabled
+            if (enabled) {
+                DebugLogManager.log("USER_ACTION", "Diagnostics & Logs ENABLED")
+            } else {
+                DebugLogManager.clear()
+            }
         }
     )
 
@@ -2049,32 +2062,34 @@ private fun PlayerScreenContent(
         }
 
         // EMERGENCY FLOATING DIAGNOSTIC BUTTON (Visible on top of everything, including loading and error states)
-        Box(
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(top = 40.dp, end = 16.dp)
-                .background(Color.Black.copy(alpha = 0.75f), RoundedCornerShape(20.dp))
-                .border(1.2.dp, CrunchyrollOrange.copy(alpha = 0.9f), RoundedCornerShape(20.dp))
-                .clickable { callbacks.onDebugClick() }
-                .padding(horizontal = 14.dp, vertical = 7.dp)
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+        if (state.isDiagnosticsEnabled) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = 40.dp, end = 16.dp)
+                    .background(Color.Black.copy(alpha = 0.75f), RoundedCornerShape(20.dp))
+                    .border(1.2.dp, CrunchyrollOrange.copy(alpha = 0.9f), RoundedCornerShape(20.dp))
+                    .clickable { callbacks.onDebugClick() }
+                    .padding(horizontal = 14.dp, vertical = 7.dp)
             ) {
-                Icon(
-                    imageVector = Icons.Default.BugReport,
-                    contentDescription = "Debug Diagnostics",
-                    tint = CrunchyrollOrange,
-                    modifier = Modifier.size(16.dp)
-                )
-                Text(
-                    text = "DIAGNOSTICS / LOGS",
-                    color = Color.White,
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 0.5.sp
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.BugReport,
+                        contentDescription = "Debug Diagnostics",
+                        tint = CrunchyrollOrange,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Text(
+                        text = "DIAGNOSTICS / LOGS",
+                        color = Color.White,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.5.sp
+                    )
+                }
             }
         }
     }
@@ -3386,15 +3401,25 @@ fun PlaybackSettingsOverlay(
             )
             HorizontalDivider(color = Color(0xFF1F1F1F), thickness = 1.dp)
 
-            // Debug Logs & Cookies Exporter Row
-            SettingsClickableRow(
-                label = "Export Debug Logs & Cookies",
-                value = "Troubleshoot & Save logs",
-                onClick = {
-                    callbacks.onDebugClick()
-                }
+            // Diagnostics Debugger Toggle Row
+            SettingsToggleRow(
+                label = "Enable Diagnostics & Logs",
+                checked = state.isDiagnosticsEnabled,
+                onCheckedChange = callbacks.onDiagnosticsChange
             )
             HorizontalDivider(color = Color(0xFF1F1F1F), thickness = 1.dp)
+
+            if (state.isDiagnosticsEnabled) {
+                // Debug Logs & Cookies Exporter Row
+                SettingsClickableRow(
+                    label = "Export Debug Logs & Cookies",
+                    value = "Troubleshoot & Save logs",
+                    onClick = {
+                        callbacks.onDebugClick()
+                    }
+                )
+                HorizontalDivider(color = Color(0xFF1F1F1F), thickness = 1.dp)
+            }
         }
 
         if (state.showServerDialog) {

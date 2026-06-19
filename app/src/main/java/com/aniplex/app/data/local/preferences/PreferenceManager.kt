@@ -43,6 +43,10 @@ class PreferenceManager @Inject constructor(
         get() = prefs.getString("preferred_anime_version", "uncensored") ?: "uncensored"
         set(value) = prefs.edit().putString("preferred_anime_version", value).apply()
 
+    var enableDiagnostics: Boolean
+        get() = prefs.getBoolean("enable_diagnostics", false)
+        set(value) = prefs.edit().putBoolean("enable_diagnostics", value).apply()
+
     var downloadOverCellular: Boolean
         get() = prefs.getBoolean("download_cellular", false)
         set(value) = prefs.edit().putBoolean("download_cellular", value).apply()

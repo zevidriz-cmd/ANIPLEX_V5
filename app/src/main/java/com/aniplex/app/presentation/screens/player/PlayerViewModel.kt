@@ -45,6 +45,13 @@ class PlayerViewModel @Inject constructor(
             preferenceManager.autoplayNextEpisode = value
         }
 
+    var enableDiagnostics: Boolean
+        get() = preferenceManager.enableDiagnostics
+        set(value) {
+            preferenceManager.enableDiagnostics = value
+            DebugLogManager.isLoggingEnabled = value
+        }
+
     val skipIntro: Boolean
         get() = preferenceManager.skipIntro
 
@@ -68,6 +75,10 @@ class PlayerViewModel @Inject constructor(
         set(value) {
             preferenceManager.defaultAudioCategory = value
         }
+
+    init {
+        DebugLogManager.isLoggingEnabled = enableDiagnostics
+    }
 
     var preferredQuality: String
         get() = preferenceManager.preferredQuality
