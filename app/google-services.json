@@ -51,6 +51,14 @@
       },
       "oauth_client": [
         {
+          "client_id": "965933740812-0cpu7ogevp1qf879sf1f1dogsaqb9vhb.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.aniplex",
+            "certificate_hash": "18c3aa2825f88abcf614bab5740dd4f9e9b85e6f"
+          }
+        },
+        {
           "client_id": "965933740812-b1rt0u9a6pjr9q5q26pjo7dbr89k5mrf.apps.googleusercontent.com",
           "client_type": 1,
           "android_info": {
