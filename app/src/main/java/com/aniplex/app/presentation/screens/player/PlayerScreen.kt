@@ -755,16 +755,16 @@ fun PlayerScreen(
         val initialEmbedUrl = getEmbedUrl(selectedServer, episodeId, activeCategory)
         localResumePlayback = resumePlayback
         
-        val isNewEpisode = (episodeId != lastEpisodeId || activeCategory != lastCategory)
+        val isNewEpisode = (episodeId != lastEpisodeId)
         
-        // Caching current position of ExoPlayer if it's a server switch
-        if (!isNewEpisode && lastServer.isNotEmpty() && selectedServer != lastServer) {
+        // Caching current position of ExoPlayer if it's a server or category switch
+        if (!isNewEpisode && (selectedServer != lastServer || activeCategory != lastCategory)) {
             val player = exoPlayerRef
             if (player != null) {
                 val currentPos = player.currentPosition
                 if (currentPos > 0) {
                     serverSwitchPosition = currentPos
-                    DebugLogManager.log("ANIPLEX_PLAYER", "Cached current position $currentPos before manual server switch from $lastServer to $selectedServer")
+                    DebugLogManager.log("ANIPLEX_PLAYER", "Cached current position $currentPos before manual switch")
                 }
             }
         }
