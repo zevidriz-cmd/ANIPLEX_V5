@@ -446,14 +446,39 @@ export default function VideoPlayer({
     }
   };
 
-  // Sync fullscreen state
+  // Sync fullscreen state & programmatically lock/unlock orientation for mobile PWA support
   useEffect(() => {
     const handleFsChange = () => {
       const isFs = !!document.fullscreenElement;
       setIsFullscreen(isFs);
+      
+      if (screen.orientation) {
+        if (isFs) {
+          // Override manifest lock and force landscape during video playback
+          screen.orientation.lock("landscape").catch(err => {
+            console.warn("Screen orientation lock to landscape failed:", err);
+          });
+        } else {
+          // Restore back to portrait PWA mode when exiting fullscreen
+          screen.orientation.lock("portrait").catch(err => {
+            if (screen.orientation.unlock) screen.orientation.unlock();
+            console.warn("Screen orientation lock to portrait failed:", err);
+          });
+        }
+      }
     };
+    
     document.addEventListener("fullscreenchange", handleFsChange);
-    return () => document.removeEventListener("fullscreenchange", handleFsChange);
+    return () => {
+      document.removeEventListener("fullscreenchange", handleFsChange);
+      if (screen.orientation && screen.orientation.unlock) {
+        try {
+          screen.orientation.unlock();
+        } catch (e) {
+          console.warn("Screen orientation unlock failed:", e);
+        }
+      }
+    };
   }, []);
 
   // Desktop keyboard shortcuts
