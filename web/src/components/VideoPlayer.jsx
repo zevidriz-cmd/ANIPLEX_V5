@@ -35,6 +35,7 @@ export default function VideoPlayer({
   const [volume, setVolume] = useState(1);
   const [isMuted, setIsMuted] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isRotatedFallback, setIsRotatedFallback] = useState(false);
   const [showControls, setShowControls] = useState(true);
   const [showSettings, setShowSettings] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
@@ -452,18 +453,33 @@ export default function VideoPlayer({
       const isFs = !!document.fullscreenElement;
       setIsFullscreen(isFs);
       
-      if (screen.orientation) {
-        if (isFs) {
-          // Override manifest lock and force landscape during video playback
-          screen.orientation.lock("landscape").catch(err => {
-            console.warn("Screen orientation lock to landscape failed:", err);
-          });
-        } else {
-          // Restore back to portrait PWA mode when exiting fullscreen
+      if (!isFs) {
+        setIsRotatedFallback(false);
+        if (screen.orientation && screen.orientation.lock) {
           screen.orientation.lock("portrait").catch(err => {
             if (screen.orientation.unlock) screen.orientation.unlock();
             console.warn("Screen orientation lock to portrait failed:", err);
           });
+        }
+        return;
+      }
+      
+      // We are in fullscreen
+      if (screen.orientation && screen.orientation.lock) {
+        screen.orientation.lock("landscape")
+          .then(() => {
+            setIsRotatedFallback(false);
+          })
+          .catch(err => {
+            console.warn("Screen orientation lock to landscape failed, using CSS rotation fallback:", err);
+            if (window.innerHeight > window.innerWidth) {
+              setIsRotatedFallback(true);
+            }
+          });
+      } else {
+        // Fallback for browsers/emulators without screen.orientation support (like iOS Safari / Chrome DevTools)
+        if (window.innerHeight > window.innerWidth) {
+          setIsRotatedFallback(true);
         }
       }
     };
@@ -658,7 +674,7 @@ export default function VideoPlayer({
 
   return (
     <div 
-      className={`player-container ${isFullscreen ? "fullscreen" : ""}`} 
+      className={`player-container ${isFullscreen ? "fullscreen" : ""} ${isRotatedFallback ? "fullscreen-portrait-rotated" : ""}`} 
       ref={containerRef}
       onMouseMove={showControlsAndResetTimeout}
       onMouseLeave={() => isPlaying && setShowControls(false)}
@@ -1034,6 +1050,17 @@ export default function VideoPlayer({
           width: 100vw;
           border-radius: 0;
           border: none;
+        }
+        .player-container.fullscreen-portrait-rotated {
+          transform: rotate(90deg) !important;
+          transform-origin: center !important;
+          width: 100vh !important;
+          height: 100vw !important;
+          position: fixed !important;
+          top: 50% !important;
+          left: 50% !important;
+          transform: translate(-50%, -50%) rotate(90deg) !important;
+          z-index: 99999 !important;
         }
         .video-element {
           position: absolute;
