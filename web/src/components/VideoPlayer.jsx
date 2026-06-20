@@ -260,14 +260,22 @@ export default function VideoPlayer({
       const hls = new Hls({
         enableWorker: true,
         lowLatencyMode: false,
-        backBufferLength: 90,
-        maxBufferLength: 60, // Buffer up to 60 seconds of video instead of 30
-        maxMaxBufferLength: 90,
-        maxBufferSize: 150 * 1024 * 1024, // Increase max buffer size limit to 150MB (default is 60MB) for high bitrate 1080p single-level streams
-        maxBufferHole: 0.5,
-        highWaterLoopDuration: 3,
-        nudgeMaxRetry: 8,
-        nudgeDelay: 0.1
+        // Aggressive pre-buffering (YouTube-style): download far ahead so proxy latency never causes stutter
+        maxBufferLength: 120,            // Buffer up to 2 minutes ahead of current playback position
+        maxMaxBufferLength: 600,         // When bandwidth is good, allow up to 10 minutes of pre-buffered video
+        maxBufferSize: 300 * 1024 * 1024, // 300MB memory cap for high-bitrate 1080p streams
+        backBufferLength: 30,            // Keep 30s of already-watched video (for rewind without re-fetch)
+        maxBufferHole: 0.1,              // Aggressively fill tiny gaps in the buffer to prevent micro-stalls
+        startFragPrefetch: true,         // Start downloading the next segment before the current one finishes
+        // Retry and recovery tuning
+        fragLoadingMaxRetry: 6,          // Retry failed segment downloads up to 6 times
+        fragLoadingRetryDelay: 1000,     // Wait 1s between retries
+        manifestLoadingMaxRetry: 4,      // Retry playlist fetches up to 4 times
+        levelLoadingMaxRetry: 4,         // Retry quality level playlist fetches up to 4 times
+        // Stall recovery
+        nudgeMaxRetry: 10,               // Try harder to recover from buffer stalls
+        nudgeDelay: 0.05,                // Nudge playback position faster to recover from stalls
+        highBufferWatchdogPeriod: 3,     // Check for buffer health every 3 seconds
       });
       hlsRef.current = hls;
 
