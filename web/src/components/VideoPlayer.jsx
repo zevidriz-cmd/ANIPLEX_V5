@@ -167,10 +167,13 @@ export default function VideoPlayer({
           e.target.closest(".control-btn") || 
           e.target.closest(".player-back-btn") || 
           e.target.closest(".progress-scrubber") || 
+          e.target.closest(".timeline-container") ||
+          e.target.closest(".timeline-input") ||
           e.target.closest(".volume-slider") ||
           e.target.closest(".settings-panel") || 
           e.target.closest(".skip-time-overlay") || 
-          e.target.closest(".unlock-btn")
+          e.target.closest(".unlock-btn") ||
+          e.target.closest(".up-next-overlay")
         ) {
           return;
         }
@@ -196,10 +199,13 @@ export default function VideoPlayer({
         e.target.closest(".control-btn") || 
         e.target.closest(".player-back-btn") || 
         e.target.closest(".progress-scrubber") || 
+        e.target.closest(".timeline-container") ||
+        e.target.closest(".timeline-input") ||
         e.target.closest(".volume-slider") ||
         e.target.closest(".settings-panel") || 
         e.target.closest(".skip-time-overlay") || 
-        e.target.closest(".unlock-btn")
+        e.target.closest(".unlock-btn") ||
+        e.target.closest(".up-next-overlay")
       ) {
         return;
       }
