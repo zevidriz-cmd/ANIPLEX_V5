@@ -57,16 +57,14 @@ const getSeasonDisplayTitle = (season) => {
     return `Season ${num}`;
   }
 
-  // Fallback to checking the seasonNumber property if it exists
-  if (season.seasonNumber) {
-    const num = parseInt(season.seasonNumber);
-    if (!isNaN(num) && num > 0) {
-      const partMatch = titleLower.match(/part\s*(\d+)/i);
-      if (partMatch) {
-        return `Season ${num} Part ${partMatch[1]}`;
-      }
-      return `Season ${num}`;
+  // Fallback to checking the displaySeasonNumber property if it exists
+  if (season.displaySeasonNumber) {
+    const num = season.displaySeasonNumber;
+    const partMatch = titleLower.match(/part\s*(\d+)/i);
+    if (partMatch) {
+      return `Season ${num} Part ${partMatch[1]}`;
     }
+    return `Season ${num}`;
   }
   
   const type = getMediaType(season);
@@ -87,7 +85,20 @@ const getShortSeasonBadge = (season) => {
     }
     return `S${num}`;
   }
-  return season.seasonNumber ? `S${season.seasonNumber}` : "S1";
+  
+  if (season.displaySeasonNumber) {
+    const num = season.displaySeasonNumber;
+    const partMatch = titleLower.match(/part\s*(\d+)/i);
+    if (partMatch) {
+      return `S${num} P${partMatch[1]}`;
+    }
+    return `S${num}`;
+  }
+  
+  const type = getMediaType(season);
+  if (type !== "TV") return type.substring(0, 3).toUpperCase();
+  
+  return "S1";
 };
 
 export default function DetailPage() {
@@ -226,7 +237,17 @@ export default function DetailPage() {
                 return 0;
               });
 
-              setSeasons(filteredList);
+              // Pre-assign sequential displaySeasonNumber to TV series in order
+              let tvIndex = 1;
+              const finalSeasonsList = filteredList.map(s => {
+                const type = getMediaType(s);
+                if (type === "TV") {
+                  return { ...s, displaySeasonNumber: tvIndex++ };
+                }
+                return s;
+              });
+
+              setSeasons(finalSeasonsList);
 
               if (filteredList.length > 0) {
                 const baseTitle = detailData?.anime?.info?.name
@@ -381,13 +402,11 @@ export default function DetailPage() {
     : (info?.name || "Select Season");
 
   const tvSeasons = seasons.filter(s => {
-    const type = getMediaType(s);
-    return type === "TV" || (s.seasonNumber && parseInt(s.seasonNumber) > 0);
+    return getMediaType(s) === "TV";
   });
   
   const moviesAndSpecials = seasons.filter(s => {
-    const type = getMediaType(s);
-    return type !== "TV" && !(s.seasonNumber && parseInt(s.seasonNumber) > 0);
+    return getMediaType(s) !== "TV";
   });
 
   // Determine watch / resume link
