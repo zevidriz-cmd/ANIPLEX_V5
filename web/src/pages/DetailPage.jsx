@@ -56,6 +56,18 @@ const getSeasonDisplayTitle = (season) => {
     }
     return `Season ${num}`;
   }
+
+  // Fallback to checking the seasonNumber property if it exists
+  if (season.seasonNumber) {
+    const num = parseInt(season.seasonNumber);
+    if (!isNaN(num) && num > 0) {
+      const partMatch = titleLower.match(/part\s*(\d+)/i);
+      if (partMatch) {
+        return `Season ${num} Part ${partMatch[1]}`;
+      }
+      return `Season ${num}`;
+    }
+  }
   
   const type = getMediaType(season);
   if (type !== "TV") return type;
