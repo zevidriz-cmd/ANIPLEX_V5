@@ -234,16 +234,34 @@ export default function DetailPage() {
               const resolvedList = await Promise.all(
                 list.map(async (s) => {
                   try {
-                    if (parseInt(s.malId) === currentMalId) {
-                      return { ...s, isResolvable: true };
+                    if (s.episodes === 0) {
+                      return { ...s, isResolvable: false };
                     }
+
+                    let resolvedId = null;
+                    if (parseInt(s.malId) === currentMalId) {
+                      const currentEpsCount = epData?.episodes?.length || 0;
+                      if (currentEpsCount > 0) {
+                        return { ...s, resolvedId: animeId, isResolvable: true };
+                      }
+                      return { ...s, isResolvable: false };
+                    }
+
                     const res = await resolveMAL(s.malId);
                     if (res && res.anikotoId && res.anikotoId !== "") {
-                      return { ...s, isResolvable: true };
+                      resolvedId = res.anikotoId;
+                    } else {
+                      const searchRes = await search(s.title);
+                      if (searchRes && searchRes.animes && searchRes.animes.length > 0) {
+                        resolvedId = searchRes.animes[0].id;
+                      }
                     }
-                    const searchRes = await search(s.title);
-                    if (searchRes && searchRes.animes && searchRes.animes.length > 0) {
-                      return { ...s, isResolvable: true };
+
+                    if (resolvedId) {
+                      const eps = await getEpisodes(resolvedId).catch(() => null);
+                      if (eps && eps.episodes && eps.episodes.length > 0) {
+                        return { ...s, resolvedId, isResolvable: true };
+                      }
                     }
                     return { ...s, isResolvable: false };
                   } catch {
@@ -411,6 +429,10 @@ export default function DetailPage() {
 
   const handleSeasonClick = async (season) => {
     if (season.malId === detail.anime.info.malId) return;
+    if (season.resolvedId) {
+      navigate(`/anime/${season.resolvedId}`);
+      return;
+    }
     setLoading(true);
     try {
       const resolved = await resolveMAL(season.malId);
