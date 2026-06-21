@@ -33,6 +33,70 @@ const setCachedSeasons = (malId, data) => {
   }
 };
 
+const getCachedFillers = (malId) => {
+  try {
+    const cached = sessionStorage.getItem(`fillers_${malId}`);
+    return cached ? JSON.parse(cached) : null;
+  } catch {
+    return null;
+  }
+};
+
+const setCachedFillers = (malId, data) => {
+  try {
+    sessionStorage.setItem(`fillers_${malId}`, JSON.stringify(data));
+  } catch (e) {
+    console.warn("Error caching fillers:", e);
+  }
+};
+
+const fetchJikanFillers = async (malId, totalEps) => {
+  try {
+    const pageCount = Math.ceil(totalEps / 100);
+    const fillerMap = {};
+    const recapMap = {};
+
+    for (let page = 1; page <= pageCount; page++) {
+      if (page > 1) {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+      const url = `https://api.jikan.moe/v4/anime/${malId}/episodes?page=${page}`;
+      const res = await fetch(url);
+      if (!res.ok) {
+        if (res.status === 429) {
+          // Rate limit: backoff and retry once
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+          const retryRes = await fetch(url);
+          if (!retryRes.ok) break;
+          const retryJson = await retryRes.json();
+          if (retryJson.data) {
+            retryJson.data.forEach((ep) => {
+              if (ep.filler) fillerMap[ep.mal_id] = true;
+              if (ep.recap) recapMap[ep.mal_id] = true;
+            });
+            continue;
+          }
+        }
+        break;
+      }
+      const json = await res.json();
+      if (json.data && json.data.length > 0) {
+        json.data.forEach((ep) => {
+          if (ep.filler) fillerMap[ep.mal_id] = true;
+          if (ep.recap) recapMap[ep.mal_id] = true;
+        });
+      } else {
+        break;
+      }
+    }
+    return { fillerMap, recapMap };
+  } catch (err) {
+    console.warn("Error fetching fillers:", err);
+    return { fillerMap: {}, recapMap: {} };
+  }
+};
+
+
 const getMediaType = (season) => {
   const titleLower = season.title.toLowerCase();
   
@@ -185,11 +249,12 @@ export default function DetailPage() {
         ]);
 
         setDetail(detailData);
-        setEpisodes(epData?.episodes || []);
+        const rawEpisodes = epData?.episodes || [];
+        setEpisodes(rawEpisodes);
         setCharacters(charData?.characters || []);
 
         // Audio preference default to whatever episodes have
-        const hasSub = epData?.episodes?.length > 0;
+        const hasSub = rawEpisodes.length > 0;
         setAudioPreference(hasSub ? "sub" : "dub");
 
         // Determine if current title is uncut/uncensored
@@ -229,8 +294,33 @@ export default function DetailPage() {
         // Set loading to false now, letting the page display instantly!
         setLoading(false);
 
-        // Fetch seasons asynchronously in the background
+        // Fetch Jikan fillers asynchronously in the background
         const malId = detailData?.anime?.info?.malId;
+        if (malId && malId !== "0" && malId !== "") {
+          const cachedFillers = getCachedFillers(malId);
+          if (cachedFillers) {
+            setEpisodes(prev => 
+              prev.map(ep => ({
+                ...ep,
+                isFiller: !!cachedFillers.fillerMap[ep.number],
+                isRecap: !!cachedFillers.recapMap[ep.number]
+              }))
+            );
+          } else {
+            fetchJikanFillers(malId, rawEpisodes.length).then(({ fillerMap, recapMap }) => {
+              setEpisodes(prev => 
+                prev.map(ep => ({
+                  ...ep,
+                  isFiller: !!fillerMap[ep.number],
+                  isRecap: !!recapMap[ep.number]
+                }))
+              );
+              setCachedFillers(malId, { fillerMap, recapMap });
+            });
+          }
+        }
+
+        // Fetch seasons asynchronously in the background
         if (malId && malId !== "0" && malId !== "") {
           const cached = getCachedSeasons(malId);
           if (cached) {
@@ -884,7 +974,7 @@ export default function DetailPage() {
                       <Link 
                         key={ep.episodeId} 
                         to={`/watch/${animeId}/${ep.episodeId}?audio=${audioPreference}`} 
-                        className={`episode-grid-card ${isWatched ? "watched" : ""}`}
+                        className={`episode-grid-card ${isWatched ? "watched" : ""} ${ep.isFiller ? "filler" : ""} ${ep.isRecap ? "recap" : ""}`}
                       >
                         <div className="ep-num">
                           <Play size={12} className="ep-play-icon" fill="currentColor" />
@@ -895,6 +985,7 @@ export default function DetailPage() {
                             {ep.title || `Episode ${ep.number}`}
                           </h4>
                           {ep.isFiller && <span className="filler-tag">Filler</span>}
+                          {ep.isRecap && <span className="recap-tag">Recap</span>}
                         </div>
                         {progressPercent > 0 && (
                           <div className="ep-progress-bar-container">
@@ -1467,14 +1558,33 @@ export default function DetailPage() {
           overflow: hidden;
           text-overflow: ellipsis;
         }
+        .episode-grid-card.filler {
+          border-left: 3px solid #ff4d4d;
+        }
+        .episode-grid-card.recap {
+          border-left: 3px solid #ffaa00;
+        }
         .filler-tag {
           align-self: flex-start;
-          background-color: rgba(245, 166, 35, 0.15);
-          color: var(--secondary);
+          background-color: rgba(255, 77, 77, 0.15);
+          color: rgb(255, 77, 77);
+          border: 1px solid rgba(255, 77, 77, 0.3);
           font-size: 0.65rem;
           font-weight: 700;
-          padding: 1px 4px;
-          border-radius: 3px;
+          padding: 1px 6px;
+          border-radius: 4px;
+          text-transform: uppercase;
+        }
+        .recap-tag {
+          align-self: flex-start;
+          background-color: rgba(255, 170, 0, 0.15);
+          color: rgb(255, 170, 0);
+          border: 1px solid rgba(255, 170, 0, 0.3);
+          font-size: 0.65rem;
+          font-weight: 700;
+          padding: 1px 6px;
+          border-radius: 4px;
+          text-transform: uppercase;
         }
 
         /* Characters lists */
