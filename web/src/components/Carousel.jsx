@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
-import { Play, Info, ChevronLeft, ChevronRight } from "lucide-react";
+import { Play, Info, ChevronLeft, ChevronRight, Bookmark } from "lucide-react";
 
 export default function Carousel({ items }) {
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -51,25 +51,32 @@ export default function Carousel({ items }) {
           <p className="spotlight-desc">{currentItem.description}</p>
 
           <div className="spotlight-actions">
-            <Link to={`/anime/${currentItem.id}`} className="btn btn-primary">
-              <Play size={18} fill="white" /> Watch Now
+            <Link to={`/anime/${currentItem.id}`} className="btn btn-primary" style={{ padding: "0.85rem 2rem", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+              <Play size={18} fill="white" /> Start Watching E1
             </Link>
-            <Link to={`/anime/${currentItem.id}`} className="btn btn-secondary">
-              <Info size={18} /> More Info
+            <Link 
+              to={`/anime/${currentItem.id}`} 
+              className="btn btn-secondary" 
+              title="Add to Watchlist"
+              style={{ padding: "0.85rem", width: "48px", height: "48px", display: "inline-flex", alignItems: "center", justifyContent: "center" }}
+            >
+              <Bookmark size={18} />
             </Link>
           </div>
         </div>
       </div>
 
-      <div className="carousel-dots">
+      <div className="carousel-dots dot-bar-container">
         {items.map((_, index) => (
           <button 
             key={index} 
-            className={`dot ${index === currentIndex ? "active" : ""}`}
+            className={`dot-bar ${index === currentIndex ? "active" : ""}`}
             onClick={() => setCurrentIndex(index)}
+            aria-label={`Go to slide ${index + 1}`}
           ></button>
         ))}
       </div>
+
 
       <style>{`
         .billboard-inner {

@@ -12,7 +12,7 @@ import { DetailsShimmer } from "../components/Shimmer";
 import AnimeCard from "../components/AnimeCard";
 import { 
   Play, Bookmark, BookmarkCheck, Star, Users, List, 
-  ChevronRight, ArrowLeft, RefreshCw, ChevronDown 
+  ChevronRight, ArrowLeft, RefreshCw, ChevronDown, Film 
 } from "lucide-react";
 
 // Seasons cache to prevent redundant fetching and shimmer loading
@@ -234,6 +234,8 @@ export default function DetailPage() {
   const [seasonDropdownOpen, setSeasonDropdownOpen] = useState(false);
   const [showMobileRating, setShowMobileRating] = useState(false);
   const [showAllSynopsis, setShowAllSynopsis] = useState(false);
+  const [showMoreDetails, setShowMoreDetails] = useState(false);
+  const [shareSuccess, setShareSuccess] = useState(false);
 
   useEffect(() => {
     async function loadData() {
@@ -581,6 +583,16 @@ export default function DetailPage() {
     }
   };
 
+  const handleShareClick = () => {
+    try {
+      navigator.clipboard.writeText(window.location.href);
+      setShareSuccess(true);
+      setTimeout(() => setShareSuccess(false), 2500);
+    } catch (e) {
+      console.warn("Share clipboard copy error:", e);
+    }
+  };
+
   if (loading) {
     return <DetailsShimmer />;
   }
@@ -629,497 +641,550 @@ export default function DetailPage() {
     <div className="detail-page fade-in">
       {/* Hero Header Section */}
       <div className="detail-hero">
-        <div className="hero-backdrop-image" style={{ backgroundImage: `url(${info.poster})` }}></div>
+        <div className="hero-backdrop-image" style={{ backgroundImage: `url(${info.poster})`, filter: "blur(30px) brightness(0.25)" }}></div>
         <div className="hero-gradient"></div>
-        <div className="container hero-container">
+        <div className="container hero-container" style={{ display: "flex", gap: "2.5rem", width: "100%", zIndex: 2 }}>
           <div className="hero-poster-wrapper">
             <img src={info.poster} alt={info.name} className="hero-poster" />
           </div>
 
-          <div className="hero-meta-content">
-            <h1 className="anime-title-h1">{info.name}</h1>
+          <div className="hero-meta-content" style={{ flexGrow: 1, display: "flex", flexDirection: "column", justifyContent: "flex-end" }}>
+            <h1 className="anime-title-h1" style={{ fontSize: "clamp(2rem, 4vw, 3rem)", fontWeight: "900", textTransform: "uppercase", letterSpacing: "-0.5px", textShadow: "2px 2px 8px rgba(0,0,0,0.5)" }}>
+              {info.name}
+            </h1>
             
-            <div className="meta-stats-row">
-              {info.stats?.rating && <span className="stat-pill rating">{info.stats.rating}</span>}
-              {info.stats?.quality && <span className="stat-pill quality">{info.stats.quality}</span>}
-              {info.stats?.type && <span className="stat-pill type">{info.stats.type}</span>}
-              {info.stats?.duration && <span className="stat-pill duration">{info.stats.duration}</span>}
-              {episodes.length > 0 && (
-                <span className="stat-pill eps-count">
-                  {episodes.length} Episodes
-                </span>
+            {/* Metadata bullets list */}
+            <div className="meta-stats-row" style={{ display: "flex", alignItems: "center", gap: "0.6rem", marginTop: "8px", flexWrap: "wrap", fontSize: "0.9rem" }}>
+              <span className="stat-pill rating" style={{ background: "var(--primary)", color: "white", fontWeight: "800", padding: "2px 8px", borderRadius: "4px" }}>
+                {(() => {
+                  if (!moreInfo?.genres || moreInfo.genres.length === 0) return "14+";
+                  const gLower = moreInfo.genres.map(g => g.toLowerCase());
+                  if (gLower.some(g => ["ecchi", "horror", "gore", "seinen", "psychological", "thriller"].includes(g))) {
+                    return "17+";
+                  }
+                  if (gLower.some(g => ["shounen", "action", "fantasy", "supernatural", "adventure"].includes(g))) {
+                    return "14+";
+                  }
+                  return "13+";
+                })()}
+              </span>
+              <span style={{ color: "var(--text-muted)" }}>•</span>
+              <span style={{ color: "white", fontWeight: "600" }}>
+                {info.stats?.episodes?.dub ? "Sub | Dub" : "Subtitled"}
+              </span>
+              {moreInfo?.genres && moreInfo.genres.length > 0 && (
+                <>
+                  <span style={{ color: "var(--text-muted)" }}>•</span>
+                  <span style={{ color: "var(--text-secondary)" }}>
+                    {moreInfo.genres.slice(0, 3).join(", ")}
+                  </span>
+                </>
               )}
             </div>
 
-            {/* TV vs UNCUT Switcher */}
-            {hasAltVersion && (
-              <div className="version-switcher-row">
-                <span className="version-label">Version:</span>
-                {["censored", "uncensored"].map((ver) => (
-                  <button
-                    key={ver}
-                    className={`version-choice-btn ${currentVersion === ver ? "active" : ""}`}
-                    onClick={() => handleSwitchVersion(ver)}
-                    disabled={resolvingVersion}
-                  >
-                    {resolvingVersion && currentVersion !== ver ? (
-                      <RefreshCw size={12} className="spin-icon" />
-                    ) : null}
-                    {ver === "uncensored" ? "Uncut (Uncensored)" : "TV Broadcast"}
-                  </button>
-                ))}
+            {/* Stars row */}
+            <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", marginTop: "10px" }}>
+              <div style={{ display: "flex", color: "#F5A623" }}>
+                {[1, 2, 3, 4, 5].map((s) => {
+                  const starsCount = Math.round((Number(info.stats?.rating) || 0) / 2);
+                  return (
+                    <Star 
+                      key={s} 
+                      size={16} 
+                      fill={userRating > 0 ? (userRating >= s ? "#F5A623" : "none") : (starsCount >= s ? "#F5A623" : "none")} 
+                      style={{ marginRight: "2px" }}
+                    />
+                  );
+                })}
               </div>
-            )}
+              <span style={{ fontWeight: "700", color: "#F5A623" }}>
+                {userRating > 0 ? `${userRating}.0` : ((Number(info.stats?.rating) || 0) / 2).toFixed(1)}
+              </span>
+              <span style={{ color: "var(--text-muted)", fontSize: "0.85rem" }}>
+                ({(() => {
+                  const averageRatingVal = Number(info.stats?.rating) || 0;
+                  const mockVotes = Math.floor((averageRatingVal * 17923) % 250000);
+                  return mockVotes >= 1000 ? (mockVotes / 1000).toFixed(1) + "K" : mockVotes;
+                })()})
+              </span>
+            </div>
 
-            {/* Action buttons */}
-            <div className="actions-row">
+            {/* Primary Action Buttons */}
+            <div className="actions-row" style={{ marginTop: "24px", display: "flex", alignItems: "center", gap: "1rem", flexWrap: "wrap" }}>
               {episodes.length > 0 ? (
-                <Link to={`/watch/${animeId}/${playEpisodeId}`} className="btn btn-primary watch-now-btn">
-                  <Play size={18} fill="white" /> {isResume ? `Resume Ep ${playEpisodeNumber}` : "Watch Episode 1"}
+                <Link to={`/watch/${animeId}/${playEpisodeId}?audio=${audioPreference}`} className="btn btn-primary watch-now-btn" style={{ padding: "0.85rem 2.2rem", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                  <Play size={18} fill="white" /> {isResume ? `Resume S1 E${playEpisodeNumber}` : "Start Watching E1"}
                 </Link>
               ) : (
                 <button className="btn btn-primary watch-now-btn" disabled>No Episodes Available</button>
               )}
 
-              <div className="watchlist-dropdown-wrapper desktop-only" style={{ display: "inline-flex", alignItems: "stretch" }}>
-                <button 
-                  className={`btn ${isWatchlisted ? "btn-secondary" : "btn-secondary"} watchlist-toggle-btn`}
-                  onClick={() => {
-                    if (isWatchlisted) {
-                      handleUpdateWatchlistStatus("");
-                    } else {
-                      handleUpdateWatchlistStatus("planning");
-                    }
-                  }}
-                  type="button"
-                  style={{ borderTopRightRadius: 0, borderBottomRightRadius: 0 }}
-                >
-                  {isWatchlisted ? <BookmarkCheck size={18} /> : <Bookmark size={18} />}
-                  <span>
-                    {isWatchlisted 
-                      ? `${
-                          watchlistStatus === "watching" 
-                            ? "Watching" 
-                            : watchlistStatus === "completed" 
-                            ? "Completed" 
-                            : "Plan to Watch"
-                        }` 
-                      : "Add to List"}
+              {/* Bookmark Toggle */}
+              <button 
+                className="btn btn-secondary" 
+                onClick={() => {
+                  if (isWatchlisted) {
+                    handleUpdateWatchlistStatus("");
+                  } else {
+                    handleUpdateWatchlistStatus("planning");
+                  }
+                }}
+                style={{ padding: "0.85rem", width: "48px", height: "48px", display: "inline-flex", alignItems: "center", justifyContent: "center" }}
+                title={isWatchlisted ? "Remove from Watchlist" : "Add to Watchlist"}
+                type="button"
+              >
+                {isWatchlisted ? <BookmarkCheck size={20} style={{ color: "var(--primary)" }} /> : <Bookmark size={20} />}
+              </button>
+            </div>
+
+            {/* Sub-actions group */}
+            <div style={{ display: "flex", alignItems: "center", gap: "2.5rem", marginTop: "24px", paddingLeft: "4px", flexWrap: "wrap" }}>
+              {/* My List vertical action */}
+              <button 
+                onClick={() => {
+                  if (isWatchlisted) {
+                    handleUpdateWatchlistStatus("");
+                  } else {
+                    handleUpdateWatchlistStatus("planning");
+                  }
+                }}
+                type="button"
+                style={{
+                  background: "none",
+                  border: "none",
+                  color: "var(--text-secondary)",
+                  cursor: "pointer",
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  gap: "6px",
+                  padding: 0,
+                  fontSize: "0.75rem",
+                  fontWeight: "700"
+                }}
+              >
+                {isWatchlisted ? <BookmarkCheck size={20} style={{ color: "var(--primary)" }} /> : <Bookmark size={20} />}
+                <span>{isWatchlisted ? "IN MY LIST" : "ADD TO LIST"}</span>
+              </button>
+
+              {/* Share vertical action */}
+              <button 
+                onClick={handleShareClick}
+                type="button"
+                style={{
+                  background: "none",
+                  border: "none",
+                  color: "var(--text-secondary)",
+                  cursor: "pointer",
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  gap: "6px",
+                  padding: 0,
+                  fontSize: "0.75rem",
+                  fontWeight: "700",
+                  position: "relative"
+                }}
+              >
+                <Film size={20} />
+                <span>{shareSuccess ? "COPIED!" : "SHARE"}</span>
+                {shareSuccess && (
+                  <span style={{
+                    position: "absolute",
+                    bottom: "32px",
+                    background: "rgba(0,0,0,0.85)",
+                    color: "white",
+                    padding: "4px 8px",
+                    borderRadius: "4px",
+                    fontSize: "0.7rem",
+                    whiteSpace: "nowrap",
+                    border: "1px solid var(--border)"
+                  }}>
+                    Link Copied!
                   </span>
-                </button>
-                <button
-                  className="btn btn-secondary watchlist-chevron-btn"
-                  onClick={() => setShowWatchlistMenu(!showWatchlistMenu)}
-                  type="button"
-                  style={{ 
-                    padding: "0.85rem 0.6rem", 
-                    borderLeft: "1px solid rgba(255,255,255,0.1)", 
-                    borderTopLeftRadius: 0, 
-                    borderBottomLeftRadius: 0,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center"
-                  }}
-                >
-                  <ChevronDown size={14} className={`dropdown-chevron ${showWatchlistMenu ? "open" : ""}`} />
-                </button>
-                {showWatchlistMenu && (
-                  <>
-                    <div className="dropdown-backplate" onClick={() => setShowWatchlistMenu(false)} />
-                    <div className="watchlist-menu-dropdown" style={{ right: 0, left: "auto" }}>
-                      {[
-                        { id: "planning", name: "Plan to Watch" },
-                        { id: "watching", name: "Watching" },
-                        { id: "completed", name: "Completed" }
-                      ].map(opt => (
-                        <button 
-                          key={opt.id}
-                          className={`watchlist-menu-item ${watchlistStatus === opt.id ? "active" : ""}`}
-                          onClick={() => {
-                            handleUpdateWatchlistStatus(opt.id);
-                            setShowWatchlistMenu(false);
-                          }}
-                          type="button"
-                        >
-                          {opt.name}
-                        </button>
-                      ))}
-                      {isWatchlisted && (
-                        <button 
-                          className="watchlist-menu-item remove-item"
-                          onClick={() => {
-                            handleUpdateWatchlistStatus("");
-                            setShowWatchlistMenu(false);
-                          }}
-                          type="button"
-                        >
-                          Remove from List
-                        </button>
-                      )}
-                    </div>
-                  </>
                 )}
-              </div>
+              </button>
 
-              {/* Mobile icon actions group */}
-              <div className="mobile-action-buttons-group">
-                <button 
-                  className="action-icon-btn watchlist-toggle-btn" 
-                  onClick={() => {
-                    if (isWatchlisted) {
-                      handleUpdateWatchlistStatus("");
-                    } else {
-                      handleUpdateWatchlistStatus("planning");
-                    }
-                  }} 
-                  type="button"
-                >
-                  {isWatchlisted ? <BookmarkCheck size={20} className="active-icon" /> : <Bookmark size={20} />}
-                  <span>
-                    {isWatchlisted 
-                      ? (watchlistStatus === "watching" 
-                          ? "Watching" 
-                          : watchlistStatus === "completed" 
-                          ? "Completed" 
-                          : "Planning") 
-                      : "My List"}
-                  </span>
-                </button>
-
-                <button className="action-icon-btn rate-toggle-btn" onClick={() => setShowMobileRating(!showMobileRating)} type="button">
-                  <Star size={20} className={userRating > 0 ? "active-icon" : ""} fill={userRating > 0 ? "currentColor" : "none"} />
-                  <span>{userRating > 0 ? `Rated ${userRating}/5` : "Rate"}</span>
-                </button>
-              </div>
-
-              {/* 5-Star Ratings */}
+              {/* Rate interactive */}
               {currentUser && activeProfile && (
-                <div className={`ratings-interactive ${showMobileRating ? "mobile-show" : ""}`}>
-                  <span className="rating-lbl">Rate:</span>
-                  <div className="star-row">
-                    {[1, 2, 3, 4, 5].map((stars) => (
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "4px" }}>
+                  <div style={{ display: "flex", gap: "2px" }}>
+                    {[1, 2, 3, 4, 5].map((s) => (
                       <button
-                        key={stars}
-                        className={`star-btn ${userRating >= stars ? "active" : ""}`}
-                        onClick={() => {
-                          handleRatingSelect(stars);
-                          setShowMobileRating(false);
-                        }}
+                        key={s}
+                        onClick={() => handleRatingSelect(s)}
                         type="button"
+                        style={{ background: "none", border: "none", cursor: "pointer", padding: "2px", color: userRating >= s ? "#F5A623" : "var(--text-muted)" }}
                       >
-                        <Star size={18} fill={userRating >= stars ? "currentColor" : "none"} />
+                        <Star size={16} fill={userRating >= s ? "#F5A623" : "none"} />
                       </button>
                     ))}
                   </div>
+                  <span style={{ fontSize: "0.75rem", fontWeight: "700", color: "var(--text-secondary)" }}>
+                    {userRating > 0 ? `YOUR RATING: ${userRating}/5` : "RATE THIS SHOW"}
+                  </span>
                 </div>
               )}
             </div>
 
-            <div className="synopsis-box">
-              <p className="synopsis-text">
-                {info.description?.length > 150 && !showAllSynopsis 
-                  ? `${info.description.substring(0, 150)}...` 
-                  : info.description}
-                {info.description?.length > 150 && (
-                  <button 
-                    className="see-more-btn" 
-                    onClick={() => setShowAllSynopsis(!showAllSynopsis)}
-                    type="button"
-                  >
-                    {showAllSynopsis ? " See Less" : " See More"}
-                  </button>
-                )}
+            {/* Synopsis and Expandable Details */}
+            <div className="synopsis-box" style={{ marginTop: "24px", background: "none", border: "none", padding: 0 }}>
+              <p className="synopsis-text" style={{ fontSize: "0.95rem", lineHeight: "1.6", color: "var(--text-secondary)" }}>
+                {info.description}
               </p>
+              
+              {/* More Details Toggle */}
+              <button
+                onClick={() => setShowMoreDetails(!showMoreDetails)}
+                type="button"
+                style={{
+                  background: "none",
+                  border: "none",
+                  color: "var(--primary)",
+                  fontWeight: "700",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "4px",
+                  fontSize: "0.85rem",
+                  marginTop: "12px",
+                  padding: "4px 0",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.05em"
+                }}
+              >
+                <span>{showMoreDetails ? "LESS DETAILS" : "MORE DETAILS"}</span>
+                <ChevronDown size={16} style={{ transform: showMoreDetails ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s" }} />
+              </button>
+
+              {/* Expanded details accordion container */}
+              {showMoreDetails && (
+                <div style={{
+                  marginTop: "1.2rem",
+                  padding: "1.2rem",
+                  backgroundColor: "var(--bg-card)",
+                  border: "1px solid var(--border)",
+                  borderRadius: "8px",
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))",
+                  gap: "1.2rem 2rem",
+                  animation: "fadeIn 0.3s ease-out"
+                }}>
+                  <div>
+                    <span style={{ display: "block", fontSize: "0.75rem", color: "var(--text-muted)", fontWeight: "700", textTransform: "uppercase" }}>Status</span>
+                    <span style={{ color: "white", fontSize: "0.9rem", fontWeight: "600" }}>{moreInfo?.status || "Unknown"}</span>
+                  </div>
+                  <div>
+                    <span style={{ display: "block", fontSize: "0.75rem", color: "var(--text-muted)", fontWeight: "700", textTransform: "uppercase" }}>Aired Dates</span>
+                    <span style={{ color: "white", fontSize: "0.9rem", fontWeight: "600" }}>{moreInfo?.aired || "Unknown"}</span>
+                  </div>
+                  <div>
+                    <span style={{ display: "block", fontSize: "0.75rem", color: "var(--text-muted)", fontWeight: "700", textTransform: "uppercase" }}>Premiered Season</span>
+                    <span style={{ color: "white", fontSize: "0.9rem", fontWeight: "600" }}>{moreInfo?.premiered || "Unknown"}</span>
+                  </div>
+                  <div>
+                    <span style={{ display: "block", fontSize: "0.75rem", color: "var(--text-muted)", fontWeight: "700", textTransform: "uppercase" }}>Studio</span>
+                    <span style={{ color: "white", fontSize: "0.9rem", fontWeight: "600" }}>{moreInfo?.studio || "Unknown"}</span>
+                  </div>
+                  {moreInfo?.producers && moreInfo.producers.length > 0 && (
+                    <div style={{ gridColumn: "1 / -1" }}>
+                      <span style={{ display: "block", fontSize: "0.75rem", color: "var(--text-muted)", fontWeight: "700", textTransform: "uppercase", marginBottom: "4px" }}>Producers</span>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+                        {moreInfo.producers.map((p) => (
+                          <span key={p} style={{ backgroundColor: "rgba(255,255,255,0.05)", padding: "3px 8px", borderRadius: "4px", fontSize: "0.75rem", color: "var(--text-secondary)" }}>
+                            {p}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         </div>
       </div>
 
-      <div className="container detail-content-body">
-        <div className="detail-grid-layout">
-          {/* Main Content Area */}
-          <div className="main-detail-column">
-            {/* Episodes Selection */}
-            {episodes.length > 0 && (
-              <section className="detail-section">
-                <div className="section-header-row">
-                  <div className="episodes-title-wrapper">
-                    <h2 className="section-title"><List size={18} /> Episodes</h2>
-                    
-                    {/* Netflix/Crunchyroll Season Selector Dropdown */}
-                    {seasonsLoading ? (
-                      <div className="season-selector-loading-shimmer shimmer" />
-                    ) : (
-                      seasons.length > 1 && (
-                        <div className="season-selector-dropdown-wrapper">
-                          <button 
-                            className="season-dropdown-toggle-btn"
-                            onClick={() => setSeasonDropdownOpen(!seasonDropdownOpen)}
-                            type="button"
-                          >
-                            <span className="dropdown-label">{currentSeasonTitle}</span>
-                            <ChevronDown size={14} className={`dropdown-chevron ${seasonDropdownOpen ? "open" : ""}`} />
-                          </button>
-                        
-                        {seasonDropdownOpen && (
-                          <>
-                            <div className="dropdown-backplate" onClick={() => setSeasonDropdownOpen(false)} />
-                            <div className="season-dropdown-menu">
-                              {/* TV Seasons Group */}
-                              {tvSeasons.length > 0 && (
-                                <div className="dropdown-section">
-                                  <div className="dropdown-section-header">TV Seasons</div>
-                                  {tvSeasons.map((s) => {
-                                    const isActive = Number(s.malId) === Number(info.malId);
-                                    return (
-                                      <div
-                                        key={s.malId}
-                                        className={`season-dropdown-item ${isActive ? "active" : ""}`}
-                                        onClick={() => {
-                                          setSeasonDropdownOpen(false);
-                                          handleSeasonClick(s);
-                                        }}
-                                      >
-                                        <div className="dropdown-item-season-meta">
-                                          {getSeasonDisplayTitle(s)}
-                                        </div>
-                                        <div className="dropdown-item-season-title" title={s.title}>
-                                          {s.title}
-                                        </div>
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                              )}
-                              
-                              {/* Movies & Specials Group */}
-                              {moviesAndSpecials.length > 0 && (
-                                <div className="dropdown-section">
-                                  <div className="dropdown-section-header">Movies & Specials</div>
-                                  {moviesAndSpecials.map((s) => {
-                                    const isActive = Number(s.malId) === Number(info.malId);
-                                    const badge = getMediaBadge(s);
-                                    return (
-                                      <div
-                                        key={s.malId}
-                                        className={`season-dropdown-item ${isActive ? "active" : ""}`}
-                                        onClick={() => {
-                                          setSeasonDropdownOpen(false);
-                                          handleSeasonClick(s);
-                                        }}
-                                      >
-                                        <div className="dropdown-item-season-meta">
-                                          {badge}
-                                        </div>
-                                        <div className="dropdown-item-season-title" title={s.title}>
-                                          {s.title}
-                                        </div>
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                              )}
-                            </div>
-                          </>
-                        )}
-                        </div>
-                      )
-                    )}
-                  </div>
+      <div className="container detail-content-body" style={{ marginTop: "2rem" }}>
+        <div className="main-detail-column" style={{ display: "flex", flexDirection: "column", gap: "3rem", width: "100%" }}>
+          {/* Episodes Selection */}
+          {episodes.length > 0 && (
+            <section className="detail-section">
+              <div className="section-header-row">
+                <div className="episodes-title-wrapper">
+                  <h2 className="section-title"><List size={18} /> Episodes</h2>
                   
-                  {info.stats?.episodes?.dub && info.stats?.episodes?.sub && (
-                    <div className="sub-dub-tabs">
-                      <button 
-                        className={audioPreference === "sub" ? "active" : ""} 
-                        onClick={() => setAudioPreference("sub")}
-                      >
-                        Subbed
-                      </button>
-                      <button 
-                        className={audioPreference === "dub" ? "active" : ""} 
-                        onClick={() => setAudioPreference("dub")}
-                      >
-                        Dubbed
-                      </button>
-                    </div>
+                  {/* Netflix/Crunchyroll Season Selector Dropdown */}
+                  {seasonsLoading ? (
+                    <div className="season-selector-loading-shimmer shimmer" />
+                  ) : (
+                    seasons.length > 1 && (
+                      <div className="season-selector-dropdown-wrapper">
+                        <button 
+                          className="season-dropdown-toggle-btn"
+                          onClick={() => setSeasonDropdownOpen(!seasonDropdownOpen)}
+                          type="button"
+                        >
+                          <span className="dropdown-label">{currentSeasonTitle}</span>
+                          <ChevronDown size={14} className={`dropdown-chevron ${seasonDropdownOpen ? "open" : ""}`} />
+                        </button>
+                      
+                      {seasonDropdownOpen && (
+                        <>
+                          <div className="dropdown-backplate" onClick={() => setSeasonDropdownOpen(false)} />
+                          <div className="season-dropdown-menu">
+                            {/* TV Seasons Group */}
+                            {tvSeasons.length > 0 && (
+                              <div className="dropdown-section">
+                                <div className="dropdown-section-header">TV Seasons</div>
+                                {tvSeasons.map((s) => {
+                                  const isActive = Number(s.malId) === Number(info.malId);
+                                  return (
+                                    <div
+                                      key={s.malId}
+                                      className={`season-dropdown-item ${isActive ? "active" : ""}`}
+                                      onClick={() => {
+                                        setSeasonDropdownOpen(false);
+                                        handleSeasonClick(s);
+                                      }}
+                                    >
+                                      <div className="dropdown-item-season-meta">
+                                        {getSeasonDisplayTitle(s)}
+                                      </div>
+                                      <div className="dropdown-item-season-title" title={s.title}>
+                                        {s.title}
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                            
+                            {/* Movies & Specials Group */}
+                            {moviesAndSpecials.length > 0 && (
+                              <div className="dropdown-section">
+                                <div className="dropdown-section-header">Movies & Specials</div>
+                                {moviesAndSpecials.map((s) => {
+                                  const isActive = Number(s.malId) === Number(info.malId);
+                                  const badge = getMediaBadge(s);
+                                  return (
+                                    <div
+                                      key={s.malId}
+                                      className={`season-dropdown-item ${isActive ? "active" : ""}`}
+                                      onClick={() => {
+                                        setSeasonDropdownOpen(false);
+                                        handleSeasonClick(s);
+                                      }}
+                                    >
+                                      <div className="dropdown-item-season-meta">
+                                        {badge}
+                                      </div>
+                                      <div className="dropdown-item-season-title" title={s.title}>
+                                        {s.title}
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        </>
+                      )}
+                      </div>
+                    )
                   )}
                 </div>
                 
-                <div className="episodes-grid-list">
-                  {episodes.map((ep) => {
-                    const isWatched = historyItem?.episodeId === ep.episodeId || (historyItem?.episodeNumber > ep.number);
-                    let progressPercent = 0;
-                    if (historyItem) {
-                      if (historyItem.episodeId === ep.episodeId) {
-                        if (historyItem.totalDuration > 0) {
-                          progressPercent = (historyItem.progressPosition / historyItem.totalDuration) * 100;
-                        }
-                      } else if (historyItem.episodeNumber > ep.number) {
-                        progressPercent = 100;
+                {info.stats?.episodes?.dub && info.stats?.episodes?.sub && (
+                  <div className="sub-dub-tabs">
+                    <button 
+                      className={audioPreference === "sub" ? "active" : ""} 
+                      onClick={() => setAudioPreference("sub")}
+                      type="button"
+                    >
+                      Subbed
+                    </button>
+                    <button 
+                      className={audioPreference === "dub" ? "active" : ""} 
+                      onClick={() => setAudioPreference("dub")}
+                      type="button"
+                    >
+                      Dubbed
+                    </button>
+                  </div>
+                )}
+              </div>
+              
+              <div className="episodes-horizontal-list">
+                {episodes.map((ep) => {
+                  const isWatched = historyItem?.episodeId === ep.episodeId || (historyItem?.episodeNumber > ep.number);
+                  let progressPercent = 0;
+                  if (historyItem) {
+                    if (historyItem.episodeId === ep.episodeId) {
+                      if (historyItem.totalDuration > 0) {
+                        progressPercent = (historyItem.progressPosition / historyItem.totalDuration) * 100;
                       }
+                    } else if (historyItem.episodeNumber > ep.number) {
+                      progressPercent = 100;
                     }
+                  }
 
-                    return (
-                      <Link 
-                        key={ep.episodeId} 
-                        to={`/watch/${animeId}/${ep.episodeId}?audio=${audioPreference}`} 
-                        className={`episode-grid-card ${isWatched ? "watched" : ""} ${ep.isFiller ? "filler" : ""} ${ep.isRecap ? "recap" : ""}`}
-                      >
-                        <div className="ep-num">
-                          <Play size={12} className="ep-play-icon" fill="currentColor" />
-                          <span>{ep.number}</span>
+                  return (
+                    <Link 
+                      key={ep.episodeId} 
+                      to={`/watch/${animeId}/${ep.episodeId}?audio=${audioPreference}`} 
+                      className={`episode-list-card ${isWatched ? "watched" : ""}`}
+                    >
+                      <div className="episode-thumbnail-wrapper">
+                        <img src={info.poster} className="episode-thumbnail-img" alt={ep.title || `Episode ${ep.number}`} />
+                        
+                        <div className="circle-play-overlay">
+                          <div className="circle-play-btn">
+                            <Play size={16} fill="currentColor" />
+                          </div>
                         </div>
-                        <div className="ep-details">
-                          <h4 className="ep-title" title={ep.title || `Episode ${ep.number}`}>
-                            {ep.title || `Episode ${ep.number}`}
-                          </h4>
-                          {ep.isFiller && <span className="filler-tag">Filler</span>}
-                          {ep.isRecap && <span className="recap-tag">Recap</span>}
-                        </div>
+
+                        {isWatched && (
+                          <div className="watched-banner">
+                            <BookmarkCheck size={14} style={{ color: "var(--primary)" }} />
+                            <span>Watched</span>
+                          </div>
+                        )}
+
                         {progressPercent > 0 && (
-                          <div className="ep-progress-bar-container">
-                            <div className="ep-progress-bar-fill" style={{ width: `${progressPercent}%` }}></div>
+                          <div className="ep-progress-bar-container" style={{ height: "4px", bottom: 0, position: "absolute", left: 0, right: 0 }}>
+                            <div className="ep-progress-bar-fill" style={{ width: `${progressPercent}%`, backgroundColor: "var(--primary)", height: "100%" }}></div>
                           </div>
                         )}
-                      </Link>
-                    );
-                  })}
-                </div>
-              </section>
-            )}
-
-            {/* TV Seasons Selection */}
-            {tvSeasons.length > 1 && (
-              <section className="detail-section animate-slide-up">
-                <h2 className="section-title"><RefreshCw size={18} /> Alternative Seasons</h2>
-                <div className="horizontal-scroll-row">
-                  {tvSeasons.map((season) => (
-                    <div 
-                      key={season.malId} 
-                      className={`season-card-item ${Number(season.malId) === Number(info.malId) ? "active" : ""}`}
-                      onClick={() => handleSeasonClick(season)}
-                    >
-                      <div className="season-poster-wrapper">
-                        {season.poster ? (
-                          <img src={season.poster} alt={season.title} className="season-poster" />
-                        ) : (
-                          <div className="season-poster-fallback flex-center">
-                            <span>{season.title.charAt(0)}</span>
-                          </div>
-                        )}
-                        <span className="season-badge">{getShortSeasonBadge(season)}</span>
                       </div>
-                      <h4 className="season-title" title={season.title}>{season.title}</h4>
-                    </div>
-                  ))}
-                </div>
-              </section>
-            )}
 
-            {/* Movies & Specials Selection */}
-            {moviesAndSpecials.length > 0 && (
-              <section className="detail-section animate-slide-up">
-                <h2 className="section-title"><RefreshCw size={18} /> Movies & Specials</h2>
-                <div className="horizontal-scroll-row">
-                  {moviesAndSpecials.map((season) => (
-                    <div 
-                      key={season.malId} 
-                      className={`season-card-item ${Number(season.malId) === Number(info.malId) ? "active" : ""}`}
-                      onClick={() => handleSeasonClick(season)}
-                    >
-                      <div className="season-poster-wrapper">
-                        {season.poster ? (
-                          <img src={season.poster} alt={season.title} className="season-poster" />
-                        ) : (
-                          <div className="season-poster-fallback flex-center">
-                            <span>{season.title.charAt(0)}</span>
-                          </div>
-                        )}
-                        <span className="season-badge type-badge">{getMediaType(season)}</span>
+                      <div className="episode-info-column">
+                        <span className="episode-series-name">{info.name}</span>
+                        <div className="episode-title-row">
+                          <h4 className="episode-list-title">
+                            S1 E{ep.number} – {ep.title || `Episode ${ep.number}`}
+                          </h4>
+                          {ep.isFiller && <span className="filler-tag" style={{ marginLeft: "6px" }}>Filler</span>}
+                          {ep.isRecap && <span className="recap-tag" style={{ marginLeft: "6px" }}>Recap</span>}
+                        </div>
+                        <span className="episode-audio-type">
+                          {audioPreference === "sub" ? "Subtitled" : "Dubbed"}
+                        </span>
                       </div>
-                      <h4 className="season-title" title={season.title}>{season.title}</h4>
-                    </div>
-                  ))}
-                </div>
-              </section>
-            )}
 
-            {/* Characters Section */}
-            {characters.length > 0 && (
-              <section className="detail-section">
-                <h2 className="section-title"><Users size={18} /> Characters</h2>
-                <div className="horizontal-scroll-row">
-                  {characters.map((char) => (
-                    <div key={char.id} className="character-card">
-                      <div className="char-avatar-wrapper">
-                        <img src={char.poster} alt={char.name} className="char-avatar-img" />
+                      <div className="episode-right-actions">
+                        <button 
+                          className="episode-options-btn" 
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            alert("Episode options menu coming soon!");
+                          }}
+                          title="Episode Options"
+                          type="button"
+                        >
+                          <ChevronRight size={18} />
+                        </button>
                       </div>
-                      <h4 className="char-name" title={char.name}>{char.name}</h4>
-                      <p className="char-role">{char.role || "Supporting"}</p>
+                    </Link>
+                  );
+                })}
+              </div>
+            </section>
+          )}
+
+          {/* TV Seasons Selection */}
+          {tvSeasons.length > 1 && (
+            <section className="detail-section animate-slide-up">
+              <h2 className="section-title"><RefreshCw size={18} /> Alternative Seasons</h2>
+              <div className="horizontal-scroll-row">
+                {tvSeasons.map((season) => (
+                  <div 
+                    key={season.malId} 
+                    className={`season-card-item ${Number(season.malId) === Number(info.malId) ? "active" : ""}`}
+                    onClick={() => handleSeasonClick(season)}
+                  >
+                    <div className="season-poster-wrapper">
+                      {season.poster ? (
+                        <img src={season.poster} alt={season.title} className="season-poster" />
+                      ) : (
+                        <div className="season-poster-fallback flex-center">
+                          <span>{season.title.charAt(0)}</span>
+                        </div>
+                      )}
+                      <span className="season-badge">{getShortSeasonBadge(season)}</span>
                     </div>
-                  ))}
-                </div>
-              </section>
-            )}
+                    <h4 className="season-title" title={season.title}>{season.title}</h4>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
 
-            {/* Recommendations */}
-            {recommendedAnimes.length > 0 && (
-              <section className="detail-section">
-                <h2 className="section-title">Recommended Anime</h2>
-                <div className="grid-layout">
-                  {recommendedAnimes.slice(0, 12).map((rec) => (
-                    <AnimeCard 
-                      key={rec.id}
-                      id={rec.id}
-                      name={rec.name}
-                      poster={rec.poster}
-                      type={rec.type}
-                      episodes={rec.episodes}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
-          </div>
+          {/* Movies & Specials Selection */}
+          {moviesAndSpecials.length > 0 && (
+            <section className="detail-section animate-slide-up">
+              <h2 className="section-title"><RefreshCw size={18} /> Movies & Specials</h2>
+              <div className="horizontal-scroll-row">
+                {moviesAndSpecials.map((season) => (
+                  <div 
+                    key={season.malId} 
+                    className={`season-card-item ${Number(season.malId) === Number(info.malId) ? "active" : ""}`}
+                    onClick={() => handleSeasonClick(season)}
+                  >
+                    <div className="season-poster-wrapper">
+                      {season.poster ? (
+                        <img src={season.poster} alt={season.title} className="season-poster" />
+                      ) : (
+                        <div className="season-poster-fallback flex-center">
+                          <span>{season.title.charAt(0)}</span>
+                        </div>
+                      )}
+                      <span className="season-badge type-badge">{getMediaType(season)}</span>
+                    </div>
+                    <h4 className="season-title" title={season.title}>{season.title}</h4>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
 
-          {/* Sidebar Meta Column */}
-          <div className="sidebar-detail-column">
-            <div className="more-info-card">
-              <h3>More Info</h3>
-              <div className="info-item">
-                <span className="lbl">Status</span>
-                <span className="val">{moreInfo?.status || "Unknown"}</span>
+          {/* Characters Section */}
+          {characters.length > 0 && (
+            <section className="detail-section">
+              <h2 className="section-title"><Users size={18} /> Characters</h2>
+              <div className="horizontal-scroll-row">
+                {characters.map((char) => (
+                  <div key={char.id} className="character-card">
+                    <div className="char-avatar-wrapper">
+                      <img src={char.poster} alt={char.name} className="char-avatar-img" />
+                    </div>
+                    <h4 className="char-name" title={char.name}>{char.name}</h4>
+                    <p className="char-role">{char.role || "Supporting"}</p>
+                  </div>
+                ))}
               </div>
-              <div className="info-item">
-                <span className="lbl">Aired</span>
-                <span className="val">{moreInfo?.aired || "Unknown"}</span>
+            </section>
+          )}
+
+          {/* Recommendations */}
+          {recommendedAnimes.length > 0 && (
+            <section className="detail-section">
+              <h2 className="section-title">Recommended Anime</h2>
+              <div className="grid-layout">
+                {recommendedAnimes.slice(0, 12).map((rec) => (
+                  <AnimeCard 
+                    key={rec.id}
+                    id={rec.id}
+                    name={rec.name}
+                    poster={rec.poster}
+                    type={rec.type}
+                    episodes={rec.episodes}
+                  />
+                ))}
               </div>
-              <div className="info-item">
-                <span className="lbl">Premiered</span>
-                <span className="val">{moreInfo?.premiered || "Unknown"}</span>
-              </div>
-              <div className="info-item">
-                <span className="lbl">Studio</span>
-                <span className="val">{moreInfo?.studio || "Unknown"}</span>
-              </div>
-              <div className="info-item list">
-                <span className="lbl">Producers</span>
-                <div className="val-tags">
-                  {moreInfo?.producers?.map((p) => (
-                    <span key={p} className="val-tag">{p}</span>
-                  ))}
-                </div>
-              </div>
-              <div className="info-item list">
-                <span className="lbl">Genres</span>
-                <div className="val-tags">
-                  {moreInfo?.genres?.map((g) => (
-                    <span key={g} className="val-tag genre">{g}</span>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
+            </section>
+          )}
         </div>
       </div>
 

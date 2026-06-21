@@ -2,12 +2,15 @@ import React, { useState } from "react";
 import { Link, NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { useProfile } from "../context/ProfileContext";
-import { Search, User, LogOut, RefreshCw, Film, Calendar, History, Bookmark, Home, Flame } from "lucide-react";
+import { 
+  Search, User, LogOut, RefreshCw, Film, Calendar, 
+  History, Bookmark, Home, Flame, Menu, Settings, Bell, Gift, X 
+} from "lucide-react";
 
 export default function Header() {
   const { currentUser, logout } = useAuth();
   const { activeProfile, selectProfile } = useProfile();
-  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const navigate = useNavigate();
 
   const handleLogout = async () => {
@@ -19,25 +22,34 @@ export default function Header() {
     }
   };
 
-  // Avatar helper
-  const getAvatarColorClass = (avatarUrl) => {
-    switch (avatarUrl) {
-      case "avatar_orange": return "from-orange-500 to-amber-600 bg-gradient-to-tr";
-      case "avatar_blue": return "from-blue-500 to-indigo-600 bg-gradient-to-tr";
-      case "avatar_green": return "from-green-500 to-emerald-600 bg-gradient-to-tr";
-      case "avatar_pink": return "from-pink-500 to-rose-600 bg-gradient-to-tr";
-      case "avatar_purple": return "from-purple-500 to-violet-600 bg-gradient-to-tr";
-      default: return "from-red-500 to-orange-600 bg-gradient-to-tr";
-    }
-  };
-
   return (
     <>
       <header className="header glass">
         <div className="header-container container">
-          <Link to="/" className="logo">
-            Ani<span>Stream</span>
-          </Link>
+          <div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
+            {currentUser && activeProfile && (
+              <button 
+                className="hamburger-btn" 
+                onClick={() => setDrawerOpen(true)}
+                title="Menu"
+                style={{
+                  background: "none",
+                  border: "none",
+                  color: "white",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  padding: "4px",
+                  marginRight: "2px"
+                }}
+              >
+                <Menu size={22} />
+              </button>
+            )}
+            <Link to="/" className="logo">
+              Ani<span>Stream</span>
+            </Link>
+          </div>
 
           {currentUser && activeProfile && (
             <nav className="nav-links">
@@ -70,7 +82,7 @@ export default function Header() {
               <div className="profile-dropdown-wrapper">
                 <button 
                   className="profile-trigger" 
-                  onClick={() => setDropdownOpen(!dropdownOpen)}
+                  onClick={() => setDrawerOpen(true)}
                 >
                   {activeProfile ? (
                     <div className={`avatar-circle ${activeProfile.avatarUrl}`}>
@@ -83,40 +95,126 @@ export default function Header() {
                   )}
                   <span className="profile-name-span">{activeProfile?.name || "Select Profile"}</span>
                 </button>
-
-                {dropdownOpen && (
-                  <div className="dropdown-menu">
-                    {activeProfile && (
-                      <button 
-                        onClick={() => {
-                          selectProfile(null);
-                          setDropdownOpen(false);
-                          navigate("/profiles");
-                        }}
-                        className="dropdown-item"
-                      >
-                        <RefreshCw size={16} /> Change Profile
-                      </button>
-                    )}
-                    <button 
-                      onClick={() => {
-                        setDropdownOpen(false);
-                        navigate("/my-anistream");
-                      }}
-                      className="dropdown-item"
-                    >
-                      <User size={16} /> Preferences
-                    </button>
-                    <button onClick={handleLogout} className="dropdown-item logout">
-                      <LogOut size={16} /> Sign Out
-                    </button>
-                  </div>
-                )}
               </div>
             )}
           </div>
         </div>
       </header>
+
+      {/* Sidebar Drawer Panel */}
+      {drawerOpen && (
+        <div className="drawer-backdrop" onClick={() => setDrawerOpen(false)} />
+      )}
+      <div className={`sidebar-drawer ${drawerOpen ? "open" : ""}`}>
+        <div className="drawer-header">
+          {currentUser && activeProfile ? (
+            <Link to="/my-anistream" className="drawer-profile-card" onClick={() => setDrawerOpen(false)}>
+              <div className={`drawer-avatar ${activeProfile.avatarUrl}`}>
+                {activeProfile.name.charAt(0).toUpperCase()}
+              </div>
+              <div className="drawer-profile-info">
+                <span className="drawer-profile-name">{activeProfile.name}</span>
+                <span className="drawer-profile-role">Premium Member</span>
+              </div>
+            </Link>
+          ) : (
+            <div className="drawer-profile-card">
+              <div className="drawer-avatar default">
+                <User size={20} />
+              </div>
+              <div className="drawer-profile-info">
+                <span className="drawer-profile-name">Guest</span>
+              </div>
+            </div>
+          )}
+          <button className="drawer-edit-btn" onClick={() => setDrawerOpen(false)} title="Close menu">
+            <X size={20} />
+          </button>
+        </div>
+        
+        <div className="drawer-content">
+          {currentUser && activeProfile ? (
+            <>
+              <button 
+                className="drawer-menu-item" 
+                onClick={() => {
+                  setDrawerOpen(false);
+                  selectProfile(null);
+                  navigate("/profiles");
+                }}
+              >
+                <RefreshCw size={18} />
+                <span>Switch Profile</span>
+              </button>
+              
+              <NavLink 
+                to="/my-anistream" 
+                className={({ isActive }) => isActive ? "drawer-menu-item active" : "drawer-menu-item"}
+                onClick={() => setDrawerOpen(false)}
+              >
+                <Settings size={18} />
+                <span>Settings</span>
+              </NavLink>
+              
+              <NavLink 
+                to="/watchlist" 
+                className={({ isActive }) => isActive ? "drawer-menu-item active" : "drawer-menu-item"}
+                onClick={() => setDrawerOpen(false)}
+              >
+                <Bookmark size={18} />
+                <span>Watchlist</span>
+              </NavLink>
+              
+              <NavLink 
+                to="/history" 
+                className={({ isActive }) => isActive ? "drawer-menu-item active" : "drawer-menu-item"}
+                onClick={() => setDrawerOpen(false)}
+              >
+                <History size={18} />
+                <span>History</span>
+              </NavLink>
+              
+              <button 
+                className="drawer-menu-item" 
+                onClick={() => {
+                  setDrawerOpen(false);
+                  alert("No new notifications");
+                }}
+              >
+                <Bell size={18} />
+                <span>Notifications</span>
+              </button>
+              
+              <button 
+                className="drawer-menu-item" 
+                onClick={() => {
+                  setDrawerOpen(false);
+                  alert("Redeem Gift Card features coming soon!");
+                }}
+              >
+                <Gift size={18} />
+                <span>Gift Card</span>
+              </button>
+              
+              <button 
+                onClick={() => { 
+                  setDrawerOpen(false); 
+                  handleLogout(); 
+                }} 
+                className="drawer-menu-item logout"
+              >
+                <LogOut size={18} />
+                <span>Log Out</span>
+              </button>
+            </>
+          ) : (
+            <NavLink to="/auth" className="drawer-menu-item" onClick={() => setDrawerOpen(false)}>
+              <User size={18} />
+              <span>Log In</span>
+            </NavLink>
+          )}
+        </div>
+      </div>
 
       {currentUser && activeProfile && (
         <nav className="mobile-bottom-nav glass">
@@ -136,12 +234,17 @@ export default function Header() {
             <History size={20} />
             <span>History</span>
           </NavLink>
-          <NavLink to="/my-anistream" className={({ isActive }) => isActive ? "mobile-nav-item active" : "mobile-nav-item"}>
+          <button 
+            type="button"
+            onClick={() => setDrawerOpen(true)}
+            className="mobile-nav-item"
+            style={{ background: "none", border: "none", cursor: "pointer", fontFamily: "inherit" }}
+          >
             <div className={`mobile-nav-avatar ${activeProfile.avatarUrl}`}>
               {activeProfile.name.charAt(0).toUpperCase()}
             </div>
             <span>Profile</span>
-          </NavLink>
+          </button>
         </nav>
       )}
 
