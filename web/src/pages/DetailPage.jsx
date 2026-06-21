@@ -60,6 +60,10 @@ const getSeasonDisplayTitle = (season) => {
   // Fallback to checking the displaySeasonNumber property if it exists
   if (season.displaySeasonNumber) {
     const num = season.displaySeasonNumber;
+    const part = season.displayPartNumber;
+    if (part && part > 1) {
+      return `Season ${num} Part ${part}`;
+    }
     const partMatch = titleLower.match(/part\s*(\d+)/i);
     if (partMatch) {
       return `Season ${num} Part ${partMatch[1]}`;
@@ -88,6 +92,10 @@ const getShortSeasonBadge = (season) => {
   
   if (season.displaySeasonNumber) {
     const num = season.displaySeasonNumber;
+    const part = season.displayPartNumber;
+    if (part && part > 1) {
+      return `S${num} P${part}`;
+    }
     const partMatch = titleLower.match(/part\s*(\d+)/i);
     if (partMatch) {
       return `S${num} P${partMatch[1]}`;
