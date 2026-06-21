@@ -101,6 +101,21 @@ const getShortSeasonBadge = (season) => {
   return "S1";
 };
 
+const checkIsPart = (titleA, titleB) => {
+  const a = titleA.toLowerCase();
+  const b = titleB.toLowerCase();
+  if (b.startsWith(a)) {
+    const diff = b.substring(a.length).trim();
+    if (diff.includes("part") || diff.includes("cour")) {
+      return true;
+    }
+    if (b.substring(a.length).startsWith(" - ") || b.substring(a.length).startsWith(" -")) {
+      return true;
+    }
+  }
+  return false;
+};
+
 export default function DetailPage() {
   const { id: animeId } = useParams();
   const { currentUser } = useAuth();
@@ -112,6 +127,7 @@ export default function DetailPage() {
   const [episodes, setEpisodes] = useState([]);
   const [characters, setCharacters] = useState([]);
   const [seasons, setSeasons] = useState([]);
+  const [seasonsLoading, setSeasonsLoading] = useState(false);
   const [audioPreference, setAudioPreference] = useState("sub"); // 'sub' or 'dub'
 
   // Firestore Sync States
@@ -190,6 +206,7 @@ export default function DetailPage() {
         // Fetch seasons asynchronously in the background
         const malId = detailData?.anime?.info?.malId;
         if (malId && malId !== "0" && malId !== "") {
+          setSeasonsLoading(true);
           getSeasons(malId)
             .then(async (seasonData) => {
               let list = seasonData?.seasons || [];
@@ -237,17 +254,45 @@ export default function DetailPage() {
                 return 0;
               });
 
-              // Pre-assign sequential displaySeasonNumber to TV series in order
-              let tvIndex = 1;
-              const finalSeasonsList = filteredList.map(s => {
+              // Pre-assign sequential displaySeasonNumber and displayPartNumber to TV series in order
+              let tvIndex = 0;
+              const tvSeasonsWithNumbers = [];
+              
+              filteredList.forEach(s => {
                 const type = getMediaType(s);
-                if (type === "TV") {
-                  return { ...s, displaySeasonNumber: tvIndex++ };
+                if (type !== "TV") {
+                  tvSeasonsWithNumbers.push(s);
+                  return;
                 }
-                return s;
+                
+                let parentSeason = null;
+                for (let i = tvSeasonsWithNumbers.length - 1; i >= 0; i--) {
+                  const prev = tvSeasonsWithNumbers[i];
+                  if (getMediaType(prev) === "TV" && checkIsPart(prev.title, s.title)) {
+                    parentSeason = prev;
+                    break;
+                  }
+                }
+                
+                if (parentSeason) {
+                  parentSeason.partCount = (parentSeason.partCount || 1) + 1;
+                  tvSeasonsWithNumbers.push({
+                    ...s,
+                    displaySeasonNumber: parentSeason.displaySeasonNumber,
+                    displayPartNumber: parentSeason.partCount
+                  });
+                } else {
+                  tvIndex++;
+                  tvSeasonsWithNumbers.push({
+                    ...s,
+                    displaySeasonNumber: tvIndex,
+                    displayPartNumber: 1
+                  });
+                }
               });
 
-              setSeasons(finalSeasonsList);
+              setSeasons(tvSeasonsWithNumbers);
+              setSeasonsLoading(false);
 
               if (filteredList.length > 0) {
                 const baseTitle = detailData?.anime?.info?.name
@@ -264,7 +309,10 @@ export default function DetailPage() {
                 setHasAltVersion(hasAlt);
               }
             })
-            .catch(e => console.warn("Background seasons fetch error:", e));
+            .catch(e => {
+              console.warn("Background seasons fetch error:", e);
+              setSeasonsLoading(false);
+            });
         }
 
       } catch (err) {
@@ -653,16 +701,19 @@ export default function DetailPage() {
                     <h2 className="section-title"><List size={18} /> Episodes</h2>
                     
                     {/* Netflix/Crunchyroll Season Selector Dropdown */}
-                    {seasons.length > 1 && (
-                      <div className="season-selector-dropdown-wrapper">
-                        <button 
-                          className="season-dropdown-toggle-btn"
-                          onClick={() => setSeasonDropdownOpen(!seasonDropdownOpen)}
-                          type="button"
-                        >
-                          <span className="dropdown-label">{currentSeasonTitle}</span>
-                          <ChevronDown size={14} className={`dropdown-chevron ${seasonDropdownOpen ? "open" : ""}`} />
-                        </button>
+                    {seasonsLoading ? (
+                      <div className="season-selector-loading-shimmer shimmer" />
+                    ) : (
+                      seasons.length > 1 && (
+                        <div className="season-selector-dropdown-wrapper">
+                          <button 
+                            className="season-dropdown-toggle-btn"
+                            onClick={() => setSeasonDropdownOpen(!seasonDropdownOpen)}
+                            type="button"
+                          >
+                            <span className="dropdown-label">{currentSeasonTitle}</span>
+                            <ChevronDown size={14} className={`dropdown-chevron ${seasonDropdownOpen ? "open" : ""}`} />
+                          </button>
                         
                         {seasonDropdownOpen && (
                           <>
@@ -725,7 +776,8 @@ export default function DetailPage() {
                             </div>
                           </>
                         )}
-                      </div>
+                        </div>
+                      )
                     )}
                   </div>
                   
@@ -1417,6 +1469,13 @@ export default function DetailPage() {
         .season-selector-dropdown-wrapper {
           position: relative;
           z-index: 100;
+        }
+
+        .season-selector-loading-shimmer {
+          width: 140px;
+          height: 30px;
+          border-radius: 4px;
+          background-color: var(--bg-input);
         }
 
         .season-dropdown-toggle-btn {
