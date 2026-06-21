@@ -681,16 +681,23 @@ export default function DetailPage() {
                 <button className="btn btn-primary watch-now-btn" disabled>No Episodes Available</button>
               )}
 
-              <div className="watchlist-dropdown-wrapper desktop-only">
+              <div className="watchlist-dropdown-wrapper desktop-only" style={{ display: "inline-flex", alignItems: "stretch" }}>
                 <button 
                   className={`btn ${isWatchlisted ? "btn-secondary" : "btn-secondary"} watchlist-toggle-btn`}
-                  onClick={() => setShowWatchlistMenu(!showWatchlistMenu)}
+                  onClick={() => {
+                    if (isWatchlisted) {
+                      handleUpdateWatchlistStatus("");
+                    } else {
+                      handleUpdateWatchlistStatus("planning");
+                    }
+                  }}
                   type="button"
+                  style={{ borderTopRightRadius: 0, borderBottomRightRadius: 0 }}
                 >
                   {isWatchlisted ? <BookmarkCheck size={18} /> : <Bookmark size={18} />}
                   <span>
                     {isWatchlisted 
-                      ? `List: ${
+                      ? `${
                           watchlistStatus === "watching" 
                             ? "Watching" 
                             : watchlistStatus === "completed" 
@@ -699,12 +706,27 @@ export default function DetailPage() {
                         }` 
                       : "Add to List"}
                   </span>
-                  <ChevronDown size={14} style={{ marginLeft: "4px" }} />
+                </button>
+                <button
+                  className="btn btn-secondary watchlist-chevron-btn"
+                  onClick={() => setShowWatchlistMenu(!showWatchlistMenu)}
+                  type="button"
+                  style={{ 
+                    padding: "0.85rem 0.6rem", 
+                    borderLeft: "1px solid rgba(255,255,255,0.1)", 
+                    borderTopLeftRadius: 0, 
+                    borderBottomLeftRadius: 0,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center"
+                  }}
+                >
+                  <ChevronDown size={14} className={`dropdown-chevron ${showWatchlistMenu ? "open" : ""}`} />
                 </button>
                 {showWatchlistMenu && (
                   <>
                     <div className="dropdown-backplate" onClick={() => setShowWatchlistMenu(false)} />
-                    <div className="watchlist-menu-dropdown">
+                    <div className="watchlist-menu-dropdown" style={{ right: 0, left: "auto" }}>
                       {[
                         { id: "planning", name: "Plan to Watch" },
                         { id: "watching", name: "Watching" },
@@ -741,61 +763,28 @@ export default function DetailPage() {
 
               {/* Mobile icon actions group */}
               <div className="mobile-action-buttons-group">
-                <div className="mobile-watchlist-wrapper">
-                  <button 
-                    className="action-icon-btn watchlist-toggle-btn" 
-                    onClick={() => setShowWatchlistMenu(!showWatchlistMenu)} 
-                    type="button"
-                  >
-                    {isWatchlisted ? <BookmarkCheck size={20} className="active-icon" /> : <Bookmark size={20} />}
-                    <span>
-                      {isWatchlisted 
-                        ? (watchlistStatus === "watching" 
-                            ? "Watching" 
-                            : watchlistStatus === "completed" 
-                            ? "Completed" 
-                            : "Planning") 
-                        : "My List"}
-                    </span>
-                  </button>
-                  {showWatchlistMenu && (
-                    <>
-                      <div className="dropdown-backplate" onClick={() => setShowWatchlistMenu(false)} style={{ zIndex: 110 }} />
-                      <div className="watchlist-menu-dropdown mobile-menu">
-                        <div className="mobile-menu-header">Select Status</div>
-                        {[
-                          { id: "planning", name: "Plan to Watch" },
-                          { id: "watching", name: "Watching" },
-                          { id: "completed", name: "Completed" }
-                        ].map(opt => (
-                          <button 
-                            key={opt.id}
-                            className={`watchlist-menu-item ${watchlistStatus === opt.id ? "active" : ""}`}
-                            onClick={() => {
-                              handleUpdateWatchlistStatus(opt.id);
-                              setShowWatchlistMenu(false);
-                            }}
-                            type="button"
-                          >
-                            {opt.name}
-                          </button>
-                        ))}
-                        {isWatchlisted && (
-                          <button 
-                            className="watchlist-menu-item remove-item"
-                            onClick={() => {
-                              handleUpdateWatchlistStatus("");
-                              setShowWatchlistMenu(false);
-                            }}
-                            type="button"
-                          >
-                            Remove from List
-                          </button>
-                        )}
-                      </div>
-                    </>
-                  )}
-                </div>
+                <button 
+                  className="action-icon-btn watchlist-toggle-btn" 
+                  onClick={() => {
+                    if (isWatchlisted) {
+                      handleUpdateWatchlistStatus("");
+                    } else {
+                      handleUpdateWatchlistStatus("planning");
+                    }
+                  }} 
+                  type="button"
+                >
+                  {isWatchlisted ? <BookmarkCheck size={20} className="active-icon" /> : <Bookmark size={20} />}
+                  <span>
+                    {isWatchlisted 
+                      ? (watchlistStatus === "watching" 
+                          ? "Watching" 
+                          : watchlistStatus === "completed" 
+                          ? "Completed" 
+                          : "Planning") 
+                      : "My List"}
+                  </span>
+                </button>
 
                 <button className="action-icon-btn rate-toggle-btn" onClick={() => setShowMobileRating(!showMobileRating)} type="button">
                   <Star size={20} className={userRating > 0 ? "active-icon" : ""} fill={userRating > 0 ? "currentColor" : "none"} />
