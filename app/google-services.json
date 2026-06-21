@@ -1,0 +1,100 @@
+{
+  "project_info": {
+    "project_number": "965933740812",
+    "project_id": "aniplex-app-f923b",
+    "storage_bucket": "aniplex-app-f923b.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:965933740812:android:cd918a49c8e4be60f68f29",
+        "android_client_info": {
+          "package_name": "com.aniplex.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "965933740812-vq2b5b77cu2tdlj70cnku23dc7g5jtb9.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.aniplex.app",
+            "certificate_hash": "3fd5c1f17b823a9cb2299bd06fddcceb9147ccb9"
+          }
+        },
+        {
+          "client_id": "965933740812-gn4ec3ig5f6uofrljh1btuup9igbm2gk.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAHZGTszBO5VkrCrHzmFuXUuooVq9BP6M8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "965933740812-gn4ec3ig5f6uofrljh1btuup9igbm2gk.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:965933740812:android:0123140c167b65c4f68f29",
+        "android_client_info": {
+          "package_name": "com.example.aniplex"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "965933740812-0cpu7ogevp1qf879sf1f1dogsaqb9vhb.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.aniplex",
+            "certificate_hash": "18c3aa2825f88abcf614bab5740dd4f9e9b85e6f"
+          }
+        },
+        {
+          "client_id": "965933740812-b1rt0u9a6pjr9q5q26pjo7dbr89k5mrf.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.aniplex",
+            "certificate_hash": "f4d9c9809d25220e31e8ec2f58a9c76a21284c61"
+          }
+        },
+        {
+          "client_id": "965933740812-co9i4pf49raae8vg4tb33ekta8lpk87n.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.aniplex",
+            "certificate_hash": "2a7d83da34b8d500b4a36890ec1fbb8ddb4a6ec7"
+          }
+        },
+        {
+          "client_id": "965933740812-gn4ec3ig5f6uofrljh1btuup9igbm2gk.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAHZGTszBO5VkrCrHzmFuXUuooVq9BP6M8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "965933740812-gn4ec3ig5f6uofrljh1btuup9igbm2gk.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

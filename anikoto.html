@@ -1,0 +1,634 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Free Anikoto Anime API</title>
+    <meta name="description" content="Free Anikoto Anime API with daily episode updates and embed URLs.">
+    <style>
+:root {
+  --bg:      hsl(220 25% 5%);
+  --bg2:     hsl(220 20% 8%);
+  --bg3:     hsl(220 18% 10%);
+  --border:  hsl(220 18% 14%);
+  --text:    hsl(180 10% 92%);
+  --muted:   hsl(220 10% 45%);
+  --accent:  hsl(172 66% 50%);
+  --accent2: hsl(172 66% 65%);
+  --green:   hsl(172 66% 50%);
+  --red:     hsl(0 72% 51%);
+  --code-bg: hsl(220 22% 7%);
+  --font-sans: "Geist", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; border-radius: 0; }
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: hsl(220 18% 18%); }
+::-webkit-scrollbar-thumb:hover { background: hsl(220 14% 28%); }
+* { scrollbar-width: thin; scrollbar-color: hsl(220 18% 18%) var(--bg); }
+html { scroll-behavior: smooth; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.55;
+  min-height: 100vh;
+}
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+code { font-family: var(--font-mono); font-size: .92em; }
+nav.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  background: hsl(220 25% 5% / .85);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--border);
+  padding: 0 24px;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 800;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--text);
+}
+.brand-mark {
+  width: 22px;
+  height: 22px;
+  background: var(--accent);
+  display: grid;
+  place-items: center;
+  color: hsl(220 25% 5%);
+  font-size: 11px;
+  font-weight: 800;
+}
+.nav-tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+}
+.nav-tabs button {
+  display: inline-flex;
+  align-items: center;
+  background: transparent;
+  color: var(--muted);
+  border: none;
+  font: 500 12px var(--font-sans);
+  letter-spacing: .02em;
+  padding: 7px 14px;
+  cursor: pointer;
+}
+.nav-tabs button:hover { color: var(--text); }
+.nav-tabs button.active {
+  background: var(--accent);
+  color: hsl(220 25% 5%);
+  font-weight: 600;
+}
+.view { display: none; }
+.view.active { display: block; }
+.welcome-wrap {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 80px 24px 96px;
+  text-align: center;
+}
+.welcome-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: hsl(172 66% 50% / .1);
+  border: 1px solid hsl(172 66% 50% / .3);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  padding: 5px 11px;
+  margin-bottom: 24px;
+}
+.welcome-wrap h1 {
+  font-size: clamp(32px, 6vw, 52px);
+  font-weight: 800;
+  letter-spacing: -.025em;
+  line-height: 1.08;
+  margin-bottom: 18px;
+}
+.welcome-wrap h1 span {
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.welcome-sub {
+  font-size: 16px;
+  color: var(--muted);
+  max-width: 680px;
+  margin: 0 auto 36px;
+}
+.welcome-cta { display: inline-flex; gap: 10px; }
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font: 600 13px var(--font-sans);
+  padding: 11px 20px;
+  border: 1px solid var(--border);
+  background: var(--bg2);
+  color: var(--text);
+  cursor: pointer;
+  text-decoration: none;
+}
+.btn:hover { background: var(--bg3); border-color: var(--muted); text-decoration: none; }
+.btn-primary { background: var(--accent); border-color: var(--accent); color: hsl(220 25% 5%); }
+.btn-primary:hover { background: var(--accent2); border-color: var(--accent2); color: hsl(220 25% 5%); }
+.feature-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-top: 56px;
+  text-align: left;
+}
+@media (max-width: 760px) { .feature-grid { grid-template-columns: 1fr; } }
+.feature {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  padding: 22px;
+}
+.feature h3 { font-size: 14px; font-weight: 600; margin-bottom: 6px; }
+.feature p { font-size: 13px; color: var(--muted); }
+.docs-page {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 40px 24px 80px;
+  min-height: calc(100vh - 56px);
+}
+.docs-page h2 {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -.01em;
+  margin-bottom: 10px;
+}
+.docs-page .eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 10px;
+}
+.docs-page p {
+  color: var(--muted);
+  margin-bottom: 16px;
+  line-height: 1.65;
+  font-size: 14px;
+}
+.docs-page h3 {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  margin: 28px 0 10px;
+}
+.docs-page ul {
+  color: var(--muted);
+  margin: 0 0 18px 1.15rem;
+  line-height: 1.65;
+  font-size: 14px;
+}
+.docs-page li { margin-bottom: 6px; }
+.docs-callout {
+  border: 1px solid hsl(172 66% 50% / .25);
+  background: hsl(172 66% 50% / .06);
+  padding: 16px 18px;
+  margin: 20px 0;
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.65;
+}
+.endpoint-list { display: flex; flex-direction: column; gap: 10px; margin: 18px 0 8px; }
+.endpoint {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+}
+.endpoint-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.method {
+  font: 700 10px var(--font-mono);
+  letter-spacing: .08em;
+  padding: 4px 8px;
+  background: hsl(172 66% 50% / .18);
+  color: var(--accent);
+  flex-shrink: 0;
+}
+.ep-url { font: 400 13px var(--font-mono); color: var(--text); word-break: break-all; line-height: 1.4; }
+.endpoint-desc { padding: 12px 16px 14px; font-size: 13px; color: var(--muted); line-height: 1.55; }
+.docs-muted-note { font-size: 13px; color: var(--muted); line-height: 1.55; margin-bottom: 14px; }
+.code-block { background: var(--code-bg); border: 1px solid var(--border); margin-top: 12px; }
+pre { padding: 14px; overflow-x: auto; font: 400 13px var(--font-mono); color: hsl(210 15% 82%); }
+.player-wrap {
+  display: grid;
+  grid-template-columns: 340px 1fr;
+  height: calc(100vh - 56px - 64px);
+}
+@media (max-width: 900px) { .player-wrap { grid-template-columns: 1fr; height: auto; } }
+.sidebar { background: var(--bg2); border-right: 1px solid var(--border); padding: 18px; overflow-y: auto; }
+.field { margin-bottom: 14px; }
+.field-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+.field input, .field select, .field button {
+  width: 100%;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  padding: 10px 12px;
+  color: var(--text);
+  font: 400 13px var(--font-sans);
+}
+.play-main {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  background: var(--bg);
+}
+.json-panel {
+  flex: 0 0 auto;
+  max-height: 42vh;
+  min-height: 140px;
+  display: flex;
+  flex-direction: column;
+  border-bottom: 1px solid var(--border);
+  background: var(--code-bg);
+}
+.json-panel-head {
+  padding: 8px 14px;
+  font: 600 10px var(--font-sans);
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  border-bottom: 1px solid var(--border);
+  background: var(--bg3);
+}
+.json-output {
+  margin: 0;
+  padding: 12px 14px;
+  overflow: auto;
+  flex: 1;
+  font: 400 12px var(--font-mono);
+  line-height: 1.5;
+  color: hsl(210 15% 82%);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.preview-player {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 260px;
+  background: #000;
+}
+.preview-frame-wrap { flex: 1; position: relative; min-height: 220px; }
+.preview-frame-wrap iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+.preview-placeholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+  padding: 16px;
+}
+.preview-footer {
+  border-top: 1px solid var(--border);
+  background: var(--bg2);
+  padding: 12px 16px;
+}
+.snippet-bar {
+  display: flex;
+  align-items: center;
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  padding-left: 12px;
+  font: 400 12px var(--font-mono);
+}
+.snippet-bar code {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--accent);
+}
+.snippet-bar button {
+  background: var(--bg3);
+  border: none;
+  border-left: 1px solid var(--border);
+  color: var(--muted);
+  padding: 10px 14px;
+  font: 600 11px var(--font-sans);
+  cursor: pointer;
+}
+footer {
+  border-top: 1px solid var(--border);
+  padding: 22px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--muted);
+}
+    </style>
+</head>
+<body>
+<nav class="topbar">
+  <div class="brand"><span class="brand-mark">A</span> ANIKOTO API</div>
+  <div class="nav-tabs">
+    <button type="button" class="tab-btn active" data-view="welcome">Welcome</button>
+    <button type="button" class="tab-btn" data-view="docs">Docs</button>
+    <button type="button" class="tab-btn" data-view="playground">Playground</button>
+  </div>
+</nav>
+
+<main id="welcome" class="view active">
+  <section class="welcome-wrap">
+    <div class="welcome-badge">FREE ANIME API</div>
+    <h1>Free <span>Anikoto Anime API</span></h1>
+    <p class="welcome-sub">
+      Get daily anime episode updates, fresh catalog data, and ready-to-use embed links.
+      We keep the feed updated for you so your app can stay current without manual scraping.
+    </p>
+    <div class="welcome-cta">
+      <button type="button" class="btn btn-primary js-go-play">Open Playground</button>
+      <button type="button" class="btn js-go-docs">Read Docs</button>
+    </div>
+    <div class="feature-grid">
+      <article class="feature">
+        <h3>Daily updates</h3>
+        <p>New episode data and changes are refreshed continuously, so your users see the latest entries fast.</p>
+      </article>
+      <article class="feature">
+        <h3>Simple integration</h3>
+        <p>Use <code>/recent-anime</code> for listings and <code>/series/{id}</code> for the full episode list plus embeds.</p>
+      </article>
+      <article class="feature">
+        <h3>Made for developers</h3>
+        <p>Clear JSON responses, pagination support, and a playground to test requests quickly.</p>
+      </article>
+    </div>
+  </section>
+</main>
+
+<main id="docs" class="view">
+  <article class="docs-page">
+    <p class="eyebrow">Documentation</p>
+    <h2>Overview</h2>
+    <p>
+      Pull a <strong>list of recent anime</strong>, or <strong>one show</strong> with every <strong>episode</strong> and links you can drop into a player.
+      Genres and similar tags are included when we have them.
+      Every reply tells you if it worked (<code>ok</code>); long lists also tell you which page you are on (<code>pagination</code>).
+    </p>
+
+    <div class="code-block"><pre>Base URL
+http://anikotoapi.site</pre></div>
+
+    <p class="docs-callout">
+      <strong style="color:var(--text)">Intended for server-side use:</strong>
+      call the API from your backend, cache or store results in your own database, and serve your users from there.
+      Avoid calling this API directly from production front-end JavaScript — it wastes your users&apos; rate limits and is easier to abuse.
+    </p>
+
+    <p class="docs-muted-note">
+      Calling this from every visitor&apos;s browser can hit <code>429</code> (too many requests) quickly; ongoing abuse may lead to an IP <code>403</code> ban. Use your own server in between.
+    </p>
+
+    <h3>Endpoints</h3>
+    <div class="endpoint-list">
+      <div class="endpoint">
+        <div class="endpoint-head">
+          <span class="method">GET</span>
+          <span class="ep-url">http://anikotoapi.site/recent-anime</span>
+        </div>
+        <div class="endpoint-desc">
+          Optional query: <code>page</code>, <code>per_page</code>. Returns a page of anime. Rows may include <code>terms_by_type</code> (e.g. <code>genre</code> → list of names).
+        </div>
+      </div>
+      <div class="endpoint">
+        <div class="endpoint-head">
+          <span class="method">GET</span>
+          <span class="ep-url">http://anikotoapi.site/series/<span style="color:var(--accent)">{id}</span></span>
+        </div>
+        <div class="endpoint-desc">
+          Replace <code>{id}</code> with the anime id from the list. Returns <code>anime</code> plus <code>episodes</code>; each episode has <code>embed_url.sub</code> / <code>embed_url.dub</code> when available.
+        </div>
+      </div>
+    </div>
+
+    <h3>Rate limits</h3>
+            <p class="docs-muted-note">
+      Up to <strong>60</strong> requests per IP every <strong>120</strong> seconds.
+    </p>
+        <p class="docs-muted-note">
+      If a limit trips you get <code>429</code>; very heavy or abusive traffic may get <code>403</code>. Headers like <code>X-RateLimit-*</code> are sent when limits are on.
+    </p>
+
+    <h3>Try it</h3>
+    <div class="code-block"><pre>curl -s "http://anikotoapi.site/recent-anime?page=1&amp;per_page=5"
+curl -s "http://anikotoapi.site/series/1"</pre></div>
+  </article>
+</main>
+
+<main id="playground" class="view">
+  <section class="player-wrap">
+    <aside class="sidebar">
+      <div class="field">
+        <label class="field-label" for="pgPage">Page</label>
+        <input id="pgPage" type="number" min="1" value="1">
+      </div>
+      <div class="field">
+        <label class="field-label" for="pgPerPage">Per Page</label>
+        <input id="pgPerPage" type="number" min="1" max="30" value="10">
+      </div>
+      <div class="field">
+        <button type="button" id="loadRecent">Load Recent Anime</button>
+      </div>
+      <div class="field">
+        <label class="field-label" for="seriesId">Series ID</label>
+        <input id="seriesId" type="number" min="1" placeholder="Enter anime id">
+      </div>
+      <div class="field">
+        <button type="button" id="loadSeries">Load series + episodes</button>
+      </div>
+      <div class="field">
+        <label class="field-label" for="episodeSelect">Episode</label>
+        <select id="episodeSelect"><option value="">Select episode</option></select>
+      </div>
+      <div class="field">
+        <label class="field-label" for="langSelect">Language</label>
+        <select id="langSelect">
+          <option value="sub">Sub</option>
+          <option value="dub">Dub</option>
+        </select>
+      </div>
+      <div class="field">
+        <button type="button" id="openEmbed">Open Embed</button>
+      </div>
+    </aside>
+    <div class="play-main">
+      <div class="json-panel">
+        <div class="json-panel-head">JSON response</div>
+        <pre class="json-output" id="jsonOutput">{}</pre>
+      </div>
+      <div class="preview-player">
+        <div class="preview-frame-wrap">
+          <iframe id="previewFrame" title="Embed preview" sandbox="allow-scripts allow-same-origin allow-presentation allowfullscreen"></iframe>
+          <div class="preview-placeholder" id="previewPlaceholder">Load data above, or pick an episode and open an embed preview here.</div>
+        </div>
+        <div class="preview-footer">
+          <div class="snippet-bar">
+            <code id="requestCode">GET http://anikotoapi.site/recent-anime?page=1&amp;per_page=10</code>
+            <button type="button" id="copyReq">Copy</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>Free Anikoto Anime API - Daily updates & embeds, maintained for developers.</footer>
+
+<script>
+window.__APP_BASE_URL__ = "http://anikotoapi.site";
+</script>
+<script>
+(function () {
+  var BASE = (typeof window.__APP_BASE_URL__ === 'string') ? window.__APP_BASE_URL__.replace(/\/$/, '') : '';
+  function apiUrl(path) {
+    if (!path) return BASE || '/';
+    if (path.charAt(0) !== '/') path = '/' + path;
+    return (BASE || '') + path;
+  }
+
+  var tabBtns = document.querySelectorAll('.tab-btn');
+  tabBtns.forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var target = btn.getAttribute('data-view');
+      document.querySelectorAll('.tab-btn').forEach(function (b) { b.classList.remove('active'); });
+      document.querySelectorAll('.view').forEach(function (v) { v.classList.remove('active'); });
+      btn.classList.add('active');
+      document.getElementById(target).classList.add('active');
+    });
+  });
+
+  document.querySelector('.js-go-docs').addEventListener('click', function () {
+    document.querySelector('.tab-btn[data-view="docs"]').click();
+  });
+  document.querySelector('.js-go-play').addEventListener('click', function () {
+    document.querySelector('.tab-btn[data-view="playground"]').click();
+  });
+
+  var seriesData = null;
+  function setReq(code) { document.getElementById('requestCode').textContent = code; }
+  function showJson(data) {
+    var el = document.getElementById('jsonOutput');
+    try {
+      el.textContent = JSON.stringify(data, null, 2);
+    } catch (e2) {
+      el.textContent = String(data);
+    }
+  }
+  function episodesOf(data) {
+    if (!data) return [];
+    return data.episodes || data.chapters || [];
+  }
+  function esc(str) {
+    var d = document.createElement('div');
+    d.textContent = str;
+    return d.innerHTML;
+  }
+
+  document.getElementById('loadRecent').addEventListener('click', async function () {
+    var page = parseInt(document.getElementById('pgPage').value || '1', 10);
+    var per = parseInt(document.getElementById('pgPerPage').value || '10', 10);
+    var url = apiUrl('/recent-anime?page=' + page + '&per_page=' + per);
+    setReq('GET ' + url);
+    try {
+      var r = await fetch(url, { headers: { 'Accept': 'application/json' } });
+      var j = await r.json();
+      showJson(j);
+      if (j.ok && j.data && j.data[0] && j.data[0].id) {
+        document.getElementById('seriesId').value = String(j.data[0].id);
+      }
+    } catch (e) {
+      showJson({ ok: false, error: 'Failed to load or parse JSON', detail: String(e && e.message ? e.message : e) });
+    }
+  });
+
+  document.getElementById('loadSeries').addEventListener('click', async function () {
+    var id = (document.getElementById('seriesId').value || '').trim();
+    if (!id) { showJson({ ok: false, error: 'Enter a series id first.' }); return; }
+    var url = apiUrl('/series/' + encodeURIComponent(id));
+    setReq('GET ' + url);
+    try {
+      var r = await fetch(url, { headers: { 'Accept': 'application/json' } });
+      var j = await r.json();
+      showJson(j);
+      if (!j.ok || !j.data) return;
+      seriesData = j.data;
+      var epSel = document.getElementById('episodeSelect');
+      epSel.innerHTML = '<option value="">Select episode</option>';
+      episodesOf(seriesData).forEach(function (ep, idx) {
+        var o = document.createElement('option');
+        o.value = String(idx);
+        o.textContent = 'Episode ' + esc(String(ep.number || idx + 1));
+        epSel.appendChild(o);
+      });
+    } catch (e) {
+      showJson({ ok: false, error: 'Failed to load or parse JSON', detail: String(e && e.message ? e.message : e) });
+    }
+  });
+
+  document.getElementById('openEmbed').addEventListener('click', function () {
+    var eps = episodesOf(seriesData);
+    if (!seriesData || eps.length === 0) { showJson({ ok: false, error: 'Load a series first (no episodes in response).' }); return; }
+    var idx = document.getElementById('episodeSelect').value;
+    if (idx === '') { showJson({ ok: false, error: 'Select an episode from the list.' }); return; }
+    var lang = document.getElementById('langSelect').value;
+    var ep = eps[parseInt(idx, 10)] || {};
+    var emb = ep.embed_url || {};
+    var u = lang === 'dub' ? emb.dub : emb.sub;
+    if (!u) { showJson({ ok: false, error: 'No embed URL for this language.', episode: ep, lang: lang }); return; }
+    document.getElementById('previewFrame').src = u;
+    document.getElementById('previewPlaceholder').style.display = 'none';
+    setReq('GET ' + apiUrl('/series/' + (document.getElementById('seriesId').value || '')));
+  });
+
+  document.getElementById('copyReq').addEventListener('click', function () {
+    var txt = document.getElementById('requestCode').textContent || '';
+    navigator.clipboard.writeText(txt).then(function () {}, function () {});
+  });
+})();
+</script>
+<script defer src="https://static.cloudflareinsights.com/beacon.min.js/v833ccba57c9e4d2798f2e76cebdd09a11778172276447" integrity="sha512-57MDmcccJXYtNnH+ZiBwzC4jb2rvgVCEokYN+L/nLlmO8rfYT/gIpW2A569iJ/3b+0UEasghjuZH/ma3wIs/EQ==" data-cf-beacon='{"version":"2024.11.0","token":"378cb213d8fd49cc84f83adcf05e6867","r":1,"server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
+</body>
+</html>

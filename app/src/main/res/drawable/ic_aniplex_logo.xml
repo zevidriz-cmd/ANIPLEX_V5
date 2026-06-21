@@ -1,0 +1,33 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="200dp"
+    android:height="200dp"
+    android:viewportWidth="100"
+    android:viewportHeight="100">
+
+    <!-- Outermost Glow / Stylized circular background badge -->
+    <path
+        android:fillColor="#1A0A2A"
+        android:pathData="M50,5 C25.1,5 5,25.1 5,50 C5,74.9 25.1,95 50,95 C74.9,95 95,74.9 95,50 C95,25.1 74.9,5 50,5 Z" />
+
+    <!-- Highly Stylized Cyberpunk Letter A -->
+    <!-- Left leg of A (Neon Red) -->
+    <path
+        android:fillColor="#FF0055"
+        android:pathData="M25,80 L45,20 L55,20 L35,80 Z" />
+
+    <!-- Right leg of A with a cool overlap (Neon Violet) -->
+    <path
+        android:fillColor="#8800FF"
+        android:pathData="M45,80 L65,20 L75,20 L55,80 Z" />
+
+    <!-- Crossbar / Horizontal slice (Bright Neon Cyan) -->
+    <path
+        android:fillColor="#00FFCC"
+        android:pathData="M30,60 L70,60 L67,54 L33,54 Z" />
+
+    <!-- Modern cyber slash over it to add stylized speed lines -->
+    <path
+        android:fillColor="#FF0055"
+        android:pathData="M20,45 L80,35 L78,32 L22,42 Z" />
+
+</vector>

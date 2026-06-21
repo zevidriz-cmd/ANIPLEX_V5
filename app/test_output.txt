@@ -1,0 +1,18 @@
+=== START TEST ===
+=== Fetching: https://aniplex-proxy.f1886391.workers.dev/api/v2/schedules ===
+Response Code: 200
+Response length: 46
+Response content: {"success":true,"data":{"scheduledAnimes":[]}}
+=== Fetching: https://aniplex-proxy.f1886391.workers.dev/api/v2/schedules?date=2026-06-14 ===
+Response Code: 200
+Response length: 46
+Response content: {"success":true,"data":{"scheduledAnimes":[]}}
+=== Fetching: https://aniplex-proxy.f1886391.workers.dev/api/v2/schedules?date=2024-06-16 ===
+Response Code: 200
+Response length: 46
+Response content: {"success":true,"data":{"scheduledAnimes":[]}}
+=== Fetching: https://api.jikan.moe/v4/schedules?filter=sunday ===
+Response Code: 200
+Response length: 84296
+Response content: {"pagination":{"last_visible_page":1,"has_next_page":false,"current_page":1,"items":{"count":23,"total":23,"per_page":25}},"data":[{"mal_id":63383,"url":"https:\/\/myanimelist.net\/anime\/63383\/Kumarba_Season_3","images":{"jpg":{"image_url":"https:\/\/cdn.myanimelist.net\/images\/anime\/1148\/155162.jpg","small_image_url":"https:\/\/cdn.myanimelist.net\/images\/anime\/1148\/155162t.jpg","large_image_url":"https:\/\/cdn.myanimelist.net\/images\/anime\/1148\/155162l.jpg"},"webp":{"image_url":"https:\/\/cdn.myanimelist.net\/images\/anime\/1148\/155162.webp","small_image_url":"https:\/\/cdn.myanimelist.net\/images\/anime\/1148\/155162t.webp","large_image_url":"https:\/\/cdn.myanimelist.net\/images\/anime\/1148\/155162l.webp"}},"trailer":{"youtube_id":null,"url":null,"embed_url":"https:\/\/www.youtube-nocookie.com\/embed\/ZMbzOD0r_Us?enablejsapi=1&wmode=opaque&autoplay=1","images":{"image_url":null,"small_image_url":null,"medium_image_url":null,"large_image_url":null,"maximum_image_url":null}},"approved":true,"titles":[{"type":"Default","title":"Kumarba Season 3"},{"type":"Japanese","title":"\u30af\u30de\u30fc\u30d0 \u30b7\u30fc\u30ba\u30f33"}],"title":"Kumarba Season 3","title_english":null,"title_japanese":"\u30af\u30de\u30fc\u30d0 \u30b7\u30fc\u30ba\u30f33","title_synonyms":[],"type":"TV","source":"Other","episodes":null,"status":"Currently Airing","airing":true,"aired":{"from":"2026-04-12T00:00:00+00:00","to":null,"prop":{"from":{"day":12,"month":4,"year":2026},"to":{"day":nu
+=== END TEST ===
