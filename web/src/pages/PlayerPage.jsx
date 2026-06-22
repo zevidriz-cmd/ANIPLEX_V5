@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { useParams, useNavigate, useSearchParams, Link } from "react-router-dom";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import { db } from "../config/firebase";
@@ -6,12 +6,75 @@ import { useAuth } from "../context/AuthContext";
 import { useProfile } from "../context/ProfileContext";
 import { getAnimeDetail, getEpisodes, getStreamSources, getSkipTimes, getDirectStream } from "../services/api";
 import VideoPlayer from "../components/VideoPlayer";
-import { ArrowLeft, RefreshCw, AlertTriangle } from "lucide-react";
+import { ArrowLeft, RefreshCw, AlertTriangle, ChevronDown, Check } from "lucide-react";
+
+const getCachedFillers = (malId) => {
+  try {
+    const cached = sessionStorage.getItem(`fillers_${malId}`);
+    return cached ? JSON.parse(cached) : null;
+  } catch {
+    return null;
+  }
+};
+
+const setCachedFillers = (malId, data) => {
+  try {
+    sessionStorage.setItem(`fillers_${malId}`, JSON.stringify(data));
+  } catch (e) {
+    console.warn("Error caching fillers:", e);
+  }
+};
+
+const fetchJikanFillers = async (malId, totalEps) => {
+  try {
+    const pageCount = Math.ceil(totalEps / 100);
+    const fillerMap = {};
+    const recapMap = {};
+
+    for (let page = 1; page <= pageCount; page++) {
+      if (page > 1) {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+      const url = `https://api.jikan.moe/v4/anime/${malId}/episodes?page=${page}`;
+      const res = await fetch(url);
+      if (!res.ok) {
+        if (res.status === 429) {
+          // Rate limit: backoff and retry once
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+          const retryRes = await fetch(url);
+          if (!retryRes.ok) break;
+          const retryJson = await retryRes.json();
+          if (retryJson.data) {
+            retryJson.data.forEach((ep) => {
+              if (ep.filler) fillerMap[ep.mal_id] = true;
+              if (ep.recap) recapMap[ep.mal_id] = true;
+            });
+            continue;
+          }
+        }
+        break;
+      }
+      const json = await res.json();
+      if (json.data && json.data.length > 0) {
+        json.data.forEach((ep) => {
+          if (ep.filler) fillerMap[ep.mal_id] = true;
+          if (ep.recap) recapMap[ep.mal_id] = true;
+        });
+      } else {
+        break;
+      }
+    }
+    return { fillerMap, recapMap };
+  } catch (err) {
+    console.warn("Error fetching fillers:", err);
+    return { fillerMap: {}, recapMap: {} };
+  }
+};
 
 export default function PlayerPage() {
   const { animeId, episodeId } = useParams();
   const [searchParams] = useSearchParams();
-  const audioCategory = searchParams.get("audio") || "sub"; // 'sub' or 'dub'
+  const audioCategory = searchParams.get("audio") || localStorage.getItem("anistream_audio_preference") || "sub"; // 'sub' or 'dub'
   
   const { currentUser } = useAuth();
   const { activeProfile } = useProfile();
@@ -23,6 +86,32 @@ export default function PlayerPage() {
   const [episodes, setEpisodes] = useState([]);
   const [currentEpisode, setCurrentEpisode] = useState(null);
   const [selectedServer, setSelectedServer] = useState("hd-1");
+
+  // Batching & dropdown UI states
+  const [selectedBatchIndex, setSelectedBatchIndex] = useState(0);
+  const [showBatchDropdown, setShowBatchDropdown] = useState(false);
+  const batchDropdownRef = useRef(null);
+
+  // Click outside to close batch dropdown
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (batchDropdownRef.current && !batchDropdownRef.current.contains(event.target)) {
+        setShowBatchDropdown(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  // Auto-select batch index when currentEpisode changes
+  useEffect(() => {
+    if (currentEpisode && episodes.length > 25) {
+      const idx = Math.floor((currentEpisode.number - 1) / 25);
+      if (idx >= 0 && idx < Math.ceil(episodes.length / 25)) {
+        setSelectedBatchIndex(idx);
+      }
+    }
+  }, [currentEpisode, episodes.length]);
   
   // Stream & Skip times
   const [streamData, setStreamData] = useState(null);
@@ -114,6 +203,31 @@ export default function PlayerPage() {
             });
           }
         }
+
+        // 5. Fetch Jikan fillers asynchronously in the background
+        if (malId && malId !== "0" && malId !== "") {
+          const cachedFillers = getCachedFillers(malId);
+          if (cachedFillers) {
+            setEpisodes(prev => 
+              prev.map(epItem => ({
+                ...epItem,
+                isFiller: !!cachedFillers.fillerMap[epItem.number],
+                isRecap: !!cachedFillers.recapMap[epItem.number]
+              }))
+            );
+          } else {
+            fetchJikanFillers(malId, epData?.episodes?.length || 0).then(({ fillerMap, recapMap }) => {
+              setEpisodes(prev => 
+                prev.map(epItem => ({
+                  ...epItem,
+                  isFiller: !!fillerMap[epItem.number],
+                  isRecap: !!recapMap[epItem.number]
+                }))
+              );
+              setCachedFillers(malId, { fillerMap, recapMap });
+            });
+          }
+        }
       } catch (err) {
         console.error("Player page loading error:", err);
         setError("Failed to extract video streams. Please try another episode or server.");
@@ -174,6 +288,7 @@ export default function PlayerPage() {
         episodeTitle: finalEpisodeTitle,
         progressPosition: finalProgress,
         totalDuration: finalDuration,
+        audioCategory: audioCategory,
         updatedAt: Date.now()
       };
 
@@ -218,6 +333,27 @@ export default function PlayerPage() {
 
   const currentIndex = episodes.findIndex(e => e.episodeId === episodeId);
   const nextEpisode = currentIndex !== -1 && currentIndex < episodes.length - 1 ? episodes[currentIndex + 1] : null;
+
+  // Batching logic: 25 episodes per batch
+  const BATCH_SIZE = 25;
+  const batches = [];
+  if (episodes && episodes.length > 0) {
+    for (let i = 0; i < episodes.length; i += BATCH_SIZE) {
+      const end = Math.min(i + BATCH_SIZE, episodes.length);
+      const batchEps = episodes.slice(i, i + BATCH_SIZE);
+      const startNum = episodes[i].number;
+      const endNum = episodes[end - 1].number;
+      
+      batches.push({
+        index: batches.length,
+        label: `Episodes ${startNum}-${endNum}`,
+        episodes: batchEps
+      });
+    }
+  }
+
+  // Active episodes for current batch selection
+  const activeEpisodes = batches.length > 1 ? (batches[selectedBatchIndex]?.episodes || []) : episodes;
 
   return (
     <div className="player-screen-page">
@@ -305,13 +441,63 @@ export default function PlayerPage() {
       {/* Up Next / Episode Navigation in Player */}
       {!loading && !error && currentEpisode && (
         <div className="container player-episodes-navigation">
-          <h3>Episodes List</h3>
+          <div className="episodes-header-row">
+            <div className="episodes-title-area">
+              <h3>Episodes List</h3>
+              <div className="episodes-legend">
+                <span className="legend-item"><span className="legend-dot filler"></span> Filler</span>
+                <span className="legend-item"><span className="legend-dot recap"></span> Recap</span>
+              </div>
+            </div>
+
+            {/* Episode Batch Selector Dropdown */}
+            {batches.length > 1 && (
+              <div className="season-selector-wrapper" ref={batchDropdownRef}>
+                <button 
+                  className="season-select-btn" 
+                  onClick={() => setShowBatchDropdown(!showBatchDropdown)}
+                  type="button"
+                >
+                  <span className="dropdown-label">{batches[selectedBatchIndex]?.label}</span>
+                  <ChevronDown size={16} className={`chevron ${showBatchDropdown ? "open" : ""}`} />
+                </button>
+                
+                {showBatchDropdown && (
+                  <div className="season-dropdown-menu episode-batch-dropdown-menu" style={{ minWidth: "180px", width: "max-content", right: 0, left: "auto" }}>
+                    <div className="dropdown-section-header">Episode Batches</div>
+                    {batches.map((batch) => {
+                      const isActive = batch.index === selectedBatchIndex;
+                      return (
+                        <button
+                          key={batch.index}
+                          className={`season-dropdown-item ${isActive ? "active" : ""}`}
+                          onClick={() => {
+                            setSelectedBatchIndex(batch.index);
+                            setShowBatchDropdown(false);
+                          }}
+                          type="button"
+                        >
+                          <span>
+                            {batch.label}
+                          </span>
+                          {isActive && (
+                            <Check size={14} className="finished-check" style={{ color: "var(--primary)" }} />
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
           <div className="navigation-episodes-list">
-            {episodes.map(ep => (
+            {activeEpisodes.map(ep => (
               <Link 
                 key={ep.episodeId}
                 to={`/watch/${animeId}/${ep.episodeId}?audio=${audioCategory}`}
-                className={`nav-ep-btn ${ep.episodeId === episodeId ? "active" : ""}`}
+                className={`nav-ep-btn ${ep.episodeId === episodeId ? "active" : ""} ${ep.isFiller ? "filler" : ""} ${ep.isRecap ? "recap" : ""}`}
+                title={ep.isFiller ? "Filler Episode" : ep.isRecap ? "Recap Episode" : `Episode ${ep.number}`}
               >
                 Ep {ep.number}
               </Link>
@@ -405,12 +591,133 @@ export default function PlayerPage() {
         .player-episodes-navigation {
           margin-top: 2rem;
         }
+        .episodes-header-row {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          margin-bottom: 1rem;
+          position: relative;
+        }
+        .episodes-title-area {
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+        }
         .player-episodes-navigation h3 {
           font-size: 1.1rem;
           font-weight: 700;
-          margin-bottom: 1rem;
+          margin-bottom: 0;
           color: white;
         }
+        .episodes-legend {
+          display: flex;
+          gap: 12px;
+          font-size: 0.75rem;
+          color: var(--text-secondary);
+        }
+        .legend-item {
+          display: flex;
+          align-items: center;
+          gap: 4px;
+        }
+        .legend-dot {
+          width: 8px;
+          height: 8px;
+          border-radius: 50%;
+        }
+        .legend-dot.filler {
+          background-color: #ff4d4d;
+        }
+        .legend-dot.recap {
+          background-color: #ffaa00;
+        }
+
+        /* Season/Batch selector styles */
+        .season-selector-wrapper {
+          position: relative;
+        }
+        .season-select-btn {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          background: #1a1a1a;
+          border: 1px solid var(--border);
+          color: white;
+          padding: 8px 16px;
+          border-radius: 6px;
+          font-weight: 600;
+          font-size: 0.9rem;
+          cursor: pointer;
+          transition: var(--transition);
+        }
+        .season-select-btn:hover {
+          background: #242424;
+        }
+        .chevron {
+          transition: transform 0.2s ease;
+        }
+        .chevron.open {
+          transform: rotate(180deg);
+        }
+        .season-dropdown-menu {
+          position: absolute;
+          top: calc(100% + 8px);
+          background: #1a1a1a;
+          border: 1px solid var(--border);
+          border-radius: 8px;
+          padding: 6px;
+          box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+          z-index: 100;
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+        }
+        .dropdown-section-header {
+          font-size: 0.7rem;
+          font-weight: 700;
+          text-transform: uppercase;
+          color: var(--text-muted);
+          padding: 6px 10px;
+          letter-spacing: 0.05em;
+        }
+        .season-dropdown-item {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          width: 100%;
+          background: transparent;
+          border: none;
+          color: var(--text-secondary);
+          padding: 8px 12px;
+          text-align: left;
+          font-size: 0.85rem;
+          font-weight: 600;
+          border-radius: 4px;
+          cursor: pointer;
+          transition: var(--transition);
+        }
+        .season-dropdown-item:hover {
+          background: rgba(255, 255, 255, 0.05);
+          color: white;
+        }
+        .season-dropdown-item.active {
+          background: rgba(229, 9, 20, 0.1);
+          color: var(--primary);
+        }
+        
+        .nav-ep-btn.filler {
+          border-left: 3px solid #ff4d4d;
+        }
+        .nav-ep-btn.recap {
+          border-left: 3px solid #ffaa00;
+        }
+        .nav-ep-btn.active.filler {
+          border-left: 3px solid #ff4d4d;
+        }
+        .nav-ep-btn.active.recap {
+          border-left: 3px solid #ffaa00;
+        }
+
         .navigation-episodes-list {
           display: flex;
           flex-wrap: wrap;
@@ -480,6 +787,12 @@ export default function PlayerPage() {
           }
           .player-episodes-navigation {
             margin-top: 1.5rem;
+          }
+          .episodes-header-row {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 12px;
+            margin-bottom: 1rem;
           }
           .navigation-episodes-list {
             display: grid;

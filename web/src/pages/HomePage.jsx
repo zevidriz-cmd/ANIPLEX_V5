@@ -335,6 +335,7 @@ export default function HomePage() {
                       episodeInfo={progressText}
                       onRemove={handleRemoveItem}
                       episodeId={item.episodeId}
+                      audioCategory={item.audioCategory}
                     />
                   </div>
                 );

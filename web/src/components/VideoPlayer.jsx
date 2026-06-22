@@ -39,6 +39,7 @@ export default function VideoPlayer({
   const [showControls, setShowControls] = useState(true);
   const [showSettings, setShowSettings] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
+  const [aspectRatio, setAspectRatio] = useState("fit"); // "fit", "stretch", "zoom"
   
   const [showSkipIntro, setShowSkipIntro] = useState(false);
   const [showSkipOutro, setShowSkipOutro] = useState(false);
@@ -75,6 +76,19 @@ export default function VideoPlayer({
 
   const handlePlayerTouchStart = (e) => {
     if (isLocked) return;
+
+    if (e.touches.length === 2) {
+      const t1 = e.touches[0];
+      const t2 = e.touches[1];
+      const dist = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
+      touchRef.current = {
+        ...touchRef.current,
+        startPinchDist: dist,
+        isPinch: true,
+        currentPinchRatio: 1
+      };
+      return;
+    }
 
     const touch = e.touches[0];
     const rect = containerRef.current.getBoundingClientRect();
@@ -122,6 +136,18 @@ export default function VideoPlayer({
   const handlePlayerTouchMove = (e) => {
     if (isLocked) return;
 
+    if (e.touches.length === 2 && touchRef.current.isPinch) {
+      e.preventDefault();
+      const t1 = e.touches[0];
+      const t2 = e.touches[1];
+      const dist = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
+      const startDist = touchRef.current.startPinchDist;
+      if (startDist > 0) {
+        touchRef.current.currentPinchRatio = dist / startDist;
+      }
+      return;
+    }
+
     const touch = e.touches[0];
     const rect = containerRef.current.getBoundingClientRect();
     const x = touch.clientX - rect.left;
@@ -153,6 +179,25 @@ export default function VideoPlayer({
   };
 
   const handlePlayerTouchEnd = (e) => {
+    if (touchRef.current.isPinch) {
+      const ratio = touchRef.current.currentPinchRatio;
+      if (ratio && ratio > 1.15) {
+        if (aspectRatio !== "zoom") {
+          setAspectRatio("zoom");
+          showHUD("aspect", "Zoom (Fill)");
+        }
+      } else if (ratio && ratio < 0.85) {
+        if (aspectRatio !== "fit") {
+          setAspectRatio("fit");
+          showHUD("aspect", "Fit (16:9)");
+        }
+      }
+      touchRef.current.isPinch = false;
+      touchRef.current.currentPinchRatio = null;
+      touchRef.current.startPinchDist = null;
+      return;
+    }
+
     if (touchRef.current.isDoubleTap) {
       touchRef.current.isDoubleTap = false;
       return;
@@ -365,7 +410,8 @@ export default function VideoPlayer({
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
-    video.volume = isMuted ? 0 : volume;
+    video.volume = volume;
+    video.muted = isMuted;
   }, [volume, isMuted]);
 
   // Skip overlays check
@@ -648,6 +694,19 @@ export default function VideoPlayer({
     const separator = cleanedEmbedUrl.includes("?") ? "&" : "?";
     return (
       <div className="iframe-player-wrapper">
+        {/* Floating Top Bar for Iframe Player */}
+        <div className="iframe-player-top-bar">
+          {onBack && (
+            <button className="player-back-btn" onClick={onBack} aria-label="Back" type="button">
+              <ArrowLeft size={20} />
+            </button>
+          )}
+          <div className="title-info">
+            <span className="anime-title">{animeTitle}</span>
+            <span className="episode-badge">Episode {episodeNumber}</span>
+          </div>
+        </div>
+
         <iframe 
           src={`${cleanedEmbedUrl}${separator}autoPlay=1`} 
           title="Episode Stream Player" 
@@ -672,6 +731,56 @@ export default function VideoPlayer({
             width: 100%;
             height: 100%;
             border: none;
+            z-index: 1;
+          }
+          .iframe-player-top-bar {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 50px;
+            background: linear-gradient(to bottom, rgba(0, 0, 0, 0.85) 0%, rgba(0, 0, 0, 0.3) 70%, transparent 100%);
+            display: flex;
+            align-items: center;
+            padding: 0 16px;
+            z-index: 10;
+            pointer-events: auto;
+          }
+          .iframe-player-top-bar .title-info {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: white;
+            font-family: var(--font-family);
+          }
+          .iframe-player-top-bar .anime-title {
+            font-size: 0.95rem;
+            font-weight: 700;
+            text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+          }
+          .iframe-player-top-bar .episode-badge {
+            background-color: var(--primary);
+            color: white;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.7rem;
+            font-weight: 700;
+          }
+          .iframe-player-top-bar .player-back-btn {
+            background: none;
+            border: none;
+            color: white;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 6px;
+            margin-right: 8px;
+            border-radius: 50%;
+            transition: var(--transition);
+          }
+          .iframe-player-top-bar .player-back-btn:hover {
+            background-color: rgba(255, 255, 255, 0.15);
           }
         `}</style>
       </div>
@@ -731,6 +840,7 @@ export default function VideoPlayer({
               {gestureHUD.type === "volume" && `🔊 Volume: ${gestureHUD.value}`}
               {gestureHUD.type === "brightness" && `☀️ Brightness: ${gestureHUD.value}`}
               {gestureHUD.type === "seek" && `⏩ Seek: ${gestureHUD.value}`}
+              {gestureHUD.type === "aspect" && `📺 Screen Fit: ${gestureHUD.value}`}
             </span>
           </div>
         </div>
@@ -768,6 +878,9 @@ export default function VideoPlayer({
       <video 
         ref={videoRef}
         className="video-element"
+        style={{
+          objectFit: aspectRatio === "fit" ? "contain" : aspectRatio === "stretch" ? "fill" : "cover"
+        }}
         onPlay={() => {
           setIsPlaying(true);
           setIsLoading(false);
@@ -781,6 +894,11 @@ export default function VideoPlayer({
           }
         }}
         onDurationChange={(e) => setDuration(e.target.duration)}
+        onVolumeChange={(e) => {
+          const video = e.target;
+          setVolume(video.volume);
+          setIsMuted(video.muted);
+        }}
         onEnded={onEnded}
         onWaiting={() => setIsLoading(true)}
         onPlaying={() => setIsLoading(false)}
@@ -966,6 +1084,28 @@ export default function VideoPlayer({
             </div>
 
             <div className="right-controls">
+              {/* Screen Fit Quick Toggle */}
+              <button 
+                className="control-btn" 
+                onClick={(e) => {
+                  e.stopPropagation();
+                  const nextMode = aspectRatio === "fit" ? "stretch" : aspectRatio === "stretch" ? "zoom" : "fit";
+                  const labels = { fit: "Fit", stretch: "Stretch", zoom: "Zoom" };
+                  setAspectRatio(nextMode);
+                  showHUD("aspect", labels[nextMode]);
+                }}
+                title="Cycle Screen Fit (Fit / Stretch / Zoom)"
+                type="button"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ transition: "transform 0.2s" }}>
+                  <rect x="2" y="4" width="20" height="16" rx="2" />
+                  <path d="M6 9V6h3" />
+                  <path d="M18 9V6h-3" />
+                  <path d="M6 15v3h3" />
+                  <path d="M18 15v3h-3" />
+                </svg>
+              </button>
+
               {/* Settings Trigger */}
               <div className="settings-menu-wrapper">
                 <button 
@@ -987,6 +1127,29 @@ export default function VideoPlayer({
                             className={playbackSpeed === speed ? "active" : ""}
                           >
                             {speed}x
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="settings-section">
+                      <h4>Screen Fit</h4>
+                      <div className="settings-options">
+                        {[
+                          { id: "fit", label: "Fit" },
+                          { id: "stretch", label: "Stretch" },
+                          { id: "zoom", label: "Zoom" }
+                        ].map(mode => (
+                          <button 
+                            key={mode.id} 
+                            onClick={() => {
+                              setAspectRatio(mode.id);
+                              const labels = { fit: "Fit", stretch: "Stretch", zoom: "Zoom" };
+                              showHUD("aspect", labels[mode.id]);
+                              setShowSettings(false);
+                            }}
+                            className={aspectRatio === mode.id ? "active" : ""}
+                          >
+                            {mode.label}
                           </button>
                         ))}
                       </div>

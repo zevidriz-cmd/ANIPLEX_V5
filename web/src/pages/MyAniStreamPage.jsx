@@ -15,6 +15,7 @@ export default function MyAniStreamPage() {
   // Settings State
   const [qualityCap, setQualityCap] = useState("Auto");
   const [autoplay, setAutoplay] = useState(true);
+  const [audioPreference, setAudioPreference] = useState("sub");
   const [subSize, setSubSize] = useState("medium");
   const [subColor, setSubColor] = useState("white");
   const [subBg, setSubBg] = useState("semi-transparent");
@@ -23,12 +24,14 @@ export default function MyAniStreamPage() {
   useEffect(() => {
     const qCap = localStorage.getItem("anistream_quality_cap") || "Auto";
     const autoPlayVal = localStorage.getItem("anistream_autoplay") !== "false";
+    const aPref = localStorage.getItem("anistream_audio_preference") || "sub";
     const sSize = localStorage.getItem("anistream_subtitle_size") || "medium";
     const sColor = localStorage.getItem("anistream_subtitle_color") || "white";
     const sBg = localStorage.getItem("anistream_subtitle_bg") || "semi-transparent";
 
     setQualityCap(qCap);
     setAutoplay(autoPlayVal);
+    setAudioPreference(aPref);
     setSubSize(sSize);
     setSubColor(sColor);
     setSubBg(sBg);
@@ -149,6 +152,22 @@ export default function MyAniStreamPage() {
                     <ToggleLeft size={38} className="text-muted" />
                   )}
                 </button>
+              </div>
+            </div>
+            <div className="setting-item">
+              <div className="setting-info">
+                <h4>Preferred Audio Language</h4>
+                <p className="text-muted">Default to Subtitled or Dubbed audio tracks globally</p>
+              </div>
+              <div className="setting-action">
+                <select 
+                  value={audioPreference}
+                  onChange={(e) => updateSetting("anistream_audio_preference", e.target.value, setAudioPreference)}
+                  className="settings-select"
+                >
+                  <option value="sub">Subtitled (Japanese Audio)</option>
+                  <option value="dub">Dubbed (Local/English Audio)</option>
+                </select>
               </div>
             </div>
           </div>

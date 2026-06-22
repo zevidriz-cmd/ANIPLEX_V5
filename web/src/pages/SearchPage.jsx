@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from "react";
 import { useSearchParams, Link } from "react-router-dom";
-import { search, getSuggestions, getGenre } from "../services/api";
+import { search, getSuggestions, getGenre, filterAnime } from "../services/api";
 import { useProfile } from "../context/ProfileContext";
 import AnimeCard from "../components/AnimeCard";
 import { GridShimmer } from "../components/Shimmer";
@@ -113,7 +113,12 @@ export default function SearchPage() {
 
   const handleSearchSubmit = async (p = 1, searchKeyword = keyword) => {
     const queryToSearch = typeof searchKeyword === "string" ? searchKeyword : keyword;
-    if (!queryToSearch.trim() && selectedGenres.length === 0 && !type && !status && !sort) {
+    
+    // Check if any filters are active
+    const hasFilters = !!(type || status || selectedGenres.length > 0 || sort);
+    const hasKeyword = !!(queryToSearch && queryToSearch.trim());
+
+    if (!hasKeyword && !hasFilters) {
       setResults([]);
       return;
     }
@@ -123,13 +128,35 @@ export default function SearchPage() {
     inputRef.current?.blur(); // Blur search input to dismiss mobile keyboard!
 
     try {
-      const data = await search(queryToSearch || "all", p);
+      let data;
+      if (hasFilters && !hasKeyword) {
+        // Fetch from filter API
+        data = await filterAnime({
+          type: type || undefined,
+          status: status || undefined,
+          genres: selectedGenres.length > 0 ? selectedGenres.join(",") : undefined,
+          sort: sort || undefined,
+          page: p
+        });
+      } else {
+        // Fetch from search API
+        data = await search(queryToSearch || "all", p);
+        if (hasFilters && data?.animes) {
+          // Apply client-side filter for type if it is set
+          let filtered = [...data.animes];
+          if (type) {
+            filtered = filtered.filter(a => a.type?.toLowerCase() === type.toLowerCase());
+          }
+          data.animes = filtered;
+        }
+      }
+
       setResults(data?.animes || []);
       setPage(data?.currentPage || 1);
       setTotalPages(data?.totalPages || 1);
       setHasNextPage(data?.hasNextPage || false);
 
-      if (queryToSearch && queryToSearch.trim()) {
+      if (hasKeyword) {
         saveSearchQuery(queryToSearch);
       }
     } catch (e) {

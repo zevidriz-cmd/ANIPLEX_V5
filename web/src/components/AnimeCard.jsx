@@ -53,7 +53,10 @@ export default function AnimeCard({
 
   return (
     <div className="anime-card" onClick={onClick}>
-      <Link to={`/anime/${id}`} className="anime-card-link">
+      <Link 
+        to={episodeId ? `/watch/${id}/${episodeId}${audioCategory ? `?audio=${audioCategory}` : ""}` : `/anime/${id}`} 
+        className="anime-card-link"
+      >
         <div className="poster-wrapper">
           <img src={poster} alt={name} loading="lazy" className="poster-img" />
           <div className="poster-overlay">

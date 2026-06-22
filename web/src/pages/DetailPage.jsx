@@ -218,7 +218,9 @@ export default function DetailPage() {
   const [characters, setCharacters] = useState([]);
   const [seasons, setSeasons] = useState([]);
   const [seasonsLoading, setSeasonsLoading] = useState(false);
-  const [audioPreference, setAudioPreference] = useState("sub"); // 'sub' or 'dub'
+  const [audioPreference, setAudioPreference] = useState(() => {
+    return localStorage.getItem("anistream_audio_preference") || "sub";
+  }); // 'sub' or 'dub' loaded from settings
 
   // Firestore Sync States
   const [isWatchlisted, setIsWatchlisted] = useState(false);
@@ -232,10 +234,65 @@ export default function DetailPage() {
   const [currentVersion, setCurrentVersion] = useState("censored"); // 'censored' or 'uncensored'
   const [resolvingVersion, setResolvingVersion] = useState(false);
   const [seasonDropdownOpen, setSeasonDropdownOpen] = useState(false);
-  const [showMobileRating, setShowMobileRating] = useState(false);
+  const [selectedBatchIndex, setSelectedBatchIndex] = useState(0);
+  const [episodeDropdownOpen, setEpisodeDropdownOpen] = useState(false);
   const [showAllSynopsis, setShowAllSynopsis] = useState(false);
   const [showMoreDetails, setShowMoreDetails] = useState(false);
   const [shareSuccess, setShareSuccess] = useState(false);
+
+  // Determine watch / resume link
+  let playEpisodeId = episodes && episodes[0]?.episodeId;
+  let playEpisodeNumber = 1;
+  let isResume = false;
+
+  if (historyItem && historyItem.episodeId) {
+    playEpisodeId = historyItem.episodeId;
+    playEpisodeNumber = historyItem.episodeNumber;
+    isResume = true;
+  }
+
+  // Batching logic: 25 episodes per batch
+  const BATCH_SIZE = 25;
+  const batches = [];
+  if (episodes && episodes.length > 0) {
+    for (let i = 0; i < episodes.length; i += BATCH_SIZE) {
+      const start = i + 1;
+      const end = Math.min(i + BATCH_SIZE, episodes.length);
+      const batchEps = episodes.slice(i, i + BATCH_SIZE);
+      
+      // A batch is completed/finished if all episodes in it have been watched
+      const isFinished = batchEps.every(ep => {
+        return historyItem?.episodeId === ep.episodeId || (historyItem?.episodeNumber > ep.number);
+      });
+
+      batches.push({
+        index: batches.length,
+        start,
+        end,
+        label: `Episodes ${start}-${end}`,
+        episodes: batchEps,
+        isFinished
+      });
+    }
+  }
+
+  // Active episodes for current batch selection
+  const activeEpisodes = batches.length > 1 ? (batches[selectedBatchIndex]?.episodes || []) : episodes;
+
+  // Auto-select the batch index containing the user's next episode to watch
+  useEffect(() => {
+    if (episodes && episodes.length > BATCH_SIZE) {
+      const targetEp = playEpisodeNumber || 1;
+      const idx = Math.floor((targetEp - 1) / BATCH_SIZE);
+      if (idx >= 0 && idx < Math.ceil(episodes.length / BATCH_SIZE)) {
+        setSelectedBatchIndex(idx);
+      } else {
+        setSelectedBatchIndex(0);
+      }
+    } else {
+      setSelectedBatchIndex(0);
+    }
+  }, [episodes, playEpisodeNumber]);
 
   useEffect(() => {
     async function loadData() {
@@ -255,9 +312,9 @@ export default function DetailPage() {
         setEpisodes(rawEpisodes);
         setCharacters(charData?.characters || []);
 
-        // Audio preference default to whatever episodes have
-        const hasSub = rawEpisodes.length > 0;
-        setAudioPreference(hasSub ? "sub" : "dub");
+        // Respect locked audio preference from settings
+        const savedAudioPref = localStorage.getItem("anistream_audio_preference") || "sub";
+        setAudioPreference(savedAudioPref);
 
         // Determine if current title is uncut/uncensored
         const nameLower = detailData?.anime?.info?.name?.toLowerCase() || "";
@@ -625,17 +682,8 @@ export default function DetailPage() {
   const moviesAndSpecials = seasons.filter(s => {
     return getMediaType(s) !== "TV";
   });
+  // Determine watch / resume link already calculated at the top-level
 
-  // Determine watch / resume link
-  let playEpisodeId = episodes[0]?.episodeId;
-  let playEpisodeNumber = 1;
-  let isResume = false;
-
-  if (historyItem && historyItem.episodeId) {
-    playEpisodeId = historyItem.episodeId;
-    playEpisodeNumber = historyItem.episodeNumber;
-    isResume = true;
-  }
 
   return (
     <div className="detail-page fade-in">
@@ -669,9 +717,12 @@ export default function DetailPage() {
                 })()}
               </span>
               <span style={{ color: "var(--text-muted)" }}>•</span>
-              <span style={{ color: "white", fontWeight: "600" }}>
-                {info.stats?.episodes?.dub ? "Sub | Dub" : "Subtitled"}
-              </span>
+              {info.stats?.episodes?.sub && (
+                <span className="stat-pill" style={{ backgroundColor: "#0070F3", color: "white", fontWeight: "700", fontSize: "0.7rem", padding: "2px 6px", borderRadius: "3px" }}>SUB</span>
+              )}
+              {info.stats?.episodes?.dub && (
+                <span className="stat-pill" style={{ backgroundColor: "var(--secondary)", color: "#0A0A0A", fontWeight: "700", fontSize: "0.7rem", padding: "2px 6px", borderRadius: "3px", marginLeft: "4px" }}>DUB</span>
+              )}
               {moreInfo?.genres && moreInfo.genres.length > 0 && (
                 <>
                   <span style={{ color: "var(--text-muted)" }}>•</span>
@@ -830,7 +881,32 @@ export default function DetailPage() {
             {/* Synopsis and Expandable Details */}
             <div className="synopsis-box" style={{ marginTop: "24px", background: "none", border: "none", padding: 0 }}>
               <p className="synopsis-text" style={{ fontSize: "0.95rem", lineHeight: "1.6", color: "var(--text-secondary)" }}>
-                {info.description}
+                {(() => {
+                  const desc = (info.description || "").replace(/<[^>]*>/g, "");
+                  if (desc.length <= 250) return desc;
+                  return (
+                    <>
+                      {showAllSynopsis ? desc : `${desc.slice(0, 250)}...`}
+                      <button
+                        onClick={() => setShowAllSynopsis(!showAllSynopsis)}
+                        type="button"
+                        style={{
+                          background: "none",
+                          border: "none",
+                          color: "var(--primary)",
+                          fontWeight: "700",
+                          cursor: "pointer",
+                          padding: "0 6px",
+                          fontSize: "0.85rem",
+                          display: "inline",
+                          textTransform: "uppercase"
+                        }}
+                      >
+                        {showAllSynopsis ? "Less" : "More"}
+                      </button>
+                    </>
+                  );
+                })()}
               </p>
               
               {/* More Details Toggle */}
@@ -993,30 +1069,59 @@ export default function DetailPage() {
                       </div>
                     )
                   )}
+
+                  {/* Episode Batch Selector Dropdown */}
+                  {batches.length > 1 && (
+                    <div className="season-selector-dropdown-wrapper">
+                      <button 
+                        className="season-dropdown-toggle-btn"
+                        onClick={() => setEpisodeDropdownOpen(!episodeDropdownOpen)}
+                        type="button"
+                      >
+                        <span className="dropdown-label">{batches[selectedBatchIndex]?.label}</span>
+                        <ChevronDown size={14} className={`dropdown-chevron ${episodeDropdownOpen ? "open" : ""}`} />
+                      </button>
+                    
+                      {episodeDropdownOpen && (
+                        <>
+                          <div className="dropdown-backplate" onClick={() => setEpisodeDropdownOpen(false)} />
+                          <div className="season-dropdown-menu episode-batch-dropdown-menu" style={{ minWidth: "180px", width: "max-content", right: 0, left: "auto" }}>
+                            <div className="dropdown-section">
+                              <div className="dropdown-section-header">Episode Batches</div>
+                              {batches.map((batch) => {
+                                const isActive = batch.index === selectedBatchIndex;
+                                return (
+                                  <div
+                                    key={batch.index}
+                                    className={`season-dropdown-item ${isActive ? "active" : ""} ${batch.isFinished ? "finished" : ""}`}
+                                    onClick={() => {
+                                      setSelectedBatchIndex(batch.index);
+                                      setEpisodeDropdownOpen(false);
+                                    }}
+                                  >
+                                    <div className="dropdown-item-season-title">
+                                      {batch.label}
+                                    </div>
+                                    {batch.isFinished && (
+                                      <div className="dropdown-item-season-meta" style={{ fontSize: "0.6rem", color: "#7f7f7f", marginTop: "2px" }}>
+                                        Completed
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )}
                 </div>
-                
-                {info.stats?.episodes?.dub && info.stats?.episodes?.sub && (
-                  <div className="sub-dub-tabs">
-                    <button 
-                      className={audioPreference === "sub" ? "active" : ""} 
-                      onClick={() => setAudioPreference("sub")}
-                      type="button"
-                    >
-                      Subbed
-                    </button>
-                    <button 
-                      className={audioPreference === "dub" ? "active" : ""} 
-                      onClick={() => setAudioPreference("dub")}
-                      type="button"
-                    >
-                      Dubbed
-                    </button>
-                  </div>
-                )}
+
               </div>
               
               <div className="episodes-horizontal-list">
-                {episodes.map((ep) => {
+                {activeEpisodes.map((ep) => {
                   const isWatched = historyItem?.episodeId === ep.episodeId || (historyItem?.episodeNumber > ep.number);
                   let progressPercent = 0;
                   if (historyItem) {
@@ -1314,6 +1419,7 @@ export default function DetailPage() {
           border-radius: 8px;
           overflow: hidden;
           background-color: var(--bg-card);
+          align-self: flex-end;
         }
         .hero-poster {
           width: 100%;
@@ -1797,6 +1903,18 @@ export default function DetailPage() {
           padding-left: 9px;
         }
 
+        .season-dropdown-item.finished {
+          color: #7f7f7f;
+          opacity: 0.7;
+        }
+        .season-dropdown-item.finished .dropdown-item-season-title {
+          color: #7f7f7f;
+        }
+        .season-dropdown-item.finished.active {
+          border-left-color: #7f7f7f;
+          background-color: rgba(127, 127, 127, 0.1);
+        }
+
         .dropdown-item-season-meta {
           font-size: 0.65rem;
           color: var(--text-muted);
@@ -1983,6 +2101,7 @@ export default function DetailPage() {
             background-size: cover;
             background-position: center;
             z-index: 1;
+            filter: brightness(0.4) !important;
           }
           .hero-gradient {
             position: absolute;
@@ -2006,7 +2125,7 @@ export default function DetailPage() {
             display: none !important;
           }
           .hero-meta-content {
-            align-items: flex-start;
+            align-items: stretch;
           }
           .anime-title-h1 {
             font-size: 1.6rem;

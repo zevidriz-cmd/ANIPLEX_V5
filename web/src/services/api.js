@@ -41,6 +41,16 @@ export async function search(keyword, page = 1) {
   return fetchJson(`${BASE_URL}/search?keyword=${encodeURIComponent(keyword)}&page=${page}`);
 }
 
+export async function filterAnime({ type, status, genres, sort, page = 1 }) {
+  const params = new URLSearchParams();
+  if (type) params.append("type", type);
+  if (status) params.append("status", status);
+  if (genres) params.append("genres", genres);
+  if (sort) params.append("sort", sort);
+  params.append("page", page);
+  return fetchJson(`${BASE_URL}/filter?${params.toString()}`);
+}
+
 export async function getSuggestions(keyword) {
   return fetchJson(`${BASE_URL}/suggestion?keyword=${encodeURIComponent(keyword)}`);
 }

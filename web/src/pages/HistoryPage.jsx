@@ -103,6 +103,7 @@ export default function HistoryPage() {
                 episodeInfo={progressText}
                 onRemove={handleRemoveItem}
                 episodeId={item.episodeId}
+                audioCategory={item.audioCategory}
               />
             );
           })}
