@@ -1,12 +1,13 @@
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useRef, useMemo } from "react";
 import { useParams, useNavigate, useSearchParams, Link } from "react-router-dom";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import { db } from "../config/firebase";
 import { useAuth } from "../context/AuthContext";
 import { useProfile } from "../context/ProfileContext";
-import { getAnimeDetail, getEpisodes, getStreamSources, getSkipTimes, getDirectStream } from "../services/api";
+import { getAnimeDetail, getEpisodes, getStreamSources, getSkipTimes, getDirectStream, getBackupStream } from "../services/api";
+import { resolveTmdId, fetchTmdSeasons, buildArcsFromSeasons } from "../services/tmdb";
 import VideoPlayer from "../components/VideoPlayer";
-import { ArrowLeft, RefreshCw, AlertTriangle, ChevronDown, Check } from "lucide-react";
+import { ArrowLeft, RefreshCw, AlertTriangle, ChevronDown, Check, CheckSquare } from "lucide-react";
 
 const getCachedFillers = (malId) => {
   try {
@@ -80,7 +81,9 @@ export default function PlayerPage() {
   const { activeProfile } = useProfile();
   const navigate = useNavigate();
 
-  const [loading, setLoading] = useState(true);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [scraping, setScraping] = useState(false);
+  const [loadedAnimeId, setLoadedAnimeId] = useState("");
   const [error, setError] = useState("");
   const [animeDetail, setAnimeDetail] = useState(null);
   const [episodes, setEpisodes] = useState([]);
@@ -91,6 +94,57 @@ export default function PlayerPage() {
   const [selectedBatchIndex, setSelectedBatchIndex] = useState(0);
   const [showBatchDropdown, setShowBatchDropdown] = useState(false);
   const batchDropdownRef = useRef(null);
+
+  // Story Arcs & User History States
+  const [tmdbSeasons, setTmdbSeasons] = useState(null);
+  const [historyItem, setHistoryItem] = useState(null);
+
+  // Batching & Arc logic using useMemo
+  const batches = useMemo(() => {
+    if (!episodes || episodes.length === 0) return [];
+    
+    // If we have TMDb seasons, use them to build story arcs!
+    if (tmdbSeasons && tmdbSeasons.length > 0) {
+      const arcs = buildArcsFromSeasons(tmdbSeasons, episodes);
+      if (arcs && arcs.length > 0) {
+        return arcs.map(arc => {
+          const isFinished = arc.episodes.every(ep => {
+            return historyItem?.episodeId === ep.episodeId || (historyItem?.episodeNumber > ep.number);
+          });
+          return {
+            ...arc,
+            isFinished
+          };
+        });
+      }
+    }
+    
+    // Fallback: standard 25-episode batches
+    const BATCH_SIZE = 25;
+    const fallbackBatches = [];
+    for (let i = 0; i < episodes.length; i += BATCH_SIZE) {
+      const start = i + 1;
+      const end = Math.min(i + BATCH_SIZE, episodes.length);
+      const batchEps = episodes.slice(i, i + BATCH_SIZE);
+      
+      const isFinished = batchEps.every(ep => {
+        return historyItem?.episodeId === ep.episodeId || (historyItem?.episodeNumber > ep.number);
+      });
+
+      fallbackBatches.push({
+        index: fallbackBatches.length,
+        start,
+        end,
+        label: `Episodes ${start}-${end}`,
+        episodes: batchEps,
+        isFinished
+      });
+    }
+    return fallbackBatches;
+  }, [episodes, historyItem, tmdbSeasons]);
+
+  // Active episodes for current batch selection
+  const activeEpisodes = batches.length > 1 ? (batches[selectedBatchIndex]?.episodes || []) : episodes;
 
   // Click outside to close batch dropdown
   useEffect(() => {
@@ -103,52 +157,111 @@ export default function PlayerPage() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // Auto-select batch index when currentEpisode changes
+  // Load TMDb story arcs
   useEffect(() => {
-    if (currentEpisode && episodes.length > 25) {
-      const idx = Math.floor((currentEpisode.number - 1) / 25);
-      if (idx >= 0 && idx < Math.ceil(episodes.length / 25)) {
-        setSelectedBatchIndex(idx);
+    const malId = animeDetail?.anime?.info?.malId;
+    if (!malId || malId === "0" || malId === "") {
+      setTmdbSeasons(null);
+      return;
+    }
+
+    let isMounted = true;
+    async function getArcs() {
+      try {
+        const tmdbId = await resolveTmdId(malId);
+        if (tmdbId && isMounted) {
+          const seasons = await fetchTmdSeasons(tmdbId);
+          if (seasons && seasons.length > 0 && isMounted) {
+            setTmdbSeasons(seasons);
+          }
+        }
+      } catch (err) {
+        console.warn("Failed to load TMDb story arcs:", err);
       }
     }
-  }, [currentEpisode, episodes.length]);
+    
+    getArcs();
+    return () => {
+      isMounted = false;
+    };
+  }, [animeDetail]);
+
+  // Auto-select batch index when currentEpisode changes
+  useEffect(() => {
+    if (batches.length > 1 && currentEpisode) {
+      const targetEp = currentEpisode.number;
+      const idx = batches.findIndex(b => targetEp >= b.start && targetEp <= b.end);
+      if (idx >= 0 && idx < batches.length) {
+        setSelectedBatchIndex(idx);
+      } else {
+        setSelectedBatchIndex(0);
+      }
+    } else {
+      setSelectedBatchIndex(0);
+    }
+  }, [batches, currentEpisode]);
   
   // Stream & Skip times
   const [streamData, setStreamData] = useState(null);
   const [directStream, setDirectStream] = useState(null);
   const [skipTimes, setSkipTimes] = useState(null);
   const [initialSavedProgress, setInitialSavedProgress] = useState(0);
+  const [loadingStatus, setLoadingStatus] = useState("Scraping stream sources...");
+  const [fallbackNotice, setFallbackNotice] = useState(null);
 
   useEffect(() => {
+    let isMounted = true;
     async function loadPlayer() {
-      setLoading(true);
       setError("");
+      const showChanged = loadedAnimeId !== animeId;
+      if (showChanged) {
+        setInitialLoading(true);
+      } else {
+        setScraping(true);
+      }
+
       try {
-        // 1. Load anime detail and episodes
-        const [detailData, epData] = await Promise.all([
-          getAnimeDetail(animeId),
-          getEpisodes(animeId)
-        ]);
+        let currentDetail = animeDetail;
+        let currentEps = episodes;
 
-        setAnimeDetail(detailData);
-        setEpisodes(epData?.episodes || []);
+        // 1. Load anime detail and episodes only if show changed or is not loaded
+        if (showChanged || !currentDetail || currentEps.length === 0) {
+          const [detailData, epData] = await Promise.all([
+            getAnimeDetail(animeId),
+            getEpisodes(animeId)
+          ]);
+          
+          if (!isMounted) return;
+          currentDetail = detailData;
+          currentEps = epData?.episodes || [];
+          
+          setAnimeDetail(detailData);
+          setEpisodes(currentEps);
+          setLoadedAnimeId(animeId);
+        }
 
-        const ep = epData?.episodes?.find(e => e.episodeId === episodeId);
-        setCurrentEpisode(ep);
+        const ep = currentEps.find(e => e.episodeId === episodeId);
+        if (isMounted) {
+          setCurrentEpisode(ep);
+        }
 
         // 2. Fetch watch history and manage watchlist status from Firestore
         if (currentUser && activeProfile) {
           const docRef = doc(db, "users", currentUser.uid, "profiles", activeProfile.id, "history", animeId);
           const histSnap = await getDoc(docRef);
-          if (histSnap.exists()) {
-            const hist = histSnap.data();
-            if (hist.episodeId === episodeId) {
-              setInitialSavedProgress(hist.progressPosition || 0);
+          if (isMounted) {
+            if (histSnap.exists()) {
+              const hist = histSnap.data();
+              setHistoryItem(hist);
+              if (hist.episodeId === episodeId) {
+                setInitialSavedProgress(hist.progressPosition || 0);
+              } else {
+                setInitialSavedProgress(0);
+              }
             } else {
+              setHistoryItem(null);
               setInitialSavedProgress(0);
             }
-          } else {
-            setInitialSavedProgress(0);
           }
 
           // Auto-manage "watching" watchlist status
@@ -158,8 +271,8 @@ export default function PlayerPage() {
             if (!watchlistSnap.exists()) {
               await setDoc(watchlistRef, {
                 id: animeId,
-                name: detailData.anime.info.name,
-                poster: detailData.anime.info.poster,
+                name: currentDetail.anime.info.name,
+                poster: currentDetail.anime.info.poster,
                 status: "watching",
                 addedAt: Date.now()
               });
@@ -176,23 +289,72 @@ export default function PlayerPage() {
           }
         }
 
+        // Clear previous stream data to trigger a clean transition in VideoPlayer
+        if (isMounted) {
+          setStreamData(null);
+          setDirectStream(null);
+          setFallbackNotice(null);
+          setLoadingStatus("Connecting to primary server (Zoro)...");
+        }
+
+        const malId = currentDetail?.anime?.info?.malId;
+        const animeTitle = currentDetail?.anime?.info?.name;
+
         // 3. Fetch stream sources
-        const stream = await getStreamSources(episodeId, selectedServer, audioCategory);
-        setStreamData(stream);
+        let stream = null;
+        let direct = null;
 
         try {
-          const direct = await getDirectStream(episodeId, selectedServer, audioCategory);
-          setDirectStream(direct);
-        } catch (err) {
-          console.warn("Direct stream extraction failed, falling back to iframe:", err);
-          setDirectStream(null);
+          stream = await getStreamSources(episodeId, selectedServer, audioCategory);
+          if (isMounted) setStreamData(stream);
+
+          try {
+            if (isMounted) setLoadingStatus("Extracting high-quality direct stream...");
+            direct = await getDirectStream(episodeId, selectedServer, audioCategory, malId, ep.number, animeTitle);
+            if (isMounted) {
+              setDirectStream(direct);
+              if (direct.provider) {
+                setFallbackNotice({
+                  type: "info",
+                  message: `Switched to Backup Stream Server (${direct.provider === "gogoanime" ? "Gogoanime" : "AnimePahe"})`
+                });
+              }
+            }
+          } catch (directErr) {
+            console.warn("Direct stream extraction failed, attempting fallback...", directErr);
+            throw directErr; // Cascade to trigger backup flow
+          }
+        } catch (streamErr) {
+          console.warn("Zoro streaming failed. Executing fallback flow...", streamErr);
+          
+          // Primary server is down. Attempt Gogoanime/AnimePahe backup direct HLS streams
+          try {
+            const backupStream = await getBackupStream(malId, ep.number, animeTitle, (statusMsg) => {
+              if (isMounted) setLoadingStatus(statusMsg);
+            });
+            if (isMounted) {
+              setDirectStream(backupStream);
+              setFallbackNotice({
+                type: "info",
+                message: `Switched to Backup Stream Server (${backupStream.provider === "gogoanime" ? "Gogoanime" : "AnimePahe"})`
+              });
+            }
+          } catch (backupErr) {
+            console.error("Backup stream resolution failed, preparing iframe fallback:", backupErr);
+            if (isMounted) {
+              setDirectStream(null);
+              setFallbackNotice({
+                type: "warning",
+                message: "Direct server under maintenance. Loaded Backup Player (Iframe)."
+              });
+            }
+          }
         }
 
         // 4. Fetch AniSkip times if MAL ID is available
-        const malId = detailData?.anime?.info?.malId;
         if (malId && malId !== "0" && ep) {
           const skip = await getSkipTimes(malId, ep.number);
-          if (skip) {
+          if (isMounted && skip) {
             // Map AniSkip response to intro/outro format
             const opSegment = skip.find(s => s.result_type === "op");
             const edSegment = skip.find(s => s.result_type === "ed");
@@ -208,34 +370,46 @@ export default function PlayerPage() {
         if (malId && malId !== "0" && malId !== "") {
           const cachedFillers = getCachedFillers(malId);
           if (cachedFillers) {
-            setEpisodes(prev => 
-              prev.map(epItem => ({
-                ...epItem,
-                isFiller: !!cachedFillers.fillerMap[epItem.number],
-                isRecap: !!cachedFillers.recapMap[epItem.number]
-              }))
-            );
-          } else {
-            fetchJikanFillers(malId, epData?.episodes?.length || 0).then(({ fillerMap, recapMap }) => {
+            if (isMounted) {
               setEpisodes(prev => 
                 prev.map(epItem => ({
                   ...epItem,
-                  isFiller: !!fillerMap[epItem.number],
-                  isRecap: !!recapMap[epItem.number]
+                  isFiller: !!cachedFillers.fillerMap[epItem.number],
+                  isRecap: !!cachedFillers.recapMap[epItem.number]
                 }))
               );
-              setCachedFillers(malId, { fillerMap, recapMap });
+            }
+          } else {
+            fetchJikanFillers(malId, currentEps.length).then(({ fillerMap, recapMap }) => {
+              if (isMounted) {
+                setEpisodes(prev => 
+                  prev.map(epItem => ({
+                    ...epItem,
+                    isFiller: !!fillerMap[epItem.number],
+                    isRecap: !!recapMap[epItem.number]
+                  }))
+                );
+                setCachedFillers(malId, { fillerMap, recapMap });
+              }
             });
           }
         }
       } catch (err) {
         console.error("Player page loading error:", err);
-        setError("Failed to extract video streams. Please try another episode or server.");
+        if (isMounted) {
+          setError("Failed to extract video streams. Please try another episode or server.");
+        }
       } finally {
-        setLoading(false);
+        if (isMounted) {
+          setInitialLoading(false);
+          setScraping(false);
+        }
       }
     }
     loadPlayer();
+    return () => {
+      isMounted = false;
+    };
   }, [animeId, episodeId, audioCategory, selectedServer, currentUser, activeProfile]);
 
   const markAsCompleted = async () => {
@@ -252,6 +426,61 @@ export default function PlayerPage() {
       console.log("Anime marked as completed in watchlist");
     } catch (e) {
       console.warn("Error marking anime as completed:", e);
+    }
+  };
+
+  const markBatchAsWatched = async (batch) => {
+    if (!currentUser || !activeProfile || !animeDetail || !episodes || episodes.length === 0) return;
+    
+    try {
+      const batchEps = batch.episodes;
+      if (!batchEps || batchEps.length === 0) return;
+      const lastEpInBatch = batchEps[batchEps.length - 1];
+      
+      const lastIndex = episodes.findIndex(ep => ep.episodeId === lastEpInBatch.episodeId);
+      
+      let targetEp = null;
+      if (lastIndex !== -1 && lastIndex < episodes.length - 1) {
+        targetEp = episodes[lastIndex + 1];
+      }
+      
+      let data;
+      if (targetEp) {
+        data = {
+          animeId,
+          animeTitle: animeDetail.anime.info.name,
+          poster: animeDetail.anime.info.poster,
+          episodeId: targetEp.episodeId,
+          episodeNumber: targetEp.number,
+          episodeTitle: targetEp.title || `Episode ${targetEp.number}`,
+          progressPosition: 0,
+          totalDuration: 0,
+          audioCategory: audioCategory,
+          updatedAt: Date.now()
+        };
+      } else {
+        const lastEp = episodes[episodes.length - 1];
+        data = {
+          animeId,
+          animeTitle: animeDetail.anime.info.name,
+          poster: animeDetail.anime.info.poster,
+          episodeId: lastEp.episodeId,
+          episodeNumber: lastEp.number + 1,
+          episodeTitle: lastEp.title || `Episode ${lastEp.number}`,
+          progressPosition: 1,
+          totalDuration: 1,
+          audioCategory: audioCategory,
+          updatedAt: Date.now()
+        };
+        
+        await markAsCompleted();
+      }
+      
+      const docRef = doc(db, "users", currentUser.uid, "profiles", activeProfile.id, "history", animeId);
+      await setDoc(docRef, data);
+      setHistoryItem(data);
+    } catch (err) {
+      console.warn("Failed to mark batch as watched:", err);
     }
   };
 
@@ -294,6 +523,7 @@ export default function PlayerPage() {
 
       const docRef = doc(db, "users", currentUser.uid, "profiles", activeProfile.id, "history", animeId);
       await setDoc(docRef, data);
+      setHistoryItem(data);
 
       // Automatically mark as completed in watchlist if last episode is watched near end
       const isLastEpisode = currentIndex !== -1 && currentIndex === episodes.length - 1;
@@ -325,7 +555,7 @@ export default function PlayerPage() {
 
   // Extract M3U8 source link
   const hlsSource = directStream ? directStream.hlsUrl : streamData?.sources?.find(s => s.type === "hls" || s.url.includes(".m3u8"))?.url;
-  const embedFallback = streamData?.videoUrl || (streamData?.sources?.[0]?.url);
+  const embedFallback = streamData?.videoUrl || (streamData?.sources?.[0]?.url) || (currentDetail?.anime?.info?.malId ? `https://vidsrc.to/embed/anime/${currentDetail.anime.info.malId}/${currentEpisode?.number || 1}` : "");
 
   // Setup skip ranges (prefer AniSkip, fallback to streamData intro/outro)
   const skipIntroRange = skipTimes?.intro || (directStream ? directStream.intro : streamData?.intro);
@@ -334,26 +564,7 @@ export default function PlayerPage() {
   const currentIndex = episodes.findIndex(e => e.episodeId === episodeId);
   const nextEpisode = currentIndex !== -1 && currentIndex < episodes.length - 1 ? episodes[currentIndex + 1] : null;
 
-  // Batching logic: 25 episodes per batch
-  const BATCH_SIZE = 25;
-  const batches = [];
-  if (episodes && episodes.length > 0) {
-    for (let i = 0; i < episodes.length; i += BATCH_SIZE) {
-      const end = Math.min(i + BATCH_SIZE, episodes.length);
-      const batchEps = episodes.slice(i, i + BATCH_SIZE);
-      const startNum = episodes[i].number;
-      const endNum = episodes[end - 1].number;
-      
-      batches.push({
-        index: batches.length,
-        label: `Episodes ${startNum}-${endNum}`,
-        episodes: batchEps
-      });
-    }
-  }
 
-  // Active episodes for current batch selection
-  const activeEpisodes = batches.length > 1 ? (batches[selectedBatchIndex]?.episodes || []) : episodes;
 
   return (
     <div className="player-screen-page">
@@ -364,11 +575,11 @@ export default function PlayerPage() {
       </div>
 
       <div className="container player-wrapper-block">
-        {loading ? (
+        {initialLoading ? (
           <div className="player-loading-placeholder flex-center">
             <div className="text-center">
               <RefreshCw size={44} className="spin-icon" style={{ margin: "0 auto 1rem" }} />
-              <h3>Scraping stream sources...</h3>
+              <h3>{loadingStatus}</h3>
               <p className="text-muted">Extracting secure links and subtitles</p>
             </div>
           </div>
@@ -398,6 +609,8 @@ export default function PlayerPage() {
             onProgress={handleProgressSave}
             onEnded={handleEpisodeEnded}
             embedUrl={embedFallback}
+            fallbackNotice={fallbackNotice}
+            loadingStatus={loadingStatus}
             animeTitle={animeDetail?.anime?.info?.name}
             episodeNumber={currentEpisode?.number || 1}
             onBack={() => navigate(`/anime/${animeId}`)}
@@ -412,12 +625,13 @@ export default function PlayerPage() {
                 navigate(`/watch/${animeId}/${nextEpisode.episodeId}?audio=${audioCategory}`);
               }
             }}
+            externalLoading={scraping}
           />
         )}
       </div>
 
       {/* Server Selector Bar */}
-      {!loading && !error && (
+      {!initialLoading && !error && (
         <div className="container server-selector-bar">
           <span className="server-label">Change Server:</span>
           <div className="server-buttons">
@@ -439,7 +653,7 @@ export default function PlayerPage() {
       )}
 
       {/* Up Next / Episode Navigation in Player */}
-      {!loading && !error && currentEpisode && (
+      {!initialLoading && !error && currentEpisode && (
         <div className="container player-episodes-navigation">
           <div className="episodes-header-row">
             <div className="episodes-title-area">
@@ -463,26 +677,68 @@ export default function PlayerPage() {
                 </button>
                 
                 {showBatchDropdown && (
-                  <div className="season-dropdown-menu episode-batch-dropdown-menu" style={{ minWidth: "180px", width: "max-content", right: 0, left: "auto" }}>
+                  <div className="season-dropdown-menu episode-batch-dropdown-menu" style={{ minWidth: "280px", width: "max-content", right: 0, left: "auto" }}>
                     <div className="dropdown-section-header">Episode Batches</div>
                     {batches.map((batch) => {
                       const isActive = batch.index === selectedBatchIndex;
                       return (
                         <button
                           key={batch.index}
-                          className={`season-dropdown-item ${isActive ? "active" : ""}`}
+                          className={`season-dropdown-item ${isActive ? "active" : ""} ${batch.isFinished ? "finished" : ""}`}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            gap: "1.2rem",
+                            padding: "8px 12px",
+                            flexDirection: "row",
+                            width: "100%",
+                            border: "none",
+                            background: "transparent",
+                            cursor: "pointer"
+                          }}
                           onClick={() => {
                             setSelectedBatchIndex(batch.index);
                             setShowBatchDropdown(false);
                           }}
                           type="button"
                         >
-                          <span>
-                            {batch.label}
-                          </span>
-                          {isActive && (
-                            <Check size={14} className="finished-check" style={{ color: "var(--primary)" }} />
-                          )}
+                          <div style={{ display: "flex", alignItems: "center", gap: "6px", minWidth: 0, flex: 1 }}>
+                            {batch.isFinished && (
+                              <Check size={14} style={{ color: "#46D369", flexShrink: 0 }} />
+                            )}
+                            <span style={{ textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap", margin: 0, color: "inherit", font: "inherit", fontWeight: isActive ? "700" : "500" }}>
+                              {batch.label}
+                            </span>
+                          </div>
+                          <div style={{ display: "flex", alignItems: "center", gap: "10px", flexShrink: 0 }}>
+                            <span style={{ fontSize: "0.75rem", color: "var(--text-secondary)", fontWeight: "600" }}>
+                              {batch.episodes.length} {batch.episodes.length === 1 ? "Ep" : "Eps"}
+                            </span>
+                            {currentUser && activeProfile && (
+                              <button
+                                type="button"
+                                onClick={async (e) => {
+                                  e.stopPropagation();
+                                  await markBatchAsWatched(batch);
+                                }}
+                                style={{
+                                  background: "none",
+                                  border: "none",
+                                  cursor: "pointer",
+                                  color: batch.isFinished ? "#46D369" : "var(--text-muted)",
+                                  padding: "2px",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                  transition: "color 0.2s"
+                                }}
+                                title="Mark all in this batch as watched"
+                              >
+                                <CheckSquare size={16} />
+                              </button>
+                            )}
+                          </div>
                         </button>
                       );
                     })}
@@ -703,6 +959,12 @@ export default function PlayerPage() {
         .season-dropdown-item.active {
           background: rgba(229, 9, 20, 0.1);
           color: var(--primary);
+        }
+        .season-dropdown-item.finished {
+          opacity: 0.7;
+        }
+        .season-dropdown-item.finished.active {
+          background: rgba(229, 9, 20, 0.08);
         }
         
         .nav-ep-btn.filler {

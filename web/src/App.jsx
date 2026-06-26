@@ -19,6 +19,7 @@ import AuthPage from "./pages/AuthPage";
 import ProfileSelection from "./pages/ProfileSelection";
 import NewAndHotPage from "./pages/NewAndHotPage";
 import MyAniStreamPage from "./pages/MyAniStreamPage";
+import SeasonalPage from "./pages/SeasonalPage";
 
 function OrientationGuard() {
   const location = useLocation();
@@ -303,6 +304,17 @@ export default function App() {
                 <RequireProfile>
                   <AppLayout>
                     <MyAniStreamPage />
+                  </AppLayout>
+                </RequireProfile>
+              } 
+            />
+
+            <Route 
+              path="/seasonal" 
+              element={
+                <RequireProfile>
+                  <AppLayout>
+                    <SeasonalPage />
                   </AppLayout>
                 </RequireProfile>
               } 

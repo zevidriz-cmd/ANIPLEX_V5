@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useMemo } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { doc, getDoc, setDoc, deleteDoc } from "firebase/firestore";
 import { db } from "../config/firebase";
@@ -8,11 +8,13 @@ import {
   getAnimeDetail, getEpisodes, getCharacters, 
   getSeasons, resolveMAL, search 
 } from "../services/api";
+import { resolveTmdId, fetchTmdSeasons, buildArcsFromSeasons } from "../services/tmdb";
 import { DetailsShimmer } from "../components/Shimmer";
 import AnimeCard from "../components/AnimeCard";
 import { 
   Play, Bookmark, BookmarkCheck, Star, Users, List, 
-  ChevronRight, ArrowLeft, RefreshCw, ChevronDown, Film 
+  ChevronRight, ArrowLeft, RefreshCw, ChevronDown, Film, Check, RotateCcw,
+  CheckSquare, Link2
 } from "lucide-react";
 
 // Seasons cache to prevent redundant fetching and shimmer loading
@@ -218,6 +220,9 @@ export default function DetailPage() {
   const [characters, setCharacters] = useState([]);
   const [seasons, setSeasons] = useState([]);
   const [seasonsLoading, setSeasonsLoading] = useState(false);
+  const [relations, setRelations] = useState([]);
+  const [relationsLoading, setRelationsLoading] = useState(false);
+  const [resolvingRelationId, setResolvingRelationId] = useState(null);
   const [audioPreference, setAudioPreference] = useState(() => {
     return localStorage.getItem("anistream_audio_preference") || "sub";
   }); // 'sub' or 'dub' loaded from settings
@@ -251,22 +256,42 @@ export default function DetailPage() {
     isResume = true;
   }
 
-  // Batching logic: 25 episodes per batch
-  const BATCH_SIZE = 25;
-  const batches = [];
-  if (episodes && episodes.length > 0) {
+  // Batching & Arc logic
+  const [tmdbSeasons, setTmdbSeasons] = useState(null);
+
+  const batches = useMemo(() => {
+    if (!episodes || episodes.length === 0) return [];
+    
+    // If we have TMDb seasons, use them to build story arcs!
+    if (tmdbSeasons && tmdbSeasons.length > 0) {
+      const arcs = buildArcsFromSeasons(tmdbSeasons, episodes);
+      if (arcs && arcs.length > 0) {
+        return arcs.map(arc => {
+          const isFinished = arc.episodes.every(ep => {
+            return historyItem?.episodeId === ep.episodeId || (historyItem?.episodeNumber > ep.number);
+          });
+          return {
+            ...arc,
+            isFinished
+          };
+        });
+      }
+    }
+    
+    // Fallback: standard 25-episode batches
+    const BATCH_SIZE = 25;
+    const fallbackBatches = [];
     for (let i = 0; i < episodes.length; i += BATCH_SIZE) {
       const start = i + 1;
       const end = Math.min(i + BATCH_SIZE, episodes.length);
       const batchEps = episodes.slice(i, i + BATCH_SIZE);
       
-      // A batch is completed/finished if all episodes in it have been watched
       const isFinished = batchEps.every(ep => {
         return historyItem?.episodeId === ep.episodeId || (historyItem?.episodeNumber > ep.number);
       });
 
-      batches.push({
-        index: batches.length,
+      fallbackBatches.push({
+        index: fallbackBatches.length,
         start,
         end,
         label: `Episodes ${start}-${end}`,
@@ -274,17 +299,18 @@ export default function DetailPage() {
         isFinished
       });
     }
-  }
+    return fallbackBatches;
+  }, [episodes, historyItem, tmdbSeasons]);
 
   // Active episodes for current batch selection
   const activeEpisodes = batches.length > 1 ? (batches[selectedBatchIndex]?.episodes || []) : episodes;
 
   // Auto-select the batch index containing the user's next episode to watch
   useEffect(() => {
-    if (episodes && episodes.length > BATCH_SIZE) {
+    if (batches.length > 1) {
       const targetEp = playEpisodeNumber || 1;
-      const idx = Math.floor((targetEp - 1) / BATCH_SIZE);
-      if (idx >= 0 && idx < Math.ceil(episodes.length / BATCH_SIZE)) {
+      const idx = batches.findIndex(b => targetEp >= b.start && targetEp <= b.end);
+      if (idx >= 0 && idx < batches.length) {
         setSelectedBatchIndex(idx);
       } else {
         setSelectedBatchIndex(0);
@@ -292,7 +318,82 @@ export default function DetailPage() {
     } else {
       setSelectedBatchIndex(0);
     }
-  }, [episodes, playEpisodeNumber]);
+  }, [batches, playEpisodeNumber]);
+
+  // Load TMDb story arcs
+  useEffect(() => {
+    const malId = detail?.anime?.info?.malId;
+    if (!malId || malId === "0" || malId === "") {
+      setTmdbSeasons(null);
+      return;
+    }
+
+    let isMounted = true;
+    async function getArcs() {
+      try {
+        const tmdbId = await resolveTmdId(malId);
+        if (tmdbId && isMounted) {
+          const seasons = await fetchTmdSeasons(tmdbId);
+          if (seasons && seasons.length > 0 && isMounted) {
+            setTmdbSeasons(seasons);
+          }
+        }
+      } catch (err) {
+        console.warn("Failed to load TMDb story arcs:", err);
+      }
+    }
+    
+    getArcs();
+    return () => {
+      isMounted = false;
+    };
+  }, [detail]);
+
+  // Load Jikan Relations
+  useEffect(() => {
+    const malId = detail?.anime?.info?.malId;
+    if (!malId || malId === "0" || malId === "") {
+      setRelations([]);
+      return;
+    }
+
+    let isMounted = true;
+    async function loadRelations() {
+      setRelationsLoading(true);
+      try {
+        const res = await fetch(`https://api.jikan.moe/v4/anime/${malId}/relations`);
+        if (!res.ok) throw new Error("Relations fetch failed");
+        const json = await res.json();
+        if (isMounted) {
+          const rawRelations = json.data || [];
+          const animeRelations = [];
+          for (const relGroup of rawRelations) {
+            const groupName = relGroup.relation;
+            const animeEntries = (relGroup.entry || []).filter(e => e.type === "anime");
+            
+            for (const entry of animeEntries) {
+              animeRelations.push({
+                relation: groupName,
+                malId: entry.mal_id,
+                title: entry.name,
+                url: entry.url
+              });
+            }
+          }
+          setRelations(animeRelations);
+        }
+      } catch (err) {
+        console.warn("Failed to fetch relations:", err);
+      } finally {
+        if (isMounted) setRelationsLoading(false);
+      }
+    }
+
+    loadRelations();
+    return () => {
+      isMounted = false;
+    };
+  }, [detail]);
 
   useEffect(() => {
     async function loadData() {
@@ -650,6 +751,100 @@ export default function DetailPage() {
     }
   };
 
+  const handleRelationClick = async (rel) => {
+    if (resolvingRelationId) return;
+    setResolvingRelationId(rel.malId);
+    try {
+      const res = await resolveMAL(rel.malId);
+      if (res && res.anikotoId) {
+        navigate(`/anime/${res.anikotoId}`);
+      } else {
+        alert(`"${rel.title}" is not directly linked, searching AniStream...`);
+        navigate(`/search?keyword=${encodeURIComponent(rel.title)}`);
+      }
+    } catch (err) {
+      console.error("Failed to resolve relation:", err);
+      navigate(`/search?keyword=${encodeURIComponent(rel.title)}`);
+    } finally {
+      setResolvingRelationId(null);
+    }
+  };
+
+  const markBatchAsWatched = async (batch) => {
+    if (!currentUser || !activeProfile || !detail || !episodes || episodes.length === 0) return;
+    
+    try {
+      const batchEps = batch.episodes;
+      if (!batchEps || batchEps.length === 0) return;
+      const lastEpInBatch = batchEps[batchEps.length - 1];
+      
+      const lastIndex = episodes.findIndex(ep => ep.episodeId === lastEpInBatch.episodeId);
+      
+      let targetEp = null;
+      if (lastIndex !== -1 && lastIndex < episodes.length - 1) {
+        targetEp = episodes[lastIndex + 1];
+      }
+      
+      let data;
+      if (targetEp) {
+        data = {
+          animeId,
+          animeTitle: detail.anime.info.name,
+          poster: detail.anime.info.poster,
+          episodeId: targetEp.episodeId,
+          episodeNumber: targetEp.number,
+          episodeTitle: targetEp.title || `Episode ${targetEp.number}`,
+          progressPosition: 0,
+          totalDuration: 0,
+          audioCategory: audioPreference,
+          updatedAt: Date.now()
+        };
+      } else {
+        const lastEp = episodes[episodes.length - 1];
+        data = {
+          animeId,
+          animeTitle: detail.anime.info.name,
+          poster: detail.anime.info.poster,
+          episodeId: lastEp.episodeId,
+          episodeNumber: lastEp.number + 1,
+          episodeTitle: lastEp.title || `Episode ${lastEp.number}`,
+          progressPosition: 1,
+          totalDuration: 1,
+          audioCategory: audioPreference,
+          updatedAt: Date.now()
+        };
+        
+        // Automatically mark as completed in watchlist
+        const watchlistRef = doc(db, "users", currentUser.uid, "profiles", activeProfile.id, "watchlist", animeId);
+        await setDoc(watchlistRef, {
+          id: animeId,
+          name: detail.anime.info.name,
+          poster: detail.anime.info.poster,
+          status: "completed",
+          addedAt: Date.now()
+        }, { merge: true });
+        setIsWatchlisted(true);
+        setWatchlistStatus("completed");
+      }
+      
+      const docRef = doc(db, "users", currentUser.uid, "profiles", activeProfile.id, "history", animeId);
+      await setDoc(docRef, data);
+      setHistoryItem(data);
+    } catch (err) {
+      console.warn("Failed to mark batch as watched:", err);
+    }
+  };
+
+  const getRelationColor = (relation) => {
+    const rel = relation.toLowerCase();
+    if (rel.includes("prequel")) return "#ff4d4d";
+    if (rel.includes("sequel")) return "#46D369";
+    if (rel.includes("parent")) return "#00A8E8";
+    if (rel.includes("side story")) return "#E5A93B";
+    if (rel.includes("spin-off") || rel.includes("spinoff")) return "#9B5DE5";
+    return "var(--text-muted)";
+  };
+
   if (loading) {
     return <DetailsShimmer />;
   }
@@ -674,6 +869,37 @@ export default function DetailPage() {
   const currentSeasonTitle = currentSeason 
     ? getSeasonDisplayTitle(currentSeason)
     : (info?.name || "Select Season");
+
+  // Dynamically resolve season prefix (e.g. "S5" or "MOV") to display correct season in episode lists rather than hardcoding "S1"
+  const getEpisodeSeasonPrefix = () => {
+    if (currentSeason) {
+      const badge = getShortSeasonBadge(currentSeason);
+      if (badge && badge !== "S1") {
+        return badge;
+      }
+    }
+    
+    // As a fallback (e.g. before seasons load), try matching patterns in the current anime's name
+    const title = info?.name || "";
+    const titleLower = title.toLowerCase();
+    const seasonMatch = titleLower.match(/(\d+)(st|nd|rd|th)?\s*season/i) || titleLower.match(/season\s*(\d+)/i);
+    if (seasonMatch) {
+      const num = seasonMatch[1];
+      const partMatch = titleLower.match(/part\s*(\d+)/i);
+      if (partMatch) {
+        return `S${num} P${partMatch[1]}`;
+      }
+      return `S${num}`;
+    }
+    
+    // Second fallback: if currentSeason was found but had "S1" badge, return that
+    if (currentSeason) {
+      return getShortSeasonBadge(currentSeason);
+    }
+    
+    return "S1";
+  };
+  const seasonPrefix = getEpisodeSeasonPrefix();
 
   const tvSeasons = seasons.filter(s => {
     return getMediaType(s) === "TV";
@@ -1085,7 +1311,7 @@ export default function DetailPage() {
                       {episodeDropdownOpen && (
                         <>
                           <div className="dropdown-backplate" onClick={() => setEpisodeDropdownOpen(false)} />
-                          <div className="season-dropdown-menu episode-batch-dropdown-menu" style={{ minWidth: "180px", width: "max-content", right: 0, left: "auto" }}>
+                          <div className="season-dropdown-menu episode-batch-dropdown-menu" style={{ minWidth: "280px", width: "max-content", right: 0, left: "auto" }}>
                             <div className="dropdown-section">
                               <div className="dropdown-section-header">Episode Batches</div>
                               {batches.map((batch) => {
@@ -1094,19 +1320,55 @@ export default function DetailPage() {
                                   <div
                                     key={batch.index}
                                     className={`season-dropdown-item ${isActive ? "active" : ""} ${batch.isFinished ? "finished" : ""}`}
+                                    style={{
+                                      display: "flex",
+                                      alignItems: "center",
+                                      justifyContent: "space-between",
+                                      gap: "1.2rem",
+                                      padding: "8px 12px",
+                                      flexDirection: "row"
+                                    }}
                                     onClick={() => {
                                       setSelectedBatchIndex(batch.index);
                                       setEpisodeDropdownOpen(false);
                                     }}
                                   >
-                                    <div className="dropdown-item-season-title">
-                                      {batch.label}
+                                    <div style={{ display: "flex", alignItems: "center", gap: "6px", minWidth: 0, flex: 1 }}>
+                                      {batch.isFinished && (
+                                        <Check size={14} style={{ color: "#46D369", flexShrink: 0 }} />
+                                      )}
+                                      <span className="dropdown-item-season-title" style={{ textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap", margin: 0 }}>
+                                        {batch.label}
+                                      </span>
                                     </div>
-                                    {batch.isFinished && (
-                                      <div className="dropdown-item-season-meta" style={{ fontSize: "0.6rem", color: "#7f7f7f", marginTop: "2px" }}>
-                                        Completed
-                                      </div>
-                                    )}
+                                    <div style={{ display: "flex", alignItems: "center", gap: "10px", flexShrink: 0 }}>
+                                      <span style={{ fontSize: "0.75rem", color: "var(--text-secondary)", fontWeight: "600" }}>
+                                        {batch.episodes.length} {batch.episodes.length === 1 ? "Ep" : "Eps"}
+                                      </span>
+                                      {currentUser && activeProfile && (
+                                        <button
+                                          type="button"
+                                          onClick={async (e) => {
+                                            e.stopPropagation();
+                                            await markBatchAsWatched(batch);
+                                          }}
+                                          style={{
+                                            background: "none",
+                                            border: "none",
+                                            cursor: "pointer",
+                                            color: batch.isFinished ? "#46D369" : "var(--text-muted)",
+                                            padding: "2px",
+                                            display: "flex",
+                                            alignItems: "center",
+                                            justifyContent: "center",
+                                            transition: "color 0.2s"
+                                          }}
+                                          title="Mark all in this batch as watched"
+                                        >
+                                          <CheckSquare size={16} />
+                                        </button>
+                                      )}
+                                    </div>
                                   </div>
                                 );
                               })}
@@ -1122,14 +1384,22 @@ export default function DetailPage() {
               
               <div className="episodes-horizontal-list">
                 {activeEpisodes.map((ep) => {
-                  const isWatched = historyItem?.episodeId === ep.episodeId || (historyItem?.episodeNumber > ep.number);
+                  // Determine episode watch state: completed, in-progress, or unwatched
                   let progressPercent = 0;
+                  let isCompleted = false;
+                  let isInProgress = false;
+
                   if (historyItem) {
                     if (historyItem.episodeId === ep.episodeId) {
+                      // This is the episode the user is currently on
                       if (historyItem.totalDuration > 0) {
                         progressPercent = (historyItem.progressPosition / historyItem.totalDuration) * 100;
+                        isCompleted = progressPercent >= 90;
+                        isInProgress = !isCompleted && progressPercent > 0;
                       }
                     } else if (historyItem.episodeNumber > ep.number) {
+                      // User has moved past this episode
+                      isCompleted = true;
                       progressPercent = 100;
                     }
                   }
@@ -1138,25 +1408,28 @@ export default function DetailPage() {
                     <Link 
                       key={ep.episodeId} 
                       to={`/watch/${animeId}/${ep.episodeId}?audio=${audioPreference}`} 
-                      className={`episode-list-card ${isWatched ? "watched" : ""}`}
+                      className={`episode-list-card ${isCompleted ? "completed" : ""}`}
                     >
                       <div className="episode-thumbnail-wrapper">
                         <img src={info.poster} className="episode-thumbnail-img" alt={ep.title || `Episode ${ep.number}`} />
                         
-                        <div className="circle-play-overlay">
-                          <div className="circle-play-btn">
-                            <Play size={16} fill="currentColor" />
+                        {/* Completed: gray overlay + replay icon */}
+                        {isCompleted ? (
+                          <div className="completed-overlay">
+                            <div className="replay-icon-btn">
+                              <RotateCcw size={18} />
+                            </div>
                           </div>
-                        </div>
-
-                        {isWatched && (
-                          <div className="watched-banner">
-                            <BookmarkCheck size={14} style={{ color: "var(--primary)" }} />
-                            <span>Watched</span>
+                        ) : (
+                          <div className="circle-play-overlay">
+                            <div className="circle-play-btn">
+                              <Play size={16} fill="currentColor" />
+                            </div>
                           </div>
                         )}
 
-                        {progressPercent > 0 && (
+                        {/* In-progress: show progress bar only (no badge) */}
+                        {isInProgress && (
                           <div className="ep-progress-bar-container" style={{ height: "4px", bottom: 0, position: "absolute", left: 0, right: 0 }}>
                             <div className="ep-progress-bar-fill" style={{ width: `${progressPercent}%`, backgroundColor: "var(--primary)", height: "100%" }}></div>
                           </div>
@@ -1167,7 +1440,7 @@ export default function DetailPage() {
                         <span className="episode-series-name">{info.name}</span>
                         <div className="episode-title-row">
                           <h4 className="episode-list-title">
-                            S1 E{ep.number} – {ep.title || `Episode ${ep.number}`}
+                            {seasonPrefix} E{ep.number} – {ep.title || `Episode ${ep.number}`}
                           </h4>
                           {ep.isFiller && <span className="filler-tag" style={{ marginLeft: "6px" }}>Filler</span>}
                           {ep.isRecap && <span className="recap-tag" style={{ marginLeft: "6px" }}>Recap</span>}
@@ -1250,6 +1523,73 @@ export default function DetailPage() {
                     <h4 className="season-title" title={season.title}>{season.title}</h4>
                   </div>
                 ))}
+              </div>
+            </section>
+          )}
+
+          {/* Related Anime Chain */}
+          {relations.length > 0 && (
+            <section className="detail-section animate-slide-up">
+              <h2 className="section-title"><Link2 size={18} /> Related Anime</h2>
+              <div className="relations-scroll-row" style={{
+                display: "flex",
+                gap: "12px",
+                overflowX: "auto",
+                padding: "4px 4px 12px 4px",
+                scrollbarWidth: "thin"
+              }}>
+                {relations.map((rel) => {
+                  const isResolving = resolvingRelationId === rel.malId;
+                  return (
+                    <button
+                      key={rel.malId}
+                      onClick={() => handleRelationClick(rel)}
+                      disabled={isResolving}
+                      type="button"
+                      className={`relation-badge-card ${isResolving ? "resolving" : ""}`}
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        alignItems: "flex-start",
+                        justifyContent: "center",
+                        padding: "12px 16px",
+                        background: "var(--bg-card)",
+                        border: "1px solid var(--border)",
+                        borderRadius: "8px",
+                        cursor: "pointer",
+                        transition: "all 0.2s ease-in-out",
+                        minWidth: "180px",
+                        maxWidth: "240px",
+                        textAlign: "left",
+                        flexShrink: 0
+                      }}
+                    >
+                      <span style={{
+                        fontSize: "0.7rem",
+                        textTransform: "uppercase",
+                        letterSpacing: "0.05em",
+                        fontWeight: "800",
+                        color: getRelationColor(rel.relation),
+                        marginBottom: "4px"
+                      }}>
+                        {rel.relation}
+                      </span>
+                      <span style={{
+                        fontSize: "0.85rem",
+                        fontWeight: "600",
+                        color: "white",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        display: "-webkit-box",
+                        WebkitLineClamp: 2,
+                        WebkitBoxOrient: "vertical",
+                        lineHeight: "1.3"
+                      }}>
+                        {isResolving ? "Resolving..." : rel.title}
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
             </section>
           )}
@@ -1666,8 +2006,8 @@ export default function DetailPage() {
           background-color: #1c1c1c;
           transform: translateY(-2px);
         }
-        .episode-grid-card.watched {
-          opacity: 0.65;
+        .episode-grid-card.completed {
+          opacity: 0.55;
           border-color: rgba(255, 255, 255, 0.1);
         }
         .ep-num {
@@ -2246,6 +2586,29 @@ export default function DetailPage() {
           }
           .ep-title {
             font-size: 0.85rem;
+          }
+          
+          /* Dropdown alignment fixes on mobile to prevent left-side overflow */
+          .section-header-row {
+            position: relative !important;
+          }
+          .episodes-title-wrapper {
+            position: static !important;
+          }
+          .season-selector-dropdown-wrapper {
+            position: static !important;
+          }
+          .season-dropdown-menu {
+            left: 16px !important;
+            right: 16px !important;
+            width: auto !important;
+            max-width: calc(100vw - 32px) !important;
+            margin: 0 auto !important;
+            top: calc(100% + 6px) !important;
+            z-index: 200 !important;
+          }
+          .dropdown-backplate {
+            z-index: 199 !important;
           }
         }
       `}</style>

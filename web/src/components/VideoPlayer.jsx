@@ -3,7 +3,7 @@ import Hls from "hls.js";
 import { 
   Play, Pause, RotateCcw, RotateCw, Volume2, VolumeX, 
   Maximize, Minimize, Settings, Subtitles, SkipForward,
-  Lock, LockOpen, ArrowLeft, Loader2, X
+  Lock, LockOpen, ArrowLeft, Loader2, X, PictureInPicture2
 } from "lucide-react";
 
 export default function VideoPlayer({ 
@@ -15,11 +15,14 @@ export default function VideoPlayer({
   onProgress, 
   onEnded, 
   embedUrl,
+  fallbackNotice,
+  loadingStatus,
   animeTitle,
   episodeNumber,
   onBack,
   nextEpisode,
-  onNext
+  onNext,
+  externalLoading = false
 }) {
   const videoRef = useRef(null);
   const containerRef = useRef(null);
@@ -38,8 +41,15 @@ export default function VideoPlayer({
   const [isRotatedFallback, setIsRotatedFallback] = useState(false);
   const [showControls, setShowControls] = useState(true);
   const [showSettings, setShowSettings] = useState(false);
-  const [playbackSpeed, setPlaybackSpeed] = useState(1);
+  const [playbackSpeed, setPlaybackSpeed] = useState(() => {
+    const saved = parseFloat(localStorage.getItem("anistream_playback_speed"));
+    return saved && [0.5, 0.75, 1, 1.25, 1.5, 2].includes(saved) ? saved : 1;
+  });
   const [aspectRatio, setAspectRatio] = useState("fit"); // "fit", "stretch", "zoom"
+  const [isPiP, setIsPiP] = useState(false);
+  const [isLongPressSpeedUp, setIsLongPressSpeedUp] = useState(false);
+  const longPressTimeoutRef = useRef(null);
+  const wasLongPressActiveRef = useRef(false);
   
   const [showSkipIntro, setShowSkipIntro] = useState(false);
   const [showSkipOutro, setShowSkipOutro] = useState(false);
@@ -62,10 +72,198 @@ export default function VideoPlayer({
   const [hudTimeout, setHudTimeout] = useState(null);
   const [isLocked, setIsLocked] = useState(false);
 
-  // Subtitle custom styles
-  const subSize = localStorage.getItem("anistream_subtitle_size") || "medium";
-  const subColor = localStorage.getItem("anistream_subtitle_color") || "white";
-  const subBg = localStorage.getItem("anistream_subtitle_bg") || "semi-transparent";
+  // Subtitle custom states
+  const [subSize, setSubSize] = useState(22);
+  const [subStyle, setSubStyle] = useState(1);
+  const [subColor, setSubColor] = useState("#FFFFFF");
+  const [subPosition, setSubPosition] = useState(10);
+  const [subOpacity, setSubOpacity] = useState(60);
+
+  const [activeTrackIndex, setActiveTrackIndex] = useState(-1);
+  const [currentCuesText, setCurrentCuesText] = useState("");
+  const [containerWidth, setContainerWidth] = useState(800);
+  const [showNotice, setShowNotice] = useState(false);
+  const [noticeData, setNoticeData] = useState(null);
+
+  useEffect(() => {
+    if (fallbackNotice) {
+      setNoticeData(fallbackNotice);
+      setShowNotice(true);
+      const timer = setTimeout(() => {
+        setShowNotice(false);
+      }, 10000);
+      return () => clearTimeout(timer);
+    } else {
+      setShowNotice(false);
+      setNoticeData(null);
+    }
+  }, [fallbackNotice]);
+
+  const loadSubtitleSettings = () => {
+    const savedSize = localStorage.getItem("anistream_subtitle_size");
+    let initialSize = 22;
+    if (savedSize === "small") initialSize = 16;
+    else if (savedSize === "medium") initialSize = 22;
+    else if (savedSize === "large") initialSize = 30;
+    else if (savedSize) {
+      const parsed = parseInt(savedSize, 10);
+      if (!isNaN(parsed)) initialSize = parsed;
+    }
+
+    const savedColor = localStorage.getItem("anistream_subtitle_color");
+    let initialColor = "#FFFFFF";
+    if (savedColor === "white" || !savedColor) initialColor = "#FFFFFF";
+    else if (savedColor === "yellow") initialColor = "#FFE600";
+    else initialColor = savedColor;
+
+    let initialOpacity = 60;
+    const savedBg = localStorage.getItem("anistream_subtitle_bg");
+    if (savedBg === "transparent") initialOpacity = 0;
+    else if (savedBg === "opaque") initialOpacity = 100;
+    else if (savedBg === "semi-transparent") initialOpacity = 60;
+    else {
+      const savedOpacityVal = localStorage.getItem("anistream_subtitle_bg_opacity");
+      const parsed = parseInt(savedOpacityVal, 10);
+      if (!isNaN(parsed)) initialOpacity = parsed;
+    }
+
+    const savedStyle = parseInt(localStorage.getItem("anistream_subtitle_style"), 10) || 1;
+    const savedPos = parseInt(localStorage.getItem("anistream_subtitle_position"), 10) || 10;
+
+    setSubSize(initialSize);
+    setSubStyle(savedStyle);
+    setSubColor(initialColor);
+    setSubPosition(savedPos);
+    setSubOpacity(initialOpacity);
+  };
+
+  // Load and listen to settings updates
+  useEffect(() => {
+    loadSubtitleSettings();
+    window.addEventListener("anistream_subtitle_settings_changed", loadSubtitleSettings);
+    return () => {
+      window.removeEventListener("anistream_subtitle_settings_changed", loadSubtitleSettings);
+    };
+  }, []);
+
+  // Measure container width
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const resizeObserver = new ResizeObserver((entries) => {
+      for (let entry of entries) {
+        setContainerWidth(entry.contentRect.width);
+      }
+    });
+    resizeObserver.observe(containerRef.current);
+    return () => resizeObserver.disconnect();
+  }, []);
+
+  // Set default active track
+  useEffect(() => {
+    if (tracks && tracks.length > 0) {
+      const englishIndex = tracks.findIndex(t => t.label?.toLowerCase() === "english");
+      const defaultIndex = tracks.findIndex(t => t.default || t.isDefault);
+      
+      if (englishIndex !== -1) {
+        setActiveTrackIndex(englishIndex);
+      } else if (defaultIndex !== -1) {
+        setActiveTrackIndex(defaultIndex);
+      } else {
+        setActiveTrackIndex(0);
+      }
+    } else {
+      setActiveTrackIndex(-1);
+    }
+  }, [tracks]);
+
+  // Handle track modes (set selected track hidden, others disabled)
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    const updateTrackModes = () => {
+      const textTracks = video.textTracks;
+      const selectedTrack = tracks[activeTrackIndex];
+
+      for (let i = 0; i < textTracks.length; i++) {
+        const t = textTracks[i];
+        const isMatch = selectedTrack && (t.label === selectedTrack.label || (textTracks.length === tracks.length && i === activeTrackIndex));
+        
+        if (isMatch) {
+          t.mode = "hidden";
+        } else {
+          t.mode = "disabled";
+        }
+      }
+    };
+
+    updateTrackModes();
+    
+    const handleTrackAdded = () => {
+      updateTrackModes();
+    };
+
+    video.textTracks.addEventListener("addtrack", handleTrackAdded);
+    video.addEventListener("loadeddata", updateTrackModes);
+
+    return () => {
+      if (video) {
+        video.textTracks.removeEventListener("addtrack", handleTrackAdded);
+        video.removeEventListener("loadeddata", updateTrackModes);
+      }
+    };
+  }, [activeTrackIndex, src, tracks]);
+
+  // Monitor track cue changes
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    const handleCueChange = (e) => {
+      const track = e.target;
+      if (track.mode === "hidden") {
+        const activeCues = track.activeCues;
+        if (activeCues && activeCues.length > 0) {
+          const text = Array.from(activeCues)
+            .map(cue => cue.text)
+            .join("\n");
+          setCurrentCuesText(text);
+        } else {
+          setCurrentCuesText("");
+        }
+      }
+    };
+
+    const registerTrackListeners = () => {
+      Array.from(video.textTracks).forEach(track => {
+        track.removeEventListener("cuechange", handleCueChange);
+        track.addEventListener("cuechange", handleCueChange);
+      });
+    };
+
+    registerTrackListeners();
+
+    const handleTrackAdded = (e) => {
+      e.track.addEventListener("cuechange", handleCueChange);
+    };
+
+    video.textTracks.addEventListener("addtrack", handleTrackAdded);
+
+    return () => {
+      if (video) {
+        video.textTracks.removeEventListener("addtrack", handleTrackAdded);
+        Array.from(video.textTracks).forEach(track => {
+          track.removeEventListener("cuechange", handleCueChange);
+        });
+      }
+    };
+  }, [activeTrackIndex, src, tracks]);
+
+  useEffect(() => {
+    if (activeTrackIndex === -1) {
+      setCurrentCuesText("");
+    }
+  }, [activeTrackIndex]);
 
   const showHUD = (type, value) => {
     setGestureHUD({ type, value });
@@ -131,6 +329,21 @@ export default function VideoPlayer({
       lastTapRef.current = { time: now, x };
     }
     postponeControlsHide();
+
+    // Long press speedup hold trigger on touchstart
+    wasLongPressActiveRef.current = false;
+    if (longPressTimeoutRef.current) {
+      clearTimeout(longPressTimeoutRef.current);
+    }
+    if (!isDoubleTap && e.touches.length === 1) {
+      longPressTimeoutRef.current = setTimeout(() => {
+        const video = videoRef.current;
+        if (video && !video.paused) {
+          setIsLongPressSpeedUp(true);
+          wasLongPressActiveRef.current = true;
+        }
+      }, 400);
+    }
   };
 
   const handlePlayerTouchMove = (e) => {
@@ -175,10 +388,31 @@ export default function VideoPlayer({
         setIsMuted(nextVolume === 0);
         showHUD("volume", `${Math.round(nextVolume * 100)}%`);
       }
+
+      // Clear the speedup timeout if they start swiping
+      if (longPressTimeoutRef.current) {
+        clearTimeout(longPressTimeoutRef.current);
+      }
+      if (isLongPressSpeedUp) {
+        setIsLongPressSpeedUp(false);
+        showHUD("speed", `${playbackSpeed}x`);
+      }
     }
   };
 
   const handlePlayerTouchEnd = (e) => {
+    if (longPressTimeoutRef.current) {
+      clearTimeout(longPressTimeoutRef.current);
+    }
+
+    if (isLongPressSpeedUp) {
+      setIsLongPressSpeedUp(false);
+      showHUD("speed", `${playbackSpeed}x`);
+      e.preventDefault();
+      touchRef.current.isSwipe = false;
+      return;
+    }
+
     if (touchRef.current.isPinch) {
       const ratio = touchRef.current.currentPinchRatio;
       if (ratio && ratio > 1.15) {
@@ -238,7 +472,59 @@ export default function VideoPlayer({
     touchRef.current.isSwipe = false;
   };
 
+  const handlePlayerMouseDown = (e) => {
+    if (e.button !== 0) return; // only left click
+    if (
+      e.target.closest(".control-btn") || 
+      e.target.closest(".player-back-btn") || 
+      e.target.closest(".progress-scrubber") || 
+      e.target.closest(".timeline-container") ||
+      e.target.closest(".timeline-input") ||
+      e.target.closest(".volume-slider") ||
+      e.target.closest(".settings-panel") || 
+      e.target.closest(".skip-time-overlay") || 
+      e.target.closest(".unlock-btn") ||
+      e.target.closest(".up-next-overlay")
+    ) {
+      return;
+    }
+    if (isLocked) return;
+
+    wasLongPressActiveRef.current = false;
+    if (longPressTimeoutRef.current) {
+      clearTimeout(longPressTimeoutRef.current);
+    }
+    longPressTimeoutRef.current = setTimeout(() => {
+      const video = videoRef.current;
+      if (video && !video.paused) {
+        setIsLongPressSpeedUp(true);
+        wasLongPressActiveRef.current = true;
+      }
+    }, 400);
+  };
+
+  const handlePlayerMouseUpOrLeave = (e) => {
+    if (longPressTimeoutRef.current) {
+      clearTimeout(longPressTimeoutRef.current);
+    }
+    if (isLongPressSpeedUp) {
+      setIsLongPressSpeedUp(false);
+      showHUD("speed", `${playbackSpeed}x`);
+      if (e) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    }
+  };
+
   const handleContainerClick = (e) => {
+    if (wasLongPressActiveRef.current) {
+      wasLongPressActiveRef.current = false;
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+
     if (showControls) {
       if (
         e.target.closest(".control-btn") || 
@@ -413,6 +699,13 @@ export default function VideoPlayer({
     video.volume = volume;
     video.muted = isMuted;
   }, [volume, isMuted]);
+
+  // Sync playback speed state
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    video.playbackRate = isLongPressSpeedUp ? 2.0 : playbackSpeed;
+  }, [playbackSpeed, isLongPressSpeedUp, isPlaying, src]);
 
   // Skip overlays check
   useEffect(() => {
@@ -618,6 +911,11 @@ export default function VideoPlayer({
           handleMuteToggle();
           showControlsAndResetTimeout();
           break;
+        case "p":
+        case "P":
+          e.preventDefault();
+          togglePiP();
+          break;
         default:
           break;
       }
@@ -639,8 +937,23 @@ export default function VideoPlayer({
     if (videoRef.current) {
       videoRef.current.playbackRate = speed;
       setPlaybackSpeed(speed);
+      localStorage.setItem("anistream_playback_speed", String(speed));
     }
     setShowSettings(false);
+  };
+
+  const togglePiP = async () => {
+    try {
+      if (document.pictureInPictureElement) {
+        await document.exitPictureInPicture();
+        setIsPiP(false);
+      } else if (videoRef.current && document.pictureInPictureEnabled) {
+        await videoRef.current.requestPictureInPicture();
+        setIsPiP(true);
+      }
+    } catch (err) {
+      console.warn("PiP error:", err);
+    }
   };
 
   const changeQuality = (qualityIdx) => {
@@ -707,6 +1020,18 @@ export default function VideoPlayer({
           </div>
         </div>
 
+        {showNotice && noticeData && (
+          <div className={`player-fallback-banner ${noticeData.type}`}>
+            <span className="notice-icon">
+              {noticeData.type === "warning" ? "⚠️" : "ℹ️"}
+            </span>
+            <span className="notice-message">{noticeData.message}</span>
+            <button className="notice-close" onClick={() => setShowNotice(false)} type="button">
+              <X size={14} />
+            </button>
+          </div>
+        )}
+
         <iframe 
           src={`${cleanedEmbedUrl}${separator}autoPlay=1`} 
           title="Episode Stream Player" 
@@ -716,6 +1041,52 @@ export default function VideoPlayer({
           className="iframe-player-frame"
         ></iframe>
         <style>{`
+          .player-fallback-banner {
+            position: absolute;
+            top: 60px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 50;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: rgba(18, 18, 18, 0.95);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            padding: 8px 16px;
+            border-radius: 6px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+            color: #fff;
+            font-size: 0.85rem;
+            pointer-events: auto;
+            animation: fadeInSub 0.3s ease;
+          }
+          .player-fallback-banner.warning {
+            border-left: 4px solid #f59e0b;
+          }
+          .player-fallback-banner.info {
+            border-left: 4px solid #3b82f6;
+          }
+          .player-fallback-banner .notice-icon {
+            font-size: 1rem;
+          }
+          .player-fallback-banner .notice-close {
+            background: none;
+            border: none;
+            color: rgba(255, 255, 255, 0.6);
+            cursor: pointer;
+            padding: 2px;
+            margin-left: 8px;
+            display: flex;
+            align-items: center;
+            transition: color 0.2s;
+          }
+          .player-fallback-banner .notice-close:hover {
+            color: #fff;
+          }
+          @keyframes fadeInSub {
+            from { opacity: 0; transform: translate(-50%, -10px); }
+            to { opacity: 1; transform: translate(-50%, 0); }
+          }
           .iframe-player-wrapper {
             position: relative;
             width: 100%;
@@ -787,15 +1158,74 @@ export default function VideoPlayer({
     );
   }
 
+  const getSubFontStyles = () => {
+    switch (subStyle) {
+      case 2: // Serif
+        return { fontFamily: "'Georgia', 'Times New Roman', serif", fontWeight: "normal", textShadow: "0 2px 4px rgba(0, 0, 0, 0.9)" };
+      case 3: // Monospace
+        return { fontFamily: "'Courier New', Courier, monospace", fontWeight: "normal", textShadow: "0 2px 4px rgba(0, 0, 0, 0.9)" };
+      case 4: // Outlined
+        return { fontFamily: "var(--font-family)", fontWeight: "bold", textShadow: "-1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000, 0 2px 4px rgba(0, 0, 0, 0.9)" };
+      case 5: // Bold
+        return { fontFamily: "var(--font-family)", fontWeight: "bold", textShadow: "0 2px 4px rgba(0, 0, 0, 0.9)" };
+      case 1: // Sans-Serif
+      default:
+        return { fontFamily: "var(--font-family)", fontWeight: "normal", textShadow: "0 2px 4px rgba(0, 0, 0, 0.9)" };
+    }
+  };
+
+  const cleanWebVttText = (text) => {
+    if (!text) return "";
+    return text
+      .replace(/<v[^>]*>/g, "")
+      .replace(/<\/v>/g, "")
+      .replace(/<c[^>]*>/g, "")
+      .replace(/<\/c>/g, "")
+      .replace(/<[^>]+>/g, (match) => {
+        if (['<b>', '</b>', '<i>', '</i>', '<u>', '</u>', '<br>', '<br/>', '<br />'].includes(match.toLowerCase())) {
+          return match;
+        }
+        return "";
+      });
+  };
+
+  const calculatedFontSize = Math.max(12, Math.min(48, (subSize * containerWidth) / 1000));
+
+  const subtitleOverlayStyles = {
+    position: "absolute",
+    left: "50%",
+    transform: "translateX(-50%)",
+    bottom: `${subPosition}%`,
+    zIndex: 36,
+    color: subColor,
+    fontSize: `${calculatedFontSize}px`,
+    backgroundColor: `rgba(0, 0, 0, ${subOpacity / 100})`,
+    padding: "6px 12px",
+    borderRadius: "6px",
+    textAlign: "center",
+    maxWidth: "85%",
+    wordBreak: "break-word",
+    lineHeight: "1.4",
+    pointerEvents: "none",
+    transition: "bottom 0.2s, font-size 0.1s",
+    ...getSubFontStyles()
+  };
+
   return (
     <div 
       className={`player-container ${isFullscreen ? "fullscreen" : ""} ${isRotatedFallback ? "fullscreen-portrait-rotated" : ""}`} 
       ref={containerRef}
       onMouseMove={showControlsAndResetTimeout}
-      onMouseLeave={() => isPlaying && setShowControls(false)}
+      onMouseDown={handlePlayerMouseDown}
+      onMouseUp={handlePlayerMouseUpOrLeave}
+      onMouseLeave={(e) => {
+        if (isPlaying) setShowControls(false);
+        handlePlayerMouseUpOrLeave(e);
+      }}
       onTouchStart={handlePlayerTouchStart}
       onTouchMove={handlePlayerTouchMove}
       onTouchEnd={handlePlayerTouchEnd}
+      onTouchCancel={handlePlayerTouchEnd}
       onClick={handleContainerClick}
       onDoubleClick={(e) => {
         if (
@@ -812,6 +1242,17 @@ export default function VideoPlayer({
         handleFullscreenToggle();
       }}
     >
+      {showNotice && noticeData && (
+        <div className={`player-fallback-banner ${noticeData.type}`}>
+          <span className="notice-icon">
+            {noticeData.type === "warning" ? "⚠️" : "ℹ️"}
+          </span>
+          <span className="notice-message">{noticeData.message}</span>
+          <button className="notice-close" onClick={() => setShowNotice(false)} type="button">
+            <X size={14} />
+          </button>
+        </div>
+      )}
       {/* Brightness Emulation Overlay */}
       <div 
         className="brightness-emulation-overlay" 
@@ -826,7 +1267,7 @@ export default function VideoPlayer({
       />
 
       {/* Loading Spinner */}
-      {isLoading && (
+      {(isLoading || externalLoading) && (
         <div className="player-loading-overlay flex-center">
           <Loader2 className="spin-icon" size={48} />
         </div>
@@ -841,8 +1282,17 @@ export default function VideoPlayer({
               {gestureHUD.type === "brightness" && `☀️ Brightness: ${gestureHUD.value}`}
               {gestureHUD.type === "seek" && `⏩ Seek: ${gestureHUD.value}`}
               {gestureHUD.type === "aspect" && `📺 Screen Fit: ${gestureHUD.value}`}
+              {gestureHUD.type === "speed" && `⚡ Speed: ${gestureHUD.value}`}
             </span>
           </div>
+        </div>
+      )}
+
+      {/* Long Press 2x Speed Pill */}
+      {isLongPressSpeedUp && (
+        <div className="long-press-speedup-pill">
+          <span className="speedup-icon">▶▶</span>
+          <span>2.0X SPEED</span>
         </div>
       )}
 
@@ -918,6 +1368,15 @@ export default function VideoPlayer({
           />
         ))}
       </video>
+
+      {/* Custom DOM Subtitle Overlay */}
+      {activeTrackIndex !== -1 && currentCuesText && (
+        <div 
+          className="custom-subtitle-overlay"
+          style={subtitleOverlayStyles}
+          dangerouslySetInnerHTML={{ __html: cleanWebVttText(currentCuesText).replace(/\n/g, "<br/>") }}
+        />
+      )}
 
       {/* Tap/Click capturing overlay when controls are hidden */}
       {!showControls && (
@@ -1154,6 +1613,34 @@ export default function VideoPlayer({
                         ))}
                       </div>
                     </div>
+                    {tracks.length > 0 && (
+                      <div className="settings-section">
+                        <h4>Subtitles</h4>
+                        <div className="settings-options scrollable">
+                          <button 
+                            onClick={() => {
+                              setActiveTrackIndex(-1);
+                              setShowSettings(false);
+                            }}
+                            className={activeTrackIndex === -1 ? "active" : ""}
+                          >
+                            Off
+                          </button>
+                          {tracks.map((track, idx) => (
+                            <button 
+                              key={idx} 
+                              onClick={() => {
+                                setActiveTrackIndex(idx);
+                                setShowSettings(false);
+                              }}
+                              className={activeTrackIndex === idx ? "active" : ""}
+                            >
+                              {track.label || `Track ${idx + 1}`}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                     {hlsQualities.length > 0 && (
                       <div className="settings-section">
                         <h4>Quality</h4>
@@ -1195,6 +1682,18 @@ export default function VideoPlayer({
                 </button>
               )}
  
+              {/* Picture-in-Picture */}
+              {document.pictureInPictureEnabled && (
+                <button 
+                  className={`control-btn ${isPiP ? "active" : ""}`}
+                  onClick={(e) => { e.stopPropagation(); togglePiP(); }}
+                  title="Picture-in-Picture (P)"
+                  type="button"
+                >
+                  <PictureInPicture2 size={20} />
+                </button>
+              )}
+
               <button className="control-btn" onClick={handleFullscreenToggle}>
                 {isFullscreen ? <Minimize size={20} /> : <Maximize size={20} />}
               </button>
@@ -1204,6 +1703,48 @@ export default function VideoPlayer({
       </div>
 
       <style>{`
+        .player-fallback-banner {
+          position: absolute;
+          top: 60px;
+          left: 50%;
+          transform: translateX(-50%);
+          z-index: 50;
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          background: rgba(18, 18, 18, 0.95);
+          border: 1px solid rgba(255, 255, 255, 0.15);
+          padding: 8px 16px;
+          border-radius: 6px;
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+          color: #fff;
+          font-size: 0.85rem;
+          pointer-events: auto;
+          animation: fadeInSub 0.3s ease;
+        }
+        .player-fallback-banner.warning {
+          border-left: 4px solid #f59e0b;
+        }
+        .player-fallback-banner.info {
+          border-left: 4px solid #3b82f6;
+        }
+        .player-fallback-banner .notice-icon {
+          font-size: 1rem;
+        }
+        .player-fallback-banner .notice-close {
+          background: none;
+          border: none;
+          color: rgba(255, 255, 255, 0.6);
+          cursor: pointer;
+          padding: 2px;
+          margin-left: 8px;
+          display: flex;
+          align-items: center;
+          transition: color 0.2s;
+        }
+        .player-fallback-banner .notice-close:hover {
+          color: #fff;
+        }
         .player-container {
           position: relative;
           width: 100%;
@@ -1511,22 +2052,22 @@ export default function VideoPlayer({
         /* Subtitle styles custom overrides using cue selector */
         video::cue {
           background-color: ${
-            subBg === "transparent"
+            subOpacity === 0
               ? "transparent"
-              : subBg === "opaque"
-              ? "rgba(0, 0, 0, 1.0)"
-              : "rgba(0, 0, 0, 0.6)"
+              : `rgba(0, 0, 0, ${subOpacity / 100})`
           } !important;
-          color: ${subColor === "yellow" ? "#FFE600" : "#FFFFFF"} !important;
+          color: ${subColor} !important;
           text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9) !important;
           font-family: var(--font-family) !important;
-          font-size: ${
-            subSize === "small"
-              ? "80%"
-              : subSize === "large"
-              ? "130%"
-              : "100%"
-          } !important;
+          font-size: ${subSize}px !important;
+        }
+
+        /* Custom DOM Subtitle Overlay */
+        .custom-subtitle-overlay {
+          pointer-events: none;
+          text-align: center;
+          user-select: none;
+          -webkit-user-select: none;
         }
 
         /* Loading Spinner Overlay */
@@ -1720,6 +2261,43 @@ export default function VideoPlayer({
         .unlock-btn:hover {
           background: white;
           color: var(--primary);
+        }
+
+        /* Long press 2x Speed Pill styles */
+        .long-press-speedup-pill {
+          position: absolute;
+          top: 24px;
+          left: 50%;
+          transform: translateX(-50%);
+          background: rgba(0, 0, 0, 0.75);
+          backdrop-filter: blur(8px);
+          border: 1px solid rgba(255, 255, 255, 0.15);
+          color: white;
+          padding: 8px 16px;
+          border-radius: 20px;
+          font-size: 0.85rem;
+          font-weight: 700;
+          letter-spacing: 0.05em;
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          z-index: 60;
+          pointer-events: none;
+          box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+          animation: scaleHUD 0.15s ease-out;
+        }
+        .speedup-icon {
+          color: var(--primary);
+          animation: blink 1.2s ease-in-out infinite;
+        }
+        @keyframes blink {
+          0%, 100% { opacity: 0.3; }
+          50% { opacity: 1; }
+        }
+        .player-container {
+          user-select: none;
+          -webkit-user-select: none;
+          -webkit-touch-callout: none;
         }
 
         @media (max-width: 768px) {

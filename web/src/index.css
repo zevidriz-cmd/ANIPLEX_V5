@@ -441,8 +441,12 @@ body {
   transform: translateX(4px);
 }
 
-.episode-list-card.watched {
-  opacity: 0.75;
+.episode-list-card.completed {
+  opacity: 0.55;
+}
+
+.episode-list-card.completed .episode-thumbnail-img {
+  filter: grayscale(60%) brightness(0.6);
 }
 
 .episode-thumbnail-wrapper {
@@ -467,22 +471,33 @@ body {
   transform: scale(1.05);
 }
 
-/* Circle watch indicator */
-.watched-banner {
+/* Completed episode overlay with replay icon */
+.completed-overlay {
   position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  background: rgba(0, 0, 0, 0.75);
-  color: #fff;
-  font-size: 0.7rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  padding: 4px 8px;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
   display: flex;
   align-items: center;
-  gap: 4px;
+  justify-content: center;
+}
+
+.replay-icon-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.15);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(255, 255, 255, 0.85);
+  transition: var(--transition);
+}
+
+.episode-list-card:hover .replay-icon-btn {
+  background: var(--primary);
+  color: white;
+  transform: scale(1.1);
 }
 
 .circle-play-overlay {
@@ -592,6 +607,55 @@ body {
   }
   .episode-series-name {
     font-size: 0.65rem;
+  }
+}
+
+/* Related Anime Badge Cards */
+.relation-badge-card {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+.relation-badge-card:hover:not(:disabled) {
+  background-color: #1f1f1f !important;
+  border-color: var(--primary) !important;
+  transform: translateY(-2px);
+}
+.relation-badge-card:active:not(:disabled) {
+  transform: translateY(0);
+}
+.relation-badge-card:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.relations-scroll-row::-webkit-scrollbar {
+  height: 6px;
+}
+.relations-scroll-row::-webkit-scrollbar-track {
+  background: transparent;
+}
+.relations-scroll-row::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+.relations-scroll-row::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+/* Genre Hero Banner Styles */
+.genre-hero-container {
+  flex-direction: row;
+}
+@media (max-width: 768px) {
+  .genre-hero-container {
+    flex-direction: column-reverse !important;
+    padding: 24px !important;
+    gap: 20px !important;
+  }
+  .genre-hero-poster-wrapper {
+    width: 140px !important;
+    height: 200px !important;
+  }
+  .genre-hero-container h1 {
+    font-size: 1.6rem !important;
   }
 }
 

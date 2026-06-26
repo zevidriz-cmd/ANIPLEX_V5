@@ -1,10 +1,42 @@
 import React, { useEffect, useState, useRef } from "react";
 import { useSearchParams, Link } from "react-router-dom";
-import { search, getSuggestions, getGenre, filterAnime } from "../services/api";
+import { search, getSuggestions, getGenre, filterAnime, resolveMAL, getAnimeDetail, getHome } from "../services/api";
 import { useProfile } from "../context/ProfileContext";
 import AnimeCard from "../components/AnimeCard";
 import { GridShimmer } from "../components/Shimmer";
-import { Search as SearchIcon, Filter, X, ChevronLeft, ChevronRight, SlidersHorizontal, MoreVertical, Trash2, History } from "lucide-react";
+import { Search as SearchIcon, Filter, X, ChevronLeft, ChevronRight, SlidersHorizontal, MoreVertical, Trash2, History, Play } from "lucide-react";
+
+const JIKAN_GENRE_MAPPING = {
+  "Action": 1,
+  "Adventure": 2,
+  "Comedy": 4,
+  "Drama": 8,
+  "Fantasy": 10,
+  "Horror": 14,
+  "Mystery": 7,
+  "Romance": 22,
+  "Sci-Fi": 24,
+  "Slice of Life": 36,
+  "Sports": 30,
+  "Supernatural": 37,
+  "Thriller": 41,
+  "Music": 19,
+  "Mecha": 18,
+  "Psychological": 40
+};
+
+const LOCAL_ACCURATE_MAPPINGS = [
+  { keywords: ["onepiece", "one piece", "the one piece"], malId: 21, id: "1642" },
+  { keywords: ["naruto"], malId: 20, id: "958" },
+  { keywords: ["naruto shippuden", "narutoshippuden", "shippuden"], malId: 1735, id: "1498" },
+  { keywords: ["bleach"], malId: 269, id: "1057" },
+  { keywords: ["hunter x hunter", "hunterxhunter", "hxh"], malId: 11061, id: "68" },
+  { keywords: ["black clover", "blackclover"], malId: 34572, id: "2121" },
+  { keywords: ["fairy tail", "fairytail"], malId: 6702, id: "489" },
+  { keywords: ["dragon ball z", "dragonballz", "dbz"], malId: 813, id: "1456" },
+  { keywords: ["dragon ball super", "dragonballsuper", "dbs"], malId: 30694, id: "132" },
+  { keywords: ["boruto"], malId: 34566, id: "4587" }
+];
 
 export default function SearchPage() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -15,6 +47,8 @@ export default function SearchPage() {
   const [results, setResults] = useState([]);
   const [suggestions, setSuggestions] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [genreHeroAnime, setGenreHeroAnime] = useState(null);
+  const [fallbackType, setFallbackType] = useState(""); // "", "anilist", "offline"
   
   // Search History State
   const [searchHistory, setSearchHistory] = useState([]);
@@ -98,14 +132,78 @@ export default function SearchPage() {
   const loadGenreData = async (genre, p) => {
     setLoading(true);
     setSuggestions([]);
+    setGenreHeroAnime(null);
+
+    const genreId = JIKAN_GENRE_MAPPING[genre];
+    if (!genreId) {
+      try {
+        const data = await getGenre(genre, p);
+        setResults(data?.animes || []);
+        setPage(data?.currentPage || 1);
+        setTotalPages(data?.totalPages || 1);
+        setHasNextPage(data?.hasNextPage || false);
+      } catch (e) {
+        console.error(e);
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+
     try {
-      const data = await getGenre(genre, p);
-      setResults(data?.animes || []);
-      setPage(data?.currentPage || 1);
-      setTotalPages(data?.totalPages || 1);
-      setHasNextPage(data?.hasNextPage || false);
-    } catch (e) {
-      console.error(e);
+      const res = await fetch(`https://api.jikan.moe/v4/anime?genres=${genreId}&order_by=score&sort=desc&page=${p}&limit=16`);
+      if (!res.ok) throw new Error("Jikan genre fetch failed");
+      const json = await res.json();
+      const jikanAnimes = json.data || [];
+
+      const resolvePromises = jikanAnimes.map(async (item) => {
+        try {
+          const resolveData = await resolveMAL(item.mal_id);
+          if (resolveData && resolveData.anikotoId) {
+            const detailData = await getAnimeDetail(resolveData.anikotoId);
+            const info = detailData?.anime?.info;
+            if (info) {
+              return {
+                id: info.id,
+                name: info.name,
+                poster: info.poster,
+                duration: info.stats?.duration || info.duration || "",
+                type: info.stats?.type || info.type || "TV",
+                rating: info.stats?.rating || info.rating || "",
+                episodes: info.stats?.episodes || info.episodes || { sub: 0, dub: 0 },
+                description: info.description || item.synopsis || ""
+              };
+            }
+          }
+        } catch {
+          // ignore
+        }
+        return null;
+      });
+
+      const resolvedAnimes = (await Promise.all(resolvePromises)).filter(Boolean);
+
+      if (p === 1 && resolvedAnimes.length > 0) {
+        setGenreHeroAnime(resolvedAnimes[0]);
+        setResults(resolvedAnimes.slice(1));
+      } else {
+        setResults(resolvedAnimes);
+      }
+
+      setPage(p);
+      setTotalPages(json.pagination?.last_visible_page || 1);
+      setHasNextPage(json.pagination?.has_next_page || false);
+    } catch (err) {
+      console.error("Failed to load Jikan genre data:", err);
+      try {
+        const data = await getGenre(genre, p);
+        setResults(data?.animes || []);
+        setPage(data?.currentPage || 1);
+        setTotalPages(data?.totalPages || 1);
+        setHasNextPage(data?.hasNextPage || false);
+      } catch (fallbackErr) {
+        console.error(fallbackErr);
+      }
     } finally {
       setLoading(false);
     }
@@ -151,16 +249,277 @@ export default function SearchPage() {
         }
       }
 
-      setResults(data?.animes || []);
+      let finalAnimes = data?.animes || [];
+
+      // Smart enrichment client-side (only on page 1)
+      if (hasKeyword && p === 1) {
+        const cleanedQuery = queryToSearch.trim().toLowerCase();
+        
+        // 1. Gather potential matched IDs
+        const matchedIds = [];
+        
+        // A. Check local accurate mappings first
+        for (const entry of LOCAL_ACCURATE_MAPPINGS) {
+          if (entry.keywords.some(kw => cleanedQuery.includes(kw) || kw.includes(cleanedQuery))) {
+            if (!matchedIds.includes(entry.id)) {
+              matchedIds.push(entry.id);
+            }
+          }
+        }
+
+        // B. Dynamic Jikan (MAL) search fallback to handle other shows
+        try {
+          // Only trigger Jikan lookup if we didn't find local match or want additional results
+          const jikanRes = await fetch(`https://api.jikan.moe/v4/anime?q=${encodeURIComponent(queryToSearch)}&limit=3`);
+          if (jikanRes.ok) {
+            const jikanJson = await jikanRes.json();
+            const malIds = (jikanJson.data || []).map(item => item.mal_id);
+            
+            // Resolve MAL IDs to streaming IDs using our backend resolveMAL endpoint
+            const resolvePromises = malIds.map(async (malId) => {
+              try {
+                const res = await resolveMAL(malId);
+                return res && res.anikotoId ? res.anikotoId : null;
+              } catch {
+                return null;
+              }
+            });
+            const resolvedIds = await Promise.all(resolvePromises);
+            for (const rid of resolvedIds) {
+              if (rid && !matchedIds.includes(rid)) {
+                matchedIds.push(rid);
+              }
+            }
+          }
+        } catch (jikanErr) {
+          console.warn("Jikan search enrichment failed:", jikanErr);
+        }
+
+        // 2. Fetch details for matched IDs that are NOT already in the results list
+        const idsToFetch = matchedIds.filter(id => !finalAnimes.some(a => String(a.id) === String(id)));
+        
+        if (idsToFetch.length > 0) {
+          const detailPromises = idsToFetch.map(async (id) => {
+            try {
+              const detail = await getAnimeDetail(id);
+              const info = detail?.anime?.info;
+              if (info) {
+                return {
+                  id: info.id,
+                  name: info.name,
+                  poster: info.poster,
+                  duration: info.stats?.duration || info.duration || "",
+                  type: info.stats?.type || info.type || "TV",
+                  rating: info.stats?.rating || info.rating || "",
+                  episodes: info.stats?.episodes || info.episodes || { sub: 0, dub: 0 }
+                };
+              }
+            } catch (err) {
+              console.warn(`Failed to fetch details for matched anime ${id}:`, err);
+            }
+            return null;
+          });
+
+          const enrichedAnimes = (await Promise.all(detailPromises)).filter(Boolean);
+          
+          // Prepend enriched animes to the results
+          finalAnimes = [...enrichedAnimes, ...finalAnimes];
+        }
+      }
+
+      setResults(finalAnimes);
       setPage(data?.currentPage || 1);
       setTotalPages(data?.totalPages || 1);
       setHasNextPage(data?.hasNextPage || false);
+      setFallbackType(""); // Success, clear fallback type
 
       if (hasKeyword) {
         saveSearchQuery(queryToSearch);
       }
     } catch (e) {
       console.error("Search error:", e);
+      if (hasKeyword) {
+        // 1. Try AniList GraphQL search fallback
+        try {
+          const graphqlQuery = `
+            query ($search: String) {
+              Page(page: 1, perPage: 12) {
+                media(search: $search, type: ANIME) {
+                  idMal
+                }
+              }
+            }
+          `;
+          
+          const anilistRes = await fetch("https://graphql.anilist.co", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Accept": "application/json"
+            },
+            body: JSON.stringify({
+              query: graphqlQuery,
+              variables: { search: queryToSearch }
+            })
+          });
+
+          if (anilistRes.ok) {
+            const anilistJson = await anilistRes.json();
+            const mediaList = anilistJson.data?.Page?.media || [];
+            const malIds = mediaList.map(m => m.idMal).filter(Boolean);
+
+            if (malIds.length > 0) {
+              // Resolve MAL IDs in parallel to our database IDs
+              const resolvePromises = malIds.map(async (malId) => {
+                try {
+                  const res = await resolveMAL(malId);
+                  return res && res.anikotoId ? res.anikotoId : null;
+                } catch {
+                  return null;
+                }
+              });
+              const resolvedIds = (await Promise.all(resolvePromises)).filter(Boolean);
+
+              if (resolvedIds.length > 0) {
+                // Fetch details in parallel
+                const detailPromises = resolvedIds.map(async (id) => {
+                  try {
+                    const detail = await getAnimeDetail(id);
+                    const info = detail?.anime?.info;
+                    if (info) {
+                      return {
+                        id: info.id,
+                        name: info.name,
+                        poster: info.poster,
+                        duration: info.stats?.duration || info.duration || "",
+                        type: info.stats?.type || info.type || "TV",
+                        rating: info.stats?.rating || info.rating || "",
+                        episodes: info.stats?.episodes || info.episodes || { sub: 0, dub: 0 }
+                      };
+                    }
+                  } catch (err) {
+                    console.warn(`Fallback detail enrichment failed for ID ${id}:`, err);
+                  }
+                  return null;
+                });
+
+                let resolvedAnimes = (await Promise.all(detailPromises)).filter(Boolean);
+
+                if (hasFilters) {
+                  if (type) {
+                    resolvedAnimes = resolvedAnimes.filter(a => a.type?.toLowerCase() === type.toLowerCase());
+                  }
+                }
+
+                if (resolvedAnimes.length > 0) {
+                  setResults(resolvedAnimes);
+                  setPage(1);
+                  setTotalPages(1);
+                  setHasNextPage(false);
+                  setFallbackType("anilist");
+                  saveSearchQuery(queryToSearch);
+                  return;
+                }
+              }
+            }
+          }
+        } catch (anilistErr) {
+          console.warn("AniList search backup failed:", anilistErr);
+        }
+
+        // 2. Secondary Fallback: Offline cached home list catalog
+        try {
+          const cleanedQuery = queryToSearch.trim().toLowerCase();
+          let fallbackResults = [];
+
+          // Check local mappings first for matching keyword
+          const matchedLocalIds = [];
+          for (const entry of LOCAL_ACCURATE_MAPPINGS) {
+            if (entry.keywords.some(kw => cleanedQuery.includes(kw) || kw.includes(cleanedQuery))) {
+              matchedLocalIds.push(entry.id);
+            }
+          }
+
+          // Query cached home API lists
+          try {
+            const homeData = await getHome();
+            const allHomeAnimes = [
+              ...(homeData?.spotlightAnimes || []),
+              ...(homeData?.trendingAnimes || []),
+              ...(homeData?.topAiringAnimes || []),
+              ...(homeData?.recentlyAddedAnimes || []),
+              ...(homeData?.mostPopularAnimes || []),
+              ...(homeData?.topUpcomingAnimes || [])
+            ];
+
+            for (const anime of allHomeAnimes) {
+              const matchesTitle = anime.name?.toLowerCase().includes(cleanedQuery) || 
+                                   anime.jname?.toLowerCase().includes(cleanedQuery);
+              if (matchesTitle && !fallbackResults.some(r => String(r.id) === String(anime.id))) {
+                fallbackResults.push({
+                  id: anime.id,
+                  name: anime.name,
+                  poster: anime.poster,
+                  duration: anime.duration || anime.stats?.duration || "",
+                  type: anime.type || anime.stats?.type || "TV",
+                  rating: anime.rate || anime.rating || "",
+                  episodes: anime.episodes || anime.stats?.episodes || { sub: 0, dub: 0 }
+                });
+              }
+            }
+          } catch (homeErr) {
+            console.warn("Failed to fetch home lists for search fallback:", homeErr);
+          }
+
+          // For any local mappings that weren't in the home lists, enrich them directly
+          const idsToFetch = matchedLocalIds.filter(id => !fallbackResults.some(r => String(r.id) === String(id)));
+          if (idsToFetch.length > 0) {
+            const detailPromises = idsToFetch.map(async (id) => {
+              try {
+                const detail = await getAnimeDetail(id);
+                const info = detail?.anime?.info;
+                if (info) {
+                  return {
+                    id: info.id,
+                    name: info.name,
+                    poster: info.poster,
+                    duration: info.stats?.duration || info.duration || "",
+                    type: info.stats?.type || info.type || "TV",
+                    rating: info.stats?.rating || info.rating || "",
+                    episodes: info.stats?.episodes || info.episodes || { sub: 0, dub: 0 }
+                  };
+                }
+              } catch (err) {
+                console.warn(`Fallback detail enrichment failed for ID ${id}:`, err);
+              }
+              return null;
+            });
+            const enrichedLocal = (await Promise.all(detailPromises)).filter(Boolean);
+            fallbackResults = [...enrichedLocal, ...fallbackResults];
+          }
+
+          // Apply client-side filters if active
+          if (hasFilters) {
+            if (type) {
+              fallbackResults = fallbackResults.filter(a => a.type?.toLowerCase() === type.toLowerCase());
+            }
+          }
+
+          if (fallbackResults.length > 0) {
+            setResults(fallbackResults);
+            setPage(1);
+            setTotalPages(1);
+            setHasNextPage(false);
+            setFallbackType("offline");
+            saveSearchQuery(queryToSearch);
+            return;
+          }
+        } catch (fallbackErr) {
+          console.error("Critical fallback search error:", fallbackErr);
+        }
+      }
+      setResults([]);
+      setFallbackType("");
     } finally {
       setLoading(false);
     }
@@ -346,24 +705,154 @@ export default function SearchPage() {
 
         {/* Results Columns */}
         <div className="search-results-column">
+          {fallbackType && (
+            <div className={`search-fallback-banner ${fallbackType}`}>
+              <span className="fallback-badge">
+                {fallbackType === "anilist" ? "AniList Backup" : "Offline Catalog"}
+              </span>
+              <p>
+                {fallbackType === "anilist" 
+                  ? "Search server is experiencing downtime. Serving results via AniList backup."
+                  : "Search server is experiencing downtime. Showing matches from popular and trending titles."}
+              </p>
+            </div>
+          )}
           {loading ? (
             <GridShimmer count={8} />
-          ) : results.length > 0 ? (
+          ) : (results.length > 0 || (genreParam && page === 1 && genreHeroAnime)) ? (
             <>
-              <div className="grid-layout">
-                {results.map((anime) => (
-                  <AnimeCard 
-                    key={anime.id}
-                    id={anime.id}
-                    name={anime.name}
-                    poster={anime.poster}
-                    type={anime.type}
-                    episodes={anime.episodes}
-                    rating={anime.rate}
-                    onClick={() => saveSearchQuery(anime.name)}
-                  />
-                ))}
-              </div>
+              {genreParam && page === 1 && genreHeroAnime && (
+                <div className="genre-hero-banner" style={{
+                  position: "relative",
+                  width: "100%",
+                  borderRadius: "12px",
+                  overflow: "hidden",
+                  marginBottom: "28px",
+                  border: "1px solid var(--border)",
+                  background: "#0a0a0a"
+                }}>
+                  <div style={{
+                    position: "absolute",
+                    inset: 0,
+                    backgroundImage: `url(${genreHeroAnime.poster})`,
+                    backgroundSize: "cover",
+                    backgroundPosition: "center",
+                    filter: "blur(40px) brightness(0.25)",
+                    opacity: 0.5,
+                    zIndex: 0
+                  }} />
+
+                  <div style={{
+                    position: "relative",
+                    zIndex: 1,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    padding: "32px 40px",
+                    gap: "40px"
+                  }} className="genre-hero-container">
+                    <div style={{
+                      flex: 1,
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "12px",
+                      textAlign: "left"
+                    }}>
+                      <span style={{
+                        backgroundColor: "var(--primary)",
+                        color: "white",
+                        fontSize: "0.75rem",
+                        fontWeight: "800",
+                        padding: "4px 10px",
+                        borderRadius: "4px",
+                        width: "fit-content",
+                        textTransform: "uppercase",
+                        letterSpacing: "0.05em"
+                      }}>
+                        Featured {genreParam}
+                      </span>
+                      <h1 style={{
+                        fontSize: "2.2rem",
+                        fontWeight: "800",
+                        color: "white",
+                        lineHeight: "1.2",
+                        margin: 0
+                      }}>
+                        {genreHeroAnime.name}
+                      </h1>
+                      <div style={{
+                        display: "flex",
+                        gap: "12px",
+                        fontSize: "0.8rem",
+                        color: "var(--text-secondary)",
+                        fontWeight: "600"
+                      }}>
+                        <span>{genreHeroAnime.type}</span>
+                        <span>•</span>
+                        <span>{genreHeroAnime.duration}</span>
+                        {genreHeroAnime.rating && (
+                          <>
+                            <span>•</span>
+                            <span style={{ color: "#F5A623" }}>★ {genreHeroAnime.rating}</span>
+                          </>
+                        )}
+                      </div>
+                      <p style={{
+                        fontSize: "0.95rem",
+                        color: "var(--text-secondary)",
+                        lineHeight: "1.6",
+                        margin: "8px 0 0 0",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        display: "-webkit-box",
+                        WebkitLineClamp: 3,
+                        WebkitBoxOrient: "vertical"
+                      }}>
+                        {genreHeroAnime.description.replace(/<[^>]*>/g, "")}
+                      </p>
+                      <div style={{ display: "flex", gap: "12px", marginTop: "12px" }}>
+                        <Link 
+                          to={`/anime/${genreHeroAnime.id}`} 
+                          className="btn btn-primary" 
+                          style={{ padding: "10px 24px" }}
+                          onClick={() => saveSearchQuery(genreHeroAnime.name)}
+                        >
+                          <Play size={16} fill="currentColor" style={{ marginRight: "6px" }} /> Watch Now
+                        </Link>
+                      </div>
+                    </div>
+
+                    <div style={{
+                      width: "180px",
+                      height: "260px",
+                      borderRadius: "8px",
+                      overflow: "hidden",
+                      boxShadow: "0 10px 25px rgba(0,0,0,0.5)",
+                      border: "1px solid rgba(255,255,255,0.1)",
+                      flexShrink: 0
+                    }} className="genre-hero-poster-wrapper">
+                      <img src={genreHeroAnime.poster} alt={genreHeroAnime.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {results.length > 0 && (
+                <div className="grid-layout">
+                  {results.map((anime) => (
+                    <AnimeCard 
+                      key={anime.id}
+                      id={anime.id}
+                      name={anime.name}
+                      poster={anime.poster}
+                      type={anime.type}
+                      episodes={anime.episodes}
+                      rating={anime.rate}
+                      onClick={() => saveSearchQuery(anime.name)}
+                    />
+                  ))}
+                </div>
+              )}
 
               {/* Pagination Controls */}
               {totalPages > 1 && (
@@ -809,6 +1298,61 @@ export default function SearchPage() {
         .recent-menu-item.delete:hover {
           background-color: rgba(229, 9, 20, 0.1);
           color: var(--primary);
+        }
+        .search-fallback-banner {
+          display: flex;
+          align-items: center;
+          gap: 16px;
+          padding: 16px 20px;
+          border-radius: 10px;
+          margin-bottom: 24px;
+          color: var(--text-secondary);
+          backdrop-filter: blur(10px);
+          animation: fadeIn 0.3s ease-out;
+        }
+        .search-fallback-banner.anilist {
+          background: rgba(61, 180, 242, 0.05);
+          border: 1px solid rgba(61, 180, 242, 0.25);
+        }
+        .search-fallback-banner.offline {
+          background: rgba(245, 166, 35, 0.05);
+          border: 1px solid rgba(245, 166, 35, 0.2);
+        }
+        .search-fallback-banner p {
+          margin: 0;
+          font-size: 0.92rem;
+          font-weight: 500;
+          line-height: 1.4;
+        }
+        .fallback-badge {
+          display: inline-flex;
+          align-items: center;
+          font-size: 0.72rem;
+          font-weight: 800;
+          text-transform: uppercase;
+          letter-spacing: 0.05em;
+          padding: 4px 10px;
+          border-radius: 4px;
+          white-space: nowrap;
+          flex-shrink: 0;
+        }
+        .anilist .fallback-badge {
+          background-color: rgba(61, 180, 242, 0.15);
+          color: #3db4f2;
+          border: 1px solid rgba(61, 180, 242, 0.3);
+        }
+        .offline .fallback-badge {
+          background-color: rgba(245, 166, 35, 0.15);
+          color: #f5a623;
+          border: 1px solid rgba(245, 166, 35, 0.3);
+        }
+        @media (max-width: 768px) {
+          .search-fallback-banner {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 10px;
+            padding: 14px 16px;
+          }
         }
       `}</style>
     </div>

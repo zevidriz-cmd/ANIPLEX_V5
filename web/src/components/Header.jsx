@@ -56,9 +56,19 @@ export default function Header() {
               <NavLink to="/" className={({ isActive }) => isActive ? "nav-link active" : "nav-link"}>
                 Home
               </NavLink>
-              <NavLink to="/new-and-hot" className={({ isActive }) => isActive ? "nav-link active" : "nav-link"}>
-                <Flame size={16} /> New & Hot
-              </NavLink>
+              <div className="nav-link-dropdown-wrapper">
+                <NavLink to="/new-and-hot" className={({ isActive }) => isActive ? "nav-link active" : "nav-link"}>
+                  <Flame size={16} /> New & Hot
+                </NavLink>
+                <div className="nav-link-dropdown-menu">
+                  <NavLink to="/new-and-hot" className="nav-dropdown-item">
+                    Trending & Schedule
+                  </NavLink>
+                  <NavLink to="/seasonal" className="nav-dropdown-item">
+                    Seasonal Anime
+                  </NavLink>
+                </div>
+              </div>
               <NavLink to="/watchlist" className={({ isActive }) => isActive ? "nav-link active" : "nav-link"}>
                 <Bookmark size={16} /> Watchlist
               </NavLink>
@@ -172,6 +182,15 @@ export default function Header() {
               >
                 <History size={18} />
                 <span>History</span>
+              </NavLink>
+              
+              <NavLink 
+                to="/seasonal" 
+                className={({ isActive }) => isActive ? "drawer-menu-item active" : "drawer-menu-item"}
+                onClick={() => setDrawerOpen(false)}
+              >
+                <Calendar size={18} />
+                <span>Seasonal Anime</span>
               </NavLink>
               
               <button 
@@ -296,6 +315,48 @@ export default function Header() {
         }
         .nav-link.active {
           font-weight: 700;
+          color: var(--primary);
+        }
+        .nav-link-dropdown-wrapper {
+          position: relative;
+          display: inline-block;
+          padding: 10px 0;
+        }
+        .nav-link-dropdown-menu {
+          display: none;
+          position: absolute;
+          top: calc(100% - 4px);
+          left: 50%;
+          transform: translateX(-50%);
+          background-color: #141414;
+          border: 1px solid var(--border);
+          border-radius: 8px;
+          padding: 8px;
+          min-width: 170px;
+          box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+          z-index: 1000;
+          flex-direction: column;
+          gap: 6px;
+        }
+        .nav-link-dropdown-wrapper:hover .nav-link-dropdown-menu {
+          display: flex;
+        }
+        .nav-dropdown-item {
+          color: var(--text-secondary);
+          text-decoration: none;
+          font-size: 0.85rem;
+          font-weight: 600;
+          padding: 8px 12px;
+          border-radius: 6px;
+          transition: var(--transition);
+          white-space: nowrap;
+          display: block;
+        }
+        .nav-dropdown-item:hover, .nav-dropdown-item.active {
+          color: white;
+          background-color: rgba(255,255,255,0.06);
+        }
+        .nav-dropdown-item.active {
           color: var(--primary);
         }
         .header-actions {
