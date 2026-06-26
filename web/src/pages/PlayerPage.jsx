@@ -76,7 +76,7 @@ export default function PlayerPage() {
   const { animeId, episodeId } = useParams();
   const [searchParams] = useSearchParams();
   const audioCategory = searchParams.get("audio") || localStorage.getItem("anistream_audio_preference") || "sub"; // 'sub' or 'dub'
-  
+
   const { currentUser } = useAuth();
   const { activeProfile } = useProfile();
   const navigate = useNavigate();
@@ -102,7 +102,7 @@ export default function PlayerPage() {
   // Batching & Arc logic using useMemo
   const batches = useMemo(() => {
     if (!episodes || episodes.length === 0) return [];
-    
+
     // If we have TMDb seasons, use them to build story arcs!
     if (tmdbSeasons && tmdbSeasons.length > 0) {
       const arcs = buildArcsFromSeasons(tmdbSeasons, episodes);
@@ -118,7 +118,7 @@ export default function PlayerPage() {
         });
       }
     }
-    
+
     // Fallback: standard 25-episode batches
     const BATCH_SIZE = 25;
     const fallbackBatches = [];
@@ -126,7 +126,7 @@ export default function PlayerPage() {
       const start = i + 1;
       const end = Math.min(i + BATCH_SIZE, episodes.length);
       const batchEps = episodes.slice(i, i + BATCH_SIZE);
-      
+
       const isFinished = batchEps.every(ep => {
         return historyItem?.episodeId === ep.episodeId || (historyItem?.episodeNumber > ep.number);
       });
@@ -179,7 +179,7 @@ export default function PlayerPage() {
         console.warn("Failed to load TMDb story arcs:", err);
       }
     }
-    
+
     getArcs();
     return () => {
       isMounted = false;
@@ -200,7 +200,7 @@ export default function PlayerPage() {
       setSelectedBatchIndex(0);
     }
   }, [batches, currentEpisode]);
-  
+
   // Stream & Skip times
   const [streamData, setStreamData] = useState(null);
   const [directStream, setDirectStream] = useState(null);
@@ -230,11 +230,11 @@ export default function PlayerPage() {
             getAnimeDetail(animeId),
             getEpisodes(animeId)
           ]);
-          
+
           if (!isMounted) return;
           currentDetail = detailData;
           currentEps = epData?.episodes || [];
-          
+
           setAnimeDetail(detailData);
           setEpisodes(currentEps);
           setLoadedAnimeId(animeId);
@@ -326,7 +326,7 @@ export default function PlayerPage() {
           }
         } catch (streamErr) {
           console.warn("Zoro streaming failed. Executing fallback flow...", streamErr);
-          
+
           // Primary server is down. Attempt Gogoanime/AnimePahe backup direct HLS streams
           try {
             const backupStream = await getBackupStream(malId, ep.number, animeTitle, (statusMsg) => {
@@ -358,7 +358,7 @@ export default function PlayerPage() {
             // Map AniSkip response to intro/outro format
             const opSegment = skip.find(s => s.result_type === "op");
             const edSegment = skip.find(s => s.result_type === "ed");
-            
+
             setSkipTimes({
               intro: opSegment ? { start: opSegment.interval.start, end: opSegment.interval.end } : null,
               outro: edSegment ? { start: edSegment.interval.start, end: edSegment.interval.end } : null
@@ -371,7 +371,7 @@ export default function PlayerPage() {
           const cachedFillers = getCachedFillers(malId);
           if (cachedFillers) {
             if (isMounted) {
-              setEpisodes(prev => 
+              setEpisodes(prev =>
                 prev.map(epItem => ({
                   ...epItem,
                   isFiller: !!cachedFillers.fillerMap[epItem.number],
@@ -382,7 +382,7 @@ export default function PlayerPage() {
           } else {
             fetchJikanFillers(malId, currentEps.length).then(({ fillerMap, recapMap }) => {
               if (isMounted) {
-                setEpisodes(prev => 
+                setEpisodes(prev =>
                   prev.map(epItem => ({
                     ...epItem,
                     isFiller: !!fillerMap[epItem.number],
@@ -431,19 +431,19 @@ export default function PlayerPage() {
 
   const markBatchAsWatched = async (batch) => {
     if (!currentUser || !activeProfile || !animeDetail || !episodes || episodes.length === 0) return;
-    
+
     try {
       const batchEps = batch.episodes;
       if (!batchEps || batchEps.length === 0) return;
       const lastEpInBatch = batchEps[batchEps.length - 1];
-      
+
       const lastIndex = episodes.findIndex(ep => ep.episodeId === lastEpInBatch.episodeId);
-      
+
       let targetEp = null;
       if (lastIndex !== -1 && lastIndex < episodes.length - 1) {
         targetEp = episodes[lastIndex + 1];
       }
-      
+
       let data;
       if (targetEp) {
         data = {
@@ -472,10 +472,10 @@ export default function PlayerPage() {
           audioCategory: audioCategory,
           updatedAt: Date.now()
         };
-        
+
         await markAsCompleted();
       }
-      
+
       const docRef = doc(db, "users", currentUser.uid, "profiles", activeProfile.id, "history", animeId);
       await setDoc(docRef, data);
       setHistoryItem(data);
@@ -489,9 +489,9 @@ export default function PlayerPage() {
 
     try {
       const isNearEnd = (durationMs > 0) && (progressMs / durationMs >= 0.90 || (durationMs - progressMs) <= 120000);
-      
+
       const currentIndex = episodes.findIndex(e => e.episodeId === episodeId);
-      
+
       let finalEpisodeId = episodeId;
       let finalEpisodeNumber = currentEpisode.number;
       let finalEpisodeTitle = currentEpisode.title || `Episode ${currentEpisode.number}`;
@@ -555,7 +555,7 @@ export default function PlayerPage() {
 
   // Extract M3U8 source link
   const hlsSource = directStream ? directStream.hlsUrl : streamData?.sources?.find(s => s.type === "hls" || s.url.includes(".m3u8"))?.url;
-  const embedFallback = streamData?.videoUrl || (streamData?.sources?.[0]?.url) || (currentDetail?.anime?.info?.malId ? `https://vidsrc.to/embed/anime/${currentDetail.anime.info.malId}/${currentEpisode?.number || 1}` : "");
+  const embedFallback = streamData?.videoUrl || (streamData?.sources?.[0]?.url) || (animeDetail?.anime?.info?.malId ? `https://vidsrc.to/embed/anime/${animeDetail.anime.info.malId}/${currentEpisode?.number || 1}` : "");
 
   // Setup skip ranges (prefer AniSkip, fallback to streamData intro/outro)
   const skipIntroRange = skipTimes?.intro || (directStream ? directStream.intro : streamData?.intro);
@@ -600,7 +600,7 @@ export default function PlayerPage() {
             </div>
           </div>
         ) : (
-          <VideoPlayer 
+          <VideoPlayer
             src={hlsSource}
             tracks={directStream ? directStream.tracks : (streamData?.tracks || [])}
             intro={skipIntroRange}
@@ -667,15 +667,15 @@ export default function PlayerPage() {
             {/* Episode Batch Selector Dropdown */}
             {batches.length > 1 && (
               <div className="season-selector-wrapper" ref={batchDropdownRef}>
-                <button 
-                  className="season-select-btn" 
+                <button
+                  className="season-select-btn"
                   onClick={() => setShowBatchDropdown(!showBatchDropdown)}
                   type="button"
                 >
                   <span className="dropdown-label">{batches[selectedBatchIndex]?.label}</span>
                   <ChevronDown size={16} className={`chevron ${showBatchDropdown ? "open" : ""}`} />
                 </button>
-                
+
                 {showBatchDropdown && (
                   <div className="season-dropdown-menu episode-batch-dropdown-menu" style={{ minWidth: "280px", width: "max-content", right: 0, left: "auto" }}>
                     <div className="dropdown-section-header">Episode Batches</div>
@@ -749,7 +749,7 @@ export default function PlayerPage() {
           </div>
           <div className="navigation-episodes-list">
             {activeEpisodes.map(ep => (
-              <Link 
+              <Link
                 key={ep.episodeId}
                 to={`/watch/${animeId}/${ep.episodeId}?audio=${audioCategory}`}
                 className={`nav-ep-btn ${ep.episodeId === episodeId ? "active" : ""} ${ep.isFiller ? "filler" : ""} ${ep.isRecap ? "recap" : ""}`}
