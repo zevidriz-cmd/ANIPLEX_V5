@@ -19,6 +19,7 @@ android {
         targetSdk = 36
         versionCode = 1
         versionName = "1.0"
+        buildConfigField("String", "UPDATE_URL", "\"https://raw.githubusercontent.com/zevidriz-cmd/ANIPLEX_V5/main/latest-version.json\"")
     }
 
     buildTypes {
@@ -128,6 +129,18 @@ dependencies {
   // Animations & Shimmer
   implementation(libs.lottie.compose)
   implementation(libs.shimmer.compose)
+
+  // CameraX dependencies
+  implementation(libs.camerax.core)
+  implementation(libs.camerax.camera2)
+  implementation(libs.camerax.lifecycle)
+  implementation(libs.camerax.view)
+
+  // ML Kit Barcode scanning
+  implementation(libs.mlkit.barcode)
+
+  // ZXing QR code generator core library
+  implementation(libs.zxing.core)
 
   // Memory Leak Detection (Tooling)
   // debugImplementation("com.squareup.leakcanary:leakcanary-android:2.14")

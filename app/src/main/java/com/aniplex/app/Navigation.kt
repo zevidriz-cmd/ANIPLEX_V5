@@ -27,13 +27,25 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.ContentTransform
+import androidx.compose.animation.core.*
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.runtime.rememberNavBackStack
 import androidx.navigation3.ui.NavDisplay
 import com.aniplex.app.presentation.screens.auth.LoginScreen
+import com.aniplex.app.presentation.screens.auth.TvLoginScreen
+import com.aniplex.app.presentation.screens.auth.QrScannerScreen
 import com.aniplex.app.presentation.screens.browse.BrowseScreen
 import com.aniplex.app.presentation.screens.detail.DetailScreen
+import com.aniplex.app.presentation.screens.detail.TvDetailScreen
 import com.aniplex.app.presentation.screens.home.HomeScreen
+import com.aniplex.app.presentation.screens.home.TvHomeScreen
 import com.aniplex.app.presentation.screens.player.PlayerScreen
 import com.aniplex.app.presentation.screens.profile.ProfileScreen
 import com.aniplex.app.presentation.screens.profile.ProfileSelectionScreen
@@ -50,16 +62,42 @@ import com.aniplex.app.theme.TextPrimary
 import com.aniplex.app.theme.TextSecondary
 
 @Composable
-fun MainNavigation() {
+fun MainNavigation(isTv: Boolean = false) {
+    if (isTv) {
+        TvMainNavigation()
+    } else {
+        MobileMainNavigation()
+    }
+}
+
+@Composable
+fun MobileMainNavigation() {
     val backStack = rememberNavBackStack(Splash)
 
-    androidx.activity.compose.BackHandler(enabled = backStack.size > 1) {
-        backStack.removeLastOrNull()
-    }
 
     NavDisplay(
         backStack = backStack,
         onBack = { backStack.removeLastOrNull() },
+        transitionSpec = {
+            slideInHorizontally(
+                initialOffsetX = { it },
+                animationSpec = tween(380, easing = EaseOutCubic)
+            ) + fadeIn(animationSpec = tween(380, easing = EaseOutCubic)) togetherWith
+            slideOutHorizontally(
+                targetOffsetX = { -it / 4 },
+                animationSpec = tween(380, easing = EaseOutCubic)
+            ) + fadeOut(animationSpec = tween(250, easing = EaseOutCubic))
+        },
+        popTransitionSpec = {
+            slideInHorizontally(
+                initialOffsetX = { -it / 4 },
+                animationSpec = tween(380, easing = EaseOutCubic)
+            ) + fadeIn(animationSpec = tween(380, easing = EaseOutCubic)) togetherWith
+            slideOutHorizontally(
+                targetOffsetX = { it },
+                animationSpec = tween(380, easing = EaseOutCubic)
+            ) + fadeOut(animationSpec = tween(250, easing = EaseOutCubic))
+        },
         entryProvider = entryProvider {
             entry<Splash> {
                 SplashScreen(
@@ -90,9 +128,7 @@ fun MainNavigation() {
                         }
                     },
                     onSignOut = {
-                        while (backStack.size > 0) {
-                            backStack.removeLastOrNull()
-                        }
+                        backStack.clear()
                         backStack.add(Login)
                     },
                     modifier = Modifier.fillMaxSize()
@@ -110,9 +146,7 @@ fun MainNavigation() {
                         backStack.add(Search)
                     },
                     onSignOut = {
-                        while (backStack.size > 0) {
-                            backStack.removeLastOrNull()
-                        }
+                        backStack.clear()
                         backStack.add(Login)
                     },
                     onWatchlistClick = {
@@ -124,6 +158,19 @@ fun MainNavigation() {
                     onSwitchProfile = {
                         backStack.add(ProfileSelection(showBack = true))
                     },
+                    onScanTvClick = {
+                        backStack.add(QrScanner)
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+            @androidx.camera.core.ExperimentalGetImage
+            entry<QrScanner> {
+                QrScannerScreen(
+                    onCodeScanned = { sessionId ->
+                        // This callback is triggered when QR code is scanned
+                    },
+                    onBackClick = { backStack.removeLastOrNull() },
                     modifier = Modifier.fillMaxSize()
                 )
             }
@@ -219,6 +266,7 @@ fun DashboardShell(
     onWatchlistClick: () -> Unit,
     onHistoryClick: () -> Unit,
     onSwitchProfile: () -> Unit,
+    onScanTvClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     var selectedTab by rememberSaveable { mutableStateOf(DashboardTab.HOME) }
@@ -426,8 +474,110 @@ fun DashboardShell(
                 onWatchlistClick = onWatchlistClick,
                 onHistoryClick = onHistoryClick,
                 onSwitchProfile = onSwitchProfile,
+                onScanTvClick = onScanTvClick,
                 modifier = screenModifier
             )
         }
     }
+}
+
+@Composable
+fun TvMainNavigation() {
+    val backStack = rememberNavBackStack(Splash)
+
+
+    NavDisplay(
+        backStack = backStack,
+        onBack = { backStack.removeLastOrNull() },
+        entryProvider = entryProvider {
+            entry<Splash> {
+                SplashScreen(
+                    onNavigate = { nextScreen ->
+                        backStack.removeLastOrNull()
+                        backStack.add(nextScreen)
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+            entry<Login> {
+                TvLoginScreen(
+                    onLoginSuccess = {
+                        backStack.removeLastOrNull()
+                        backStack.add(ProfileSelection(showBack = false))
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+            entry<ProfileSelection> { key ->
+                ProfileSelectionScreen(
+                    onProfileSelected = {
+                        if (key.showBack) {
+                            backStack.removeLastOrNull()
+                        } else {
+                            backStack.removeLastOrNull()
+                            backStack.add(Home)
+                        }
+                    },
+                    onSignOut = {
+                        backStack.clear()
+                        backStack.add(Login)
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+            entry<Home> {
+                com.aniplex.app.presentation.screens.home.TvDashboardShell(
+                    onAnimeClick = { animeId ->
+                        backStack.add(Detail(animeId))
+                    },
+                    onEpisodeClick = { epId, animId, title, epNum, cat, progress ->
+                        backStack.add(Player(epId, animId, title, epNum, cat, resumePlayback = true, initialProgress = progress))
+                    },
+                    onSwitchProfile = {
+                        backStack.clear()
+                        backStack.add(ProfileSelection(showBack = false))
+                    },
+                    onSignOut = {
+                        backStack.clear()
+                        backStack.add(Login)
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+            entry<Detail> { key ->
+                TvDetailScreen(
+                    animeId = key.animeId,
+                    onBackClick = { backStack.removeLastOrNull() },
+                    onPlayClick = { epId, animId, title, epNum, cat ->
+                        backStack.add(Player(epId, animId, title, epNum, cat, resumePlayback = true))
+                    },
+                    onRecommendationClick = { recId ->
+                        backStack.add(Detail(recId))
+                    },
+                    onSeasonSelect = { newId ->
+                        backStack.removeLastOrNull()
+                        backStack.add(Detail(newId))
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+            entry<Player> { key ->
+                PlayerScreen(
+                    episodeId = key.episodeId,
+                    animeId = key.animeId,
+                    animeTitle = key.animeTitle,
+                    episodeNumber = key.episodeNumber,
+                    category = key.category,
+                    resumePlayback = key.resumePlayback,
+                    initialProgressParam = key.initialProgress,
+                    isTv = true,
+                    onBackClick = { backStack.removeLastOrNull() },
+                    onAnimeClick = { animeId ->
+                        backStack.add(Detail(animeId))
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+        }
+    )
 }

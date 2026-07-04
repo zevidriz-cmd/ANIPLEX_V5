@@ -69,6 +69,7 @@ import com.aniplex.app.domain.model.Character
 import com.aniplex.app.domain.model.Episode
 import com.aniplex.app.domain.model.HistoryItem
 import com.aniplex.app.domain.model.Season
+import com.aniplex.app.domain.model.StoryArc
 import com.aniplex.app.presentation.components.AnimeCard
 import com.aniplex.app.theme.BackgroundVoid
 import com.aniplex.app.theme.BrandGradient
@@ -100,6 +101,7 @@ fun DetailScreen(
     val isResolvingSeason by viewModel.isResolvingSeason.collectAsStateWithLifecycle()
     val selectedVersion by viewModel.selectedVersion.collectAsStateWithLifecycle()
     val hasMultipleVersions by viewModel.hasMultipleVersions.collectAsStateWithLifecycle()
+    val storyArcsState by viewModel.storyArcsState.collectAsStateWithLifecycle()
 
     // Load the selected season smoothly by popping the current screen and pushing a new one
     LaunchedEffect(resolvedAnikotoId) {
@@ -171,6 +173,7 @@ fun DetailScreen(
                     selectedVersion = selectedVersion,
                     onVersionChange = { viewModel.setSelectedVersion(it) },
                     hasMultipleVersions = hasMultipleVersions,
+                    storyArcsState = storyArcsState,
                     modifier = Modifier.fillMaxSize()
                 )
             }
@@ -279,6 +282,7 @@ fun DetailContent(
     selectedVersion: String,
     onVersionChange: (String) -> Unit,
     hasMultipleVersions: Boolean = false,
+    storyArcsState: DetailState<List<StoryArc>> = DetailState.Loading,
     modifier: Modifier = Modifier
 ) {
     var selectedTab by remember { mutableStateOf(0) }
@@ -816,7 +820,7 @@ fun DetailContent(
                 when (seasonsState) {
                     is DetailState.Success -> {
                         val seasons = seasonsState.data
-                        if (seasons.isNotEmpty()) {
+                        if (seasons.size > 1) {
                             var expanded by remember { mutableStateOf(false) }
                             // Current selected season is the one that matches this anime's title or the first one if we can't figure it out
                             val currentSeason = seasons.find { it.malId == animeDetail.malId } ?: seasons.firstOrNull()
@@ -966,8 +970,13 @@ fun DetailContent(
                                                         verticalAlignment = Alignment.CenterVertically,
                                                         modifier = Modifier
                                                             .fillMaxWidth()
+                                                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                                                            .clip(RoundedCornerShape(8.dp))
                                                             .background(
-                                                                if (isPrimaryCurrent) Color.White.copy(alpha = 0.04f) else Color.Transparent
+                                                                if (isPrimaryCurrent) CrunchyrollOrange.copy(alpha = 0.08f) else Color.Transparent
+                                                            )
+                                                            .then(
+                                                                if (isPrimaryCurrent) Modifier.border(1.dp, CrunchyrollOrange.copy(alpha = 0.2f), RoundedCornerShape(8.dp)) else Modifier
                                                             )
                                                             .clickable {
                                                                 expanded = false
@@ -975,7 +984,7 @@ fun DetailContent(
                                                                     onSeasonSelected(primary.malId)
                                                                 }
                                                             }
-                                                            .padding(horizontal = 16.dp, vertical = 12.dp)
+                                                            .padding(horizontal = 12.dp, vertical = 10.dp)
                                                     ) {
                                                         Text(
                                                             text = "#$watchNum",
@@ -1083,8 +1092,13 @@ fun DetailContent(
                                                                 verticalAlignment = Alignment.CenterVertically,
                                                                 modifier = Modifier
                                                                     .fillMaxWidth()
+                                                                    .padding(start = 28.dp, end = 8.dp, top = 2.dp, bottom = 2.dp)
+                                                                    .clip(RoundedCornerShape(8.dp))
                                                                     .background(
-                                                                        if (isAltCurrent) Color.White.copy(alpha = 0.04f) else Color.Transparent
+                                                                        if (isAltCurrent) CrunchyrollOrange.copy(alpha = 0.08f) else Color.Transparent
+                                                                    )
+                                                                    .then(
+                                                                        if (isAltCurrent) Modifier.border(1.dp, CrunchyrollOrange.copy(alpha = 0.2f), RoundedCornerShape(8.dp)) else Modifier
                                                                     )
                                                                     .clickable {
                                                                         expanded = false
@@ -1092,7 +1106,7 @@ fun DetailContent(
                                                                             onSeasonSelected(alt.malId)
                                                                         }
                                                                     }
-                                                                    .padding(start = 36.dp, end = 16.dp, top = 6.dp, bottom = 6.dp)
+                                                                    .padding(horizontal = 12.dp, vertical = 8.dp)
                                                             ) {
                                                                 Text(
                                                                     text = "ALT",
@@ -1381,7 +1395,8 @@ fun DetailContent(
                     watchHistory = watchHistory,
                     selectedVersion = selectedVersion,
                     onVersionChange = onVersionChange,
-                    hasMultipleVersions = hasMultipleVersions
+                    hasMultipleVersions = hasMultipleVersions,
+                    storyArcsState = storyArcsState
                 )
                 1 -> CharactersTabContent(charactersState = charactersState)
                 2 -> RecommendationsTabContent(
@@ -1538,8 +1553,20 @@ fun EpisodesTabContent(
     watchHistory: HistoryItem? = null,
     selectedVersion: String,
     onVersionChange: (String) -> Unit,
-    hasMultipleVersions: Boolean = false
+    hasMultipleVersions: Boolean = false,
+    storyArcsState: DetailState<List<StoryArc>> = DetailState.Loading
 ) {
+    val arcs = if (storyArcsState is DetailState.Success) storyArcsState.data else emptyList()
+    val hasArcs = arcs.isNotEmpty()
+
+    val activeArcIndex = remember(arcs, watchHistory) {
+        val index = arcs.indexOfFirst { arc ->
+            watchHistory != null && watchHistory.episodeNumber in arc.start..arc.end
+        }
+        if (index != -1) index else 0
+    }
+    var selectedArcIndex by remember(activeArcIndex) { mutableStateOf(activeArcIndex) }
+
     var showSeasonDialog by remember { mutableStateOf(false) }
     var selectedChunkIndex by remember { mutableStateOf(0) }
 
@@ -1559,41 +1586,60 @@ fun EpisodesTabContent(
             val totalEpisodes = (episodesState as? DetailState.Success)?.data?.size ?: 0
             val chunks = (episodesState as? DetailState.Success)?.data?.chunked(25) ?: emptyList()
 
-            Box {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.clickable { if (chunks.size > 1) showSeasonDialog = true }
-                ) {
-                    Text(
-                        text = if (chunks.size > 1) "Episodes ${selectedChunkIndex * 25 + 1}-${minOf((selectedChunkIndex + 1) * 25, totalEpisodes)}" else "All Episodes",
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
-                    )
-                    if (chunks.size > 1) {
+            val showDropdown = (hasArcs && arcs.size > 1) || (!hasArcs && chunks.size > 1)
+            if (showDropdown) {
+                Box {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.clickable { showSeasonDialog = true }
+                    ) {
+                        Text(
+                            text = if (hasArcs) {
+                                if (selectedArcIndex in arcs.indices) arcs[selectedArcIndex].label else "All Episodes"
+                            } else {
+                                "Episodes ${selectedChunkIndex * 25 + 1}-${minOf((selectedChunkIndex + 1) * 25, totalEpisodes)}"
+                            },
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
                         Icon(
                             imageVector = Icons.Default.ArrowDropDown,
                             contentDescription = "Select Episodes",
                             tint = Color.White
                         )
                     }
-                }
-                
-                DropdownMenu(
-                    expanded = showSeasonDialog,
-                    onDismissRequest = { showSeasonDialog = false },
-                    modifier = Modifier.background(SurfaceDark)
-                ) {
-                    chunks.forEachIndexed { index, _ ->
-                        DropdownMenuItem(
-                            text = { Text("Episodes ${index * 25 + 1}-${minOf((index + 1) * 25, totalEpisodes)}", color = Color.White) },
-                            onClick = {
-                                selectedChunkIndex = index
-                                showSeasonDialog = false
+                    
+                    DropdownMenu(
+                        expanded = showSeasonDialog,
+                        onDismissRequest = { showSeasonDialog = false },
+                        modifier = Modifier.background(SurfaceDark)
+                    ) {
+                        if (hasArcs) {
+                            arcs.forEachIndexed { index, arc ->
+                                DropdownMenuItem(
+                                    text = { Text(arc.label, color = Color.White) },
+                                    onClick = {
+                                        selectedArcIndex = index
+                                        showSeasonDialog = false
+                                    }
+                                )
                             }
-                        )
+                        } else {
+                            chunks.forEachIndexed { index, _ ->
+                                DropdownMenuItem(
+                                    text = { Text("Episodes ${index * 25 + 1}-${minOf((index + 1) * 25, totalEpisodes)}", color = Color.White) },
+                                    onClick = {
+                                        selectedChunkIndex = index
+                                        showSeasonDialog = false
+                                    }
+                                )
+                            }
+                        }
                     }
                 }
+            } else {
+                Spacer(modifier = Modifier.width(1.dp))
             }
 
             Row(
@@ -1677,8 +1723,12 @@ fun EpisodesTabContent(
                     Column(
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
-                        val chunks = episodeList.chunked(25)
-                        val displayEpisodes = if (chunks.isNotEmpty() && selectedChunkIndex < chunks.size) chunks[selectedChunkIndex] else emptyList()
+                        val displayEpisodes = if (hasArcs) {
+                            if (selectedArcIndex in arcs.indices) arcs[selectedArcIndex].episodes else emptyList()
+                        } else {
+                            val chunks = episodeList.chunked(25)
+                            if (chunks.isNotEmpty() && selectedChunkIndex < chunks.size) chunks[selectedChunkIndex] else emptyList()
+                        }
                         
                         displayEpisodes.forEach { episode ->
                             val isFiller = episode.isFiller
