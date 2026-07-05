@@ -67,6 +67,14 @@
           }
         },
         {
+          "client_id": "965933740812-bthrlsa1968tm4mncealhuv83hqda37q.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.aniplex",
+            "certificate_hash": "89092ffb5620458cd11448833c2020c1e1f19cd9"
+          }
+        },
+        {
           "client_id": "965933740812-co9i4pf49raae8vg4tb33ekta8lpk87n.apps.googleusercontent.com",
           "client_type": 1,
           "android_info": {

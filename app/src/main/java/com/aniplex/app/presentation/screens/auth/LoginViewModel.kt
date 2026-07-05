@@ -94,6 +94,10 @@ class LoginViewModel @Inject constructor(
         _uiState.update { it.copy(error = null) }
     }
 
+    fun resetState() {
+        _uiState.value = LoginUiState()
+    }
+
     private fun validateInputs(email: String, password: String): Boolean {
         if (email.isBlank() || !Patterns.EMAIL_ADDRESS.matcher(email.trim()).matches()) {
             _uiState.update { it.copy(error = "Please enter a valid email address") }

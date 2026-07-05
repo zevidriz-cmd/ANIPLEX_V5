@@ -13,6 +13,23 @@ export default function Header() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const navigate = useNavigate();
 
+  const getAvatarUrl = (key) => {
+    const mapping = {
+      avatar_orange: "/avatars/avatar_shonen.png",
+      avatar_blue: "/avatars/avatar_cyber.png",
+      avatar_green: "/avatars/avatar_ninja.png",
+      avatar_pink: "/avatars/avatar_girl.png",
+      avatar_purple: "/avatars/avatar_mascot.png",
+      avatar_shonen: "/avatars/avatar_shonen.png",
+      avatar_girl: "/avatars/avatar_girl.png",
+      avatar_ninja: "/avatars/avatar_ninja.png",
+      avatar_mascot: "/avatars/avatar_mascot.png",
+      avatar_cyber: "/avatars/avatar_cyber.png",
+      avatar_retro: "/avatars/avatar_retro.png"
+    };
+    return mapping[key] || "/avatars/avatar_shonen.png";
+  };
+
   const handleLogout = async () => {
     try {
       await logout();
@@ -95,8 +112,8 @@ export default function Header() {
                   onClick={() => setDrawerOpen(true)}
                 >
                   {activeProfile ? (
-                    <div className={`avatar-circle ${activeProfile.avatarUrl}`}>
-                      {activeProfile.name.charAt(0).toUpperCase()}
+                    <div className="avatar-circle overflow-hidden bg-zinc-800 border border-zinc-700">
+                      <img src={getAvatarUrl(activeProfile.avatarUrl)} alt="" className="w-full h-full object-cover" />
                     </div>
                   ) : (
                     <div className="avatar-circle default">
@@ -119,8 +136,8 @@ export default function Header() {
         <div className="drawer-header">
           {currentUser && activeProfile ? (
             <Link to="/my-anistream" className="drawer-profile-card" onClick={() => setDrawerOpen(false)}>
-              <div className={`drawer-avatar ${activeProfile.avatarUrl}`}>
-                {activeProfile.name.charAt(0).toUpperCase()}
+              <div className="drawer-avatar overflow-hidden bg-zinc-800 border border-zinc-700">
+                <img src={getAvatarUrl(activeProfile.avatarUrl)} alt="" className="w-full h-full object-cover" />
               </div>
               <div className="drawer-profile-info">
                 <span className="drawer-profile-name">{activeProfile.name}</span>
@@ -259,8 +276,8 @@ export default function Header() {
             className="mobile-nav-item"
             style={{ background: "none", border: "none", cursor: "pointer", fontFamily: "inherit" }}
           >
-            <div className={`mobile-nav-avatar ${activeProfile.avatarUrl}`}>
-              {activeProfile.name.charAt(0).toUpperCase()}
+            <div className="mobile-nav-avatar overflow-hidden bg-zinc-800 border border-zinc-700">
+              <img src={getAvatarUrl(activeProfile.avatarUrl)} alt="" className="w-full h-full object-cover" />
             </div>
             <span>Profile</span>
           </button>
@@ -403,6 +420,13 @@ export default function Header() {
           font-weight: 700;
           font-size: 1rem;
           color: white;
+          overflow: hidden;
+        }
+        .avatar-circle img {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+          border-radius: inherit;
         }
         .avatar-circle.avatar_orange { background: linear-gradient(135deg, #FF9900, #FF5E00); }
         .avatar-circle.avatar_blue { background: linear-gradient(135deg, #0070F3, #00C6FF); }
@@ -509,6 +533,13 @@ export default function Header() {
             font-size: 0.65rem;
             color: white;
             border: 1.5px solid transparent;
+            overflow: hidden;
+          }
+          .mobile-nav-avatar img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            border-radius: inherit;
           }
           .mobile-nav-item.active .mobile-nav-avatar {
             border-color: var(--primary);

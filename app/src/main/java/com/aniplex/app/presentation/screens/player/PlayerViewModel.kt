@@ -28,6 +28,7 @@ sealed interface PlayerUiState {
     data class Success(val stream: EpisodeStream) : PlayerUiState
     data class Error(val message: String) : PlayerUiState
     data class WebViewFallback(val embedUrl: String) : PlayerUiState
+    data class IframeFallback(val iframeUrl: String, val provider: String) : PlayerUiState
 }
 
 @HiltViewModel
@@ -43,6 +44,7 @@ class PlayerViewModel @Inject constructor(
         get() = preferenceManager.autoplayNextEpisode
         set(value) {
             preferenceManager.autoplayNextEpisode = value
+            profileManager.saveSettingsToFirestore()
         }
 
     var enableDiagnostics: Boolean
@@ -62,18 +64,59 @@ class PlayerViewModel @Inject constructor(
         get() = preferenceManager.playbackSpeed
         set(value) {
             preferenceManager.playbackSpeed = value
+            profileManager.saveSettingsToFirestore()
         }
 
     var subtitlesEnabled: Boolean
         get() = preferenceManager.subtitlesEnabled
         set(value) {
             preferenceManager.subtitlesEnabled = value
+            profileManager.saveSettingsToFirestore()
         }
 
     var defaultAudioCategory: String
         get() = preferenceManager.defaultAudioCategory
         set(value) {
             preferenceManager.defaultAudioCategory = value
+            profileManager.saveSettingsToFirestore()
+        }
+
+    val preferredProvider: String
+        get() = preferenceManager.preferredProvider
+
+    var subtitleSizeScale: Float
+        get() = preferenceManager.subtitleSizeScale
+        set(value) {
+            preferenceManager.subtitleSizeScale = value
+            profileManager.saveSettingsToFirestore()
+        }
+
+    var subtitleColor: String
+        get() = preferenceManager.subtitleColor
+        set(value) {
+            preferenceManager.subtitleColor = value
+            profileManager.saveSettingsToFirestore()
+        }
+
+    var subtitleBgOpacity: Float
+        get() = preferenceManager.subtitleBgOpacity
+        set(value) {
+            preferenceManager.subtitleBgOpacity = value
+            profileManager.saveSettingsToFirestore()
+        }
+
+    var subtitleStyle: String
+        get() = preferenceManager.subtitleStyle
+        set(value) {
+            preferenceManager.subtitleStyle = value
+            profileManager.saveSettingsToFirestore()
+        }
+
+    var subtitlePosition: Float
+        get() = preferenceManager.subtitlePosition
+        set(value) {
+            preferenceManager.subtitlePosition = value
+            profileManager.saveSettingsToFirestore()
         }
 
     init {
@@ -84,13 +127,21 @@ class PlayerViewModel @Inject constructor(
         get() = preferenceManager.preferredQuality
         set(value) {
             preferenceManager.preferredQuality = value
+            profileManager.saveSettingsToFirestore()
         }
 
     var preferredAnimeVersion: String
         get() = preferenceManager.preferredAnimeVersion
         set(value) {
             preferenceManager.preferredAnimeVersion = value
+            profileManager.saveSettingsToFirestore()
         }
+
+    val hevcDecoderEnabled: Boolean
+        get() = preferenceManager.hevcDecoderEnabled
+
+    val dolbyAtmosEnabled: Boolean
+        get() = preferenceManager.dolbyAtmosEnabled
 
     fun setPreferredAnimeVersion(version: String, onStatusMsg: (String) -> Unit) {
         preferenceManager.preferredAnimeVersion = version
@@ -230,10 +281,23 @@ class PlayerViewModel @Inject constructor(
     private var progressSaveJob: Job? = null
     private var posterUrl: String = ""
 
+    // Fallback chain state (mirrors website's getBackupStream pipeline)
+    private val _activeProvider = MutableStateFlow("zoro")
+    val activeProvider: StateFlow<String> = _activeProvider.asStateFlow()
+
+    private val _fallbackStatusMessage = MutableStateFlow<String?>(null)
+    val fallbackStatusMessage: StateFlow<String?> = _fallbackStatusMessage.asStateFlow()
+
+    private val failedProviders = mutableSetOf<String>()
+    private var streamJob: Job? = null
+
     fun initialize(animeId: String, episodeId: String, category: String, server: String = "hd-1", initialSavedProgress: Long = 0L) {
         _uiState.value = PlayerUiState.Loading
         _skipTimes.value = SkipTimes() // Reset skip times on load
         _initialProgress.value = initialSavedProgress // Reset initial progress too to avoid cross-anime progress leak
+        _activeProvider.value = preferredProvider
+        _fallbackStatusMessage.value = null
+        failedProviders.clear()
         
         viewModelScope.launch {
             // 1. Fetch Anime Detail (for poster image)
@@ -297,25 +361,203 @@ class PlayerViewModel @Inject constructor(
             }
         }
 
-        viewModelScope.launch {
-            repository.getEpisodeStream(episodeId, server, category).collect { result ->
-                when (result) {
-                    is Result.Success -> {
-                        if (result.data.isHls) {
-                            _uiState.value = PlayerUiState.Success(stream = result.data)
-                        } else {
-                            _uiState.value = PlayerUiState.WebViewFallback(embedUrl = result.data.videoUrl)
-                        }
+        loadPlaybackStream(episodeId, server, category)
+    }
+
+    private fun loadPlaybackStream(
+        episodeId: String,
+        server: String,
+        category: String
+    ) {
+        streamJob?.cancel()
+
+        // Define the try sequence matching the website
+        val sequence = if (preferredProvider == "gogoanime") {
+            listOf("gogoanime", "zoro", "animepahe", "megaplay-direct")
+        } else {
+            listOf("zoro", "gogoanime", "animepahe", "megaplay-direct")
+        }
+
+        // Find the first provider not in failedProviders
+        val provider = sequence.firstOrNull { it !in failedProviders }
+        if (provider == null) {
+            // All direct providers failed, go to iframe fallback
+            loadIframeFallback(category)
+            return
+        }
+
+        _activeProvider.value = provider
+        DebugLogManager.log("ANIPLEX_PLAYER", "Attempting provider: $provider")
+
+        when (provider) {
+            "zoro" -> {
+                _fallbackStatusMessage.value = if (preferredProvider == "zoro") {
+                    "Connecting to primary server (Zoro)..."
+                } else {
+                    "Gogoanime failed. Switching to Zoro..."
+                }
+                streamJob = viewModelScope.launch {
+                    repository.getEpisodeStream(episodeId, server, category).collect { result ->
+                        handleStreamResult(result, provider, episodeId, server, category)
                     }
-                    is Result.Error -> {
-                        _uiState.value = PlayerUiState.Error(result.message)
+                }
+            }
+            "gogoanime", "animepahe" -> {
+                _fallbackStatusMessage.value = if (provider == "gogoanime") {
+                    "Connecting to Gogoanime backup..."
+                } else {
+                    "Gogoanime failed. Fetching AnimePahe backup..."
+                }
+                streamJob = viewModelScope.launch {
+                    val malId = awaitMetadataAndGetMalId()
+                    val title = _animeDetail.value?.name
+                    val epNum = _currentEpisode.value?.number ?: 1
+
+                    if (malId == null) {
+                        DebugLogManager.log("ANIPLEX_PLAYER", "MAL metadata unavailable for provider $provider, skipping...")
+                        failedProviders.add(provider)
+                        loadPlaybackStream(episodeId, server, category)
+                        return@launch
                     }
-                    is Result.Loading -> {
-                        _uiState.value = PlayerUiState.Loading
+
+                    repository.getFallbackStream(malId, epNum, title, provider).collect { result ->
+                        handleStreamResult(result, provider, episodeId, server, category)
+                    }
+                }
+            }
+            "megaplay-direct" -> {
+                _fallbackStatusMessage.value = "Extracting MegaPlay direct stream..."
+                streamJob = viewModelScope.launch {
+                    val malId = awaitMetadataAndGetMalId()
+                    val epNum = _currentEpisode.value?.number ?: 1
+
+                    if (malId == null) {
+                        DebugLogManager.log("ANIPLEX_PLAYER", "MAL ID unavailable for MegaPlay, skipping...")
+                        failedProviders.add(provider)
+                        loadPlaybackStream(episodeId, server, category)
+                        return@launch
+                    }
+
+                    repository.getMegaplayDirectStream(malId, epNum, category).collect { result ->
+                        handleStreamResult(result, provider, episodeId, server, category)
                     }
                 }
             }
         }
+    }
+
+    private suspend fun awaitMetadataAndGetMalId(): String? {
+        var count = 0
+        while (_animeDetail.value == null || _currentEpisode.value == null) {
+            delay(200)
+            count++
+            if (count > 50) { // 10 seconds timeout
+                return null
+            }
+        }
+        val malId = _animeDetail.value?.malId
+        return if (!malId.isNullOrEmpty() && malId != "0") malId else null
+    }
+
+    private fun handleStreamResult(
+        result: Result<EpisodeStream>,
+        provider: String,
+        episodeId: String,
+        server: String,
+        category: String
+    ) {
+        when (result) {
+            is Result.Success -> {
+                if (result.data.isHls) {
+                    _uiState.value = PlayerUiState.Success(stream = result.data)
+                } else {
+                    _uiState.value = PlayerUiState.WebViewFallback(embedUrl = result.data.videoUrl)
+                }
+                _fallbackStatusMessage.value = when (provider) {
+                    "zoro" -> null
+                    "gogoanime" -> "Streaming via Gogoanime backup."
+                    "animepahe" -> "Streaming via AnimePahe backup."
+                    "megaplay-direct" -> "Streaming via MegaPlay direct."
+                    else -> null
+                }
+            }
+            is Result.Error -> {
+                DebugLogManager.log("ANIPLEX_PLAYER", "Provider $provider failed: ${result.message}")
+                failedProviders.add(provider)
+                loadPlaybackStream(episodeId, server, category)
+            }
+            is Result.Loading -> {
+                _uiState.value = PlayerUiState.Loading
+            }
+        }
+    }
+
+    /**
+     * Run the full fallback chain exactly as the website does:
+     * 1. Gogoanime (Netlify serverless API)
+     * 2. AnimePahe (Netlify serverless API)
+     * 3. MegaPlay Direct (.m3u8 extraction)
+     * 4. MegaPlay Iframe (fullscreen WebView as absolute last resort)
+     *
+     * Called by PlayerScreen when all Zoro WebView sniffing servers have failed.
+     */
+    fun runFallbackChain(audioCategory: String) {
+        failedProviders.add("zoro")
+        val epId = _currentEpisode.value?.id ?: ""
+        if (epId.isNotEmpty()) {
+            loadPlaybackStream(
+                episodeId = epId,
+                server = "hd-1",
+                category = audioCategory
+            )
+        } else {
+            loadIframeFallback(audioCategory)
+        }
+    }
+
+    private fun loadIframeFallback(audioCategory: String) {
+        val malId = _animeDetail.value?.malId
+        val epNum = _currentEpisode.value?.number ?: 1
+
+        if (malId.isNullOrEmpty() || malId == "0") {
+            _fallbackStatusMessage.value = "No MAL ID available. Loading backup iframe player..."
+            _uiState.value = PlayerUiState.IframeFallback(
+                iframeUrl = "about:blank",
+                provider = "megaplay"
+            )
+            return
+        }
+
+        _fallbackStatusMessage.value = "All HLS streams failed. Loaded Backup Player (Iframe)."
+        _activeProvider.value = "megaplay-iframe"
+        val iframeUrl = "https://megaplay.buzz/stream/mal/$malId/$epNum/$audioCategory"
+        _uiState.value = PlayerUiState.IframeFallback(
+            iframeUrl = iframeUrl,
+            provider = "megaplay"
+        )
+    }
+
+    /**
+     * Switch the iframe backup server (matches website's Backup Server selector).
+     */
+    fun switchIframeServer(server: String) {
+        val malId = _animeDetail.value?.malId ?: return
+        val epNum = _currentEpisode.value?.number ?: 1
+        val audioCategory = defaultAudioCategory.lowercase()
+
+        val iframeUrl = when (server) {
+            "megaplay" -> "https://megaplay.buzz/stream/mal/$malId/$epNum/$audioCategory"
+            "vidsrc-to" -> "https://vidsrc.to/embed/anime/$malId/$epNum"
+            "vidsrc-me" -> "https://vidsrc.me/embed/anime?mal=$malId&ep=$epNum"
+            "embed-su" -> "https://embed.su/embed/anime/$malId/$epNum"
+            else -> "https://megaplay.buzz/stream/mal/$malId/$epNum/$audioCategory"
+        }
+
+        _activeProvider.value = "$server-iframe"
+        _uiState.value = PlayerUiState.IframeFallback(
+            iframeUrl = iframeUrl,
+            provider = server
+        )
     }
 
     fun stopPeriodicProgressSaving() {
@@ -377,6 +619,28 @@ class PlayerViewModel @Inject constructor(
                         .collection("history").document(animeId)
                 }
                 docRef.set(data).await()
+
+                // Also update/sync Watchlist status in Firestore
+                val watchlistRef = if (profileId != null) {
+                    firestore.collection("users").document(userId)
+                        .collection("profiles").document(profileId)
+                        .collection("watchlist").document(animeId)
+                } else {
+                    firestore.collection("users").document(userId)
+                        .collection("watchlist").document(animeId)
+                }
+
+                val isLastEpisode = currentIndex == currentList.size - 1
+                val targetStatus = if (isNearEnd && isLastEpisode) "completed" else "watching"
+
+                val watchlistData = hashMapOf(
+                    "id" to animeId,
+                    "name" to animeTitle,
+                    "poster" to posterUrl,
+                    "status" to targetStatus,
+                    "addedAt" to System.currentTimeMillis()
+                )
+                watchlistRef.set(watchlistData, com.google.firebase.firestore.SetOptions.merge()).await()
             } catch (e: Exception) {
                 // Ignore silent error
             }

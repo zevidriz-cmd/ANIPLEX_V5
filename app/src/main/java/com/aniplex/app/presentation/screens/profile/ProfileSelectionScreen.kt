@@ -26,6 +26,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
@@ -161,6 +162,10 @@ fun ProfileSelectionScreen(
     val uiState by viewModel.uiState.collectAsState()
     val isMigrating by viewModel.isMigrating.collectAsState()
     val context = LocalContext.current
+
+    LaunchedEffect(Unit) {
+        viewModel.loadProfilesAndMigrate()
+    }
 
     // Screen State
     var isManageMode by remember { mutableStateOf(false) }
@@ -478,16 +483,19 @@ fun ProfileSelectionContent(
         Spacer(modifier = Modifier.height(72.dp))
 
         // High gloss manage button
+        var isManageFocused by remember { mutableStateOf(false) }
         Button(
             onClick = onToggleManageMode,
             modifier = Modifier
                 .fillMaxWidth(0.65f)
-                .height(48.dp),
+                .height(48.dp)
+                .onFocusChanged { isManageFocused = it.isFocused },
             colors = ButtonDefaults.buttonColors(
-                containerColor = if (isManageMode) CrunchyrollOrange else Color(0xFF14141A)
+                containerColor = if (isManageFocused) CrunchyrollOrange else if (isManageMode) CrunchyrollOrange.copy(alpha = 0.8f) else Color(0xFF14141A),
+                contentColor = Color.White
             ),
             shape = RoundedCornerShape(24.dp),
-            border = BorderStroke(1.dp, if (isManageMode) Color.Transparent else Color(0xFF33333C))
+            border = BorderStroke(1.dp, if (isManageFocused) Color.White else if (isManageMode) Color.Transparent else Color(0xFF33333C))
         ) {
             Icon(
                 imageVector = if (isManageMode) Icons.Default.Check else Icons.Default.Settings,
@@ -507,15 +515,19 @@ fun ProfileSelectionContent(
 
         Spacer(modifier = Modifier.height(18.dp))
 
+        var isLogoutFocused by remember { mutableStateOf(false) }
         TextButton(
             onClick = onLogOut,
-            colors = ButtonDefaults.textButtonColors(contentColor = CrunchyrollOrange)
+            modifier = Modifier.onFocusChanged { isLogoutFocused = it.isFocused },
+            colors = ButtonDefaults.textButtonColors(
+                contentColor = if (isLogoutFocused) Color.White else CrunchyrollOrange
+            )
         ) {
             Text(
                 text = "Log Out Account",
-                color = CrunchyrollOrange.copy(alpha = 0.85f),
+                color = if (isLogoutFocused) Color.White else CrunchyrollOrange.copy(alpha = 0.85f),
                 fontSize = 14.sp,
-                fontWeight = FontWeight.SemiBold,
+                fontWeight = if (isLogoutFocused) FontWeight.Bold else FontWeight.SemiBold,
                 letterSpacing = 0.4.sp
             )
         }
@@ -557,15 +569,20 @@ fun ProfileItemCard(
         label = "PressedScale"
     )
 
+    var isFocused by remember { mutableStateOf(false) }
+    val focusScale by animateFloatAsState(if (isFocused) 1.12f else 1.0f)
+    val finalScale = focusScale * pressedScale
+
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
             .width(96.dp)
             .graphicsLayer {
                 rotationZ = currentRotation
-                scaleX = pressedScale
-                scaleY = pressedScale
+                scaleX = finalScale
+                scaleY = finalScale
             }
+            .onFocusChanged { isFocused = it.isFocused }
             .clickable(
                 interactionSource = interactionSource,
                 indication = null,
@@ -579,8 +596,8 @@ fun ProfileItemCard(
                 .background(Color.Transparent, CircleShape)
                 .border(
                     BorderStroke(
-                        2.5.dp,
-                        if (isManageMode) CrunchyrollOrange else currentAvatar.primaryColor.copy(alpha = 0.5f)
+                        width = if (isFocused) 3.5.dp else 2.5.dp,
+                        color = if (isFocused) CrunchyrollOrange else if (isManageMode) CrunchyrollOrange.copy(alpha = 0.5f) else currentAvatar.primaryColor.copy(alpha = 0.4f)
                     ),
                     CircleShape
                 )
@@ -667,7 +684,7 @@ fun ProfileItemCard(
         // Profile Name with Kids or Premium Tag indicator underneath
         Text(
             text = profile.name,
-            color = if (isManageMode) CrunchyrollOrange else Color.White,
+            color = if (isFocused || isManageMode) CrunchyrollOrange else Color.White,
             fontSize = 14.sp,
             fontWeight = FontWeight.Bold,
             maxLines = 1,
@@ -712,14 +729,19 @@ fun AddProfileItemCard(
         label = "AddPressedScale"
     )
 
+    var isFocused by remember { mutableStateOf(false) }
+    val focusScale by animateFloatAsState(if (isFocused) 1.12f else 1.0f)
+    val finalScale = focusScale * pressedScale
+
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
             .width(96.dp)
             .graphicsLayer {
-                scaleX = pressedScale
-                scaleY = pressedScale
+                scaleX = finalScale
+                scaleY = finalScale
             }
+            .onFocusChanged { isFocused = it.isFocused }
             .clickable(
                 interactionSource = interactionSource,
                 indication = null,
@@ -730,7 +752,13 @@ fun AddProfileItemCard(
             modifier = Modifier
                 .size(80.dp)
                 .background(Color.Transparent, CircleShape)
-                .border(BorderStroke(2.dp, Color(0xFF22222A)), CircleShape)
+                .border(
+                    BorderStroke(
+                        width = if (isFocused) 3.5.dp else 2.dp,
+                        color = if (isFocused) CrunchyrollOrange else Color(0xFF22222A)
+                    ),
+                    CircleShape
+                )
                 .padding(4.dp),
             contentAlignment = Alignment.Center
         ) {
@@ -744,7 +772,7 @@ fun AddProfileItemCard(
                 Icon(
                     imageVector = Icons.Default.Add,
                     contentDescription = "Add Profile",
-                    tint = Color.Gray,
+                    tint = if (isFocused) CrunchyrollOrange else Color.Gray,
                     modifier = Modifier.size(28.dp)
                 )
             }
@@ -754,7 +782,7 @@ fun AddProfileItemCard(
 
         Text(
             text = "Add Profile",
-            color = Color.Gray,
+            color = if (isFocused) CrunchyrollOrange else Color.Gray,
             fontSize = 14.sp,
             fontWeight = FontWeight.Medium,
             textAlign = TextAlign.Center
@@ -1216,24 +1244,12 @@ fun PinEntryOverlay(
                             horizontalArrangement = Arrangement.SpaceEvenly
                         ) {
                             row.forEach { char ->
+                                var isKeyFocused by remember { mutableStateOf(false) }
                                 Box(
                                     modifier = Modifier
                                         .size(54.dp)
                                         .clip(CircleShape)
-                                        .background(
-                                            when (char) {
-                                                "C", "⌫" -> Color.Transparent
-                                                else -> Color(0xFF14141C)
-                                            }
-                                        )
-                                        .border(
-                                            width = 1.dp,
-                                            color = when (char) {
-                                                "C", "⌫" -> Color.Transparent
-                                                else -> Color(0xFF25252F)
-                                            },
-                                            shape = CircleShape
-                                        )
+                                        .onFocusChanged { isKeyFocused = it.isFocused }
                                         .clickable {
                                             if (pinError) return@clickable
 
@@ -1257,12 +1273,28 @@ fun PinEntryOverlay(
                                                     }
                                                 }
                                             }
-                                        },
+                                        }
+                                        .background(
+                                            when {
+                                                isKeyFocused -> CrunchyrollOrange
+                                                char == "C" || char == "⌫" -> Color.Transparent
+                                                else -> Color(0xFF14141C)
+                                            }
+                                        )
+                                        .border(
+                                            width = if (isKeyFocused) 2.5.dp else 1.dp,
+                                            color = when {
+                                                isKeyFocused -> Color.White
+                                                char == "C" || char == "⌫" -> Color.Transparent
+                                                else -> Color(0xFF25252F)
+                                            },
+                                            shape = CircleShape
+                                        ),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Text(
                                         text = char,
-                                        color = if (char == "C" || char == "⌫") CrunchyrollOrange else Color.White,
+                                        color = if (isKeyFocused) Color.White else if (char == "C" || char == "⌫") CrunchyrollOrange else Color.White,
                                         fontSize = if (char == "C" || char == "⌫") 16.sp else 20.sp,
                                         fontWeight = FontWeight.Bold
                                     )
@@ -1378,18 +1410,20 @@ fun CreateEditProfileDialog(
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             firstHalf.forEach { avatar ->
+                                var isAvatarFocused by remember { mutableStateOf(false) }
                                 Box(
                                     modifier = Modifier
                                         .weight(1f)
                                         .aspectRatio(1f)
                                         .clip(RoundedCornerShape(12.dp))
                                         .background(Brush.radialGradient(avatar.gradientColors))
+                                        .onFocusChanged { isAvatarFocused = it.isFocused }
+                                        .clickable { selectedAvatarId = avatar.id }
                                         .border(
                                             width = 3.dp,
-                                            color = if (selectedAvatarId == avatar.id) Color.White else Color.Transparent,
+                                            color = if (isAvatarFocused) CrunchyrollOrange else if (selectedAvatarId == avatar.id) Color.White else Color.Transparent,
                                             shape = RoundedCornerShape(12.dp)
-                                        )
-                                        .clickable { selectedAvatarId = avatar.id },
+                                        ),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Icon(
@@ -1407,18 +1441,20 @@ fun CreateEditProfileDialog(
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             secondHalf.forEach { avatar ->
+                                var isAvatarFocused by remember { mutableStateOf(false) }
                                 Box(
                                     modifier = Modifier
                                         .weight(1f)
                                         .aspectRatio(1f)
                                         .clip(RoundedCornerShape(12.dp))
                                         .background(Brush.radialGradient(avatar.gradientColors))
+                                        .onFocusChanged { isAvatarFocused = it.isFocused }
+                                        .clickable { selectedAvatarId = avatar.id }
                                         .border(
                                             width = 3.dp,
-                                            color = if (selectedAvatarId == avatar.id) Color.White else Color.Transparent,
+                                            color = if (isAvatarFocused) CrunchyrollOrange else if (selectedAvatarId == avatar.id) Color.White else Color.Transparent,
                                             shape = RoundedCornerShape(12.dp)
-                                        )
-                                        .clickable { selectedAvatarId = avatar.id },
+                                        ),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Icon(
@@ -1786,6 +1822,7 @@ fun CreateEditProfileDialog(
             }
         },
         confirmButton = {
+            var isSaveFocused by remember { mutableStateOf(false) }
             Button(
                 onClick = {
                     if (name.isBlank()) return@Button
@@ -1819,7 +1856,12 @@ fun CreateEditProfileDialog(
                         if (isPinEnabled) recoveryAnswer else null
                     )
                 },
-                colors = ButtonDefaults.buttonColors(containerColor = CrunchyrollOrange),
+                modifier = Modifier.onFocusChanged { isSaveFocused = it.isFocused },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (isSaveFocused) CrunchyrollOrange else Color(0xFF22222A),
+                    contentColor = Color.White
+                ),
+                border = BorderStroke(1.dp, if (isSaveFocused) Color.White else Color.Transparent),
                 shape = RoundedCornerShape(10.dp)
             ) {
                 Text("Apply & Save", color = Color.White, fontWeight = FontWeight.Bold)
@@ -1831,12 +1873,34 @@ fun CreateEditProfileDialog(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 if (onDelete != null) {
-                    TextButton(onClick = onDelete) {
-                        Text("Delete Profile", color = ErrorColor)
+                    var isDeleteFocused by remember { mutableStateOf(false) }
+                    TextButton(
+                        onClick = onDelete,
+                        modifier = Modifier.onFocusChanged { isDeleteFocused = it.isFocused },
+                        colors = ButtonDefaults.textButtonColors(
+                            contentColor = if (isDeleteFocused) Color.White else ErrorColor
+                        )
+                    ) {
+                        Text(
+                            text = "Delete Profile", 
+                            color = if (isDeleteFocused) Color.White else ErrorColor,
+                            fontWeight = if (isDeleteFocused) FontWeight.Bold else FontWeight.Normal
+                        )
                     }
                 }
-                TextButton(onClick = onDismiss) {
-                    Text("Cancel", color = Color.LightGray)
+                var isCancelFocused by remember { mutableStateOf(false) }
+                TextButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.onFocusChanged { isCancelFocused = it.isFocused },
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = if (isCancelFocused) Color.White else Color.LightGray
+                    )
+                ) {
+                    Text(
+                        text = "Cancel", 
+                        color = if (isCancelFocused) Color.White else Color.LightGray,
+                        fontWeight = if (isCancelFocused) FontWeight.Bold else FontWeight.Normal
+                    )
                 }
             }
         },

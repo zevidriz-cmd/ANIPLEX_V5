@@ -7,7 +7,7 @@ import { useProfile } from "../context/ProfileContext";
 import { getHome, resolveMAL, search, STREAM_PROXY_BASE } from "../services/api";
 import Carousel from "../components/Carousel";
 import AnimeCard from "../components/AnimeCard";
-import { BillboardShimmer, GridShimmer } from "../components/Shimmer";
+import { BillboardShimmer, GridShimmer, CardShimmer, LandscapeCardShimmer } from "../components/Shimmer";
 import { Play, ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
 
 export default function HomePage() {
@@ -272,11 +272,44 @@ export default function HomePage() {
     return (
       <div className="home-loading-wrapper">
         <BillboardShimmer />
-        <div className="container">
-          <div style={{ margin: "2rem 0" }}>
-            <h2 className="section-title">Loading trending anime...</h2>
-            <GridShimmer count={6} />
-          </div>
+        <div className="container home-content-sections" style={{ marginTop: "-6rem" }}>
+          {/* Continue Watching Shimmer */}
+          <section className="home-section">
+            <h2 className="section-title">Continue Watching</h2>
+            <div className="horizontal-scroll-row">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <div key={i} className="scroll-card-item">
+                  <CardShimmer />
+                </div>
+              ))}
+            </div>
+          </section>
+
+          {/* Trending Now Shimmer */}
+          <section className="home-section">
+            <h2 className="section-title">Trending Now</h2>
+            <div className="horizontal-scroll-row">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <div key={i} className="scroll-card-item">
+                  <CardShimmer />
+                </div>
+              ))}
+            </div>
+          </section>
+
+          {/* Recently Added Landscape Shimmer */}
+          <section className="home-section">
+            <h2 className="section-title">Recently Added Episodes</h2>
+            <div className="airing-scroll-container-wrapper">
+              <div className="airing-scroll-row">
+                {Array.from({ length: 5 }).map((_, i) => (
+                  <div key={i} className="airing-card-item">
+                    <LandscapeCardShimmer />
+                  </div>
+                ))}
+              </div>
+            </div>
+          </section>
         </div>
       </div>
     );

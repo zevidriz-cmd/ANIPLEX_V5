@@ -5,6 +5,7 @@ import {
   Maximize, Minimize, Settings, Subtitles, SkipForward,
   Lock, LockOpen, ArrowLeft, Loader2, X, PictureInPicture2
 } from "lucide-react";
+import { useProfile } from "../context/ProfileContext";
 
 export default function VideoPlayer({ 
   src, 
@@ -22,15 +23,36 @@ export default function VideoPlayer({
   onBack,
   nextEpisode,
   onNext,
-  externalLoading = false
+  externalLoading = false,
+  malId,
+  tmdbId,
+  tmdbEpisodeInfo,
+  audioCategory = "sub",
+  onPlaybackError,
+  provider = "zoro",
+  availableAudioCategories = [],
+  onAudioCategoryChange
 }) {
   const videoRef = useRef(null);
+  const { saveSettings } = useProfile();
   const containerRef = useRef(null);
   const hlsRef = useRef(null);
   const lastSavedTimeRef = useRef(0);
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [hasPlaybackError, setHasPlaybackError] = useState(false);
+
+  const triggerPlaybackError = () => {
+    console.warn("Playback error triggered for provider:", provider);
+    setHasPlaybackError(true);
+    if (onPlaybackError) {
+      onPlaybackError(provider);
+    }
+  };
+  const networkErrorRetryCountRef = useRef(0);
+  const mediaErrorRetryCountRef = useRef(0);
+  const loadingTimeoutRef = useRef(null);
   const [upNextDismissed, setUpNextDismissed] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -55,6 +77,9 @@ export default function VideoPlayer({
   const [showSkipOutro, setShowSkipOutro] = useState(false);
   const [hlsQualities, setHlsQualities] = useState([]);
   const [currentQuality, setCurrentQuality] = useState(-1); // -1 = Auto
+  const [activeQualityHeight, setActiveQualityHeight] = useState(null);
+  const [audioTracks, setAudioTracks] = useState([]);
+  const [currentAudioTrack, setCurrentAudioTrack] = useState(-1);
 
   // Touch Swipe & Double Tap Gestures
   const touchRef = useRef({
@@ -84,6 +109,7 @@ export default function VideoPlayer({
   const [containerWidth, setContainerWidth] = useState(800);
   const [showNotice, setShowNotice] = useState(false);
   const [noticeData, setNoticeData] = useState(null);
+  const [selectedBackupServer, setSelectedBackupServer] = useState("megaplay");
 
   useEffect(() => {
     if (fallbackNotice) {
@@ -160,6 +186,12 @@ export default function VideoPlayer({
 
   // Set default active track
   useEffect(() => {
+    const subsEnabled = localStorage.getItem("anistream_subtitles_enabled") !== "false";
+    if (!subsEnabled) {
+      setActiveTrackIndex(-1);
+      return;
+    }
+
     if (tracks && tracks.length > 0) {
       const englishIndex = tracks.findIndex(t => t.label?.toLowerCase() === "english");
       const defaultIndex = tracks.findIndex(t => t.default || t.isDefault);
@@ -578,6 +610,33 @@ export default function VideoPlayer({
     };
   }, [isPlaying]);
 
+  const startLoadingWatchdog = () => {
+    if (loadingTimeoutRef.current) clearTimeout(loadingTimeoutRef.current);
+    loadingTimeoutRef.current = setTimeout(() => {
+      const video = videoRef.current;
+      const isActuallyPlaying = video && !video.paused && video.currentTime > 0;
+      if (!isActuallyPlaying) {
+        console.warn("Loading watchdog fired: stream failed to start within 15 seconds. Triggering fallback...");
+        triggerPlaybackError();
+        if (hlsRef.current) {
+          hlsRef.current.destroy();
+        }
+      }
+    }, 15000);
+  };
+
+  const clearLoadingWatchdog = () => {
+    if (loadingTimeoutRef.current) {
+      clearTimeout(loadingTimeoutRef.current);
+      loadingTimeoutRef.current = null;
+    }
+  };
+
+  // Reset playback error state when the source URL changes
+  useEffect(() => {
+    setHasPlaybackError(false);
+  }, [src]);
+
   // Load HLS Video or Iframe Fallback
   useEffect(() => {
     const video = videoRef.current;
@@ -590,6 +649,13 @@ export default function VideoPlayer({
     setCurrentTime(0);
     setDuration(0);
     lastSavedTimeRef.current = 0;
+    setHasPlaybackError(false);
+    networkErrorRetryCountRef.current = 0;
+    mediaErrorRetryCountRef.current = 0;
+    setAudioTracks([]);
+    setCurrentAudioTrack(-1);
+
+    startLoadingWatchdog();
 
     if (Hls.isSupported()) {
       if (hlsRef.current) {
@@ -658,16 +724,57 @@ export default function VideoPlayer({
         video.play().catch(e => console.log("Auto-play blocked by browser. Ready."));
       });
 
+      hls.on(Hls.Events.LEVEL_SWITCHED, (event, data) => {
+        const levelIdx = data.level;
+        if (hls.levels[levelIdx]) {
+          const height = hls.levels[levelIdx].height;
+          console.log(`[Hls.js] Level switched to: ${height}p`);
+          setActiveQualityHeight(height);
+        }
+      });
+
+      // Initialize audio tracks if available
+      hls.on(Hls.Events.AUDIO_TRACKS_UPDATED, (event, data) => {
+        if (hls.audioTracks && hls.audioTracks.length > 0) {
+          setAudioTracks(hls.audioTracks.map(track => ({
+            id: track.id,
+            name: track.name || track.lang || `Track ${track.id}`,
+            lang: track.lang
+          })));
+          setCurrentAudioTrack(hls.audioTrack);
+        }
+      });
+
+      hls.on(Hls.Events.AUDIO_TRACK_SWITCHED, (event, data) => {
+        setCurrentAudioTrack(data.id);
+      });
+
       hls.on(Hls.Events.ERROR, (event, data) => {
         if (data.fatal) {
           switch (data.type) {
             case Hls.ErrorTypes.NETWORK_ERROR:
-              hls.startLoad();
+              networkErrorRetryCountRef.current++;
+              if (networkErrorRetryCountRef.current > 3) {
+                console.error("Fatal HLS network error limit reached. Triggering fallback...");
+                triggerPlaybackError();
+                hls.destroy();
+              } else {
+                hls.startLoad();
+              }
               break;
             case Hls.ErrorTypes.MEDIA_ERROR:
-              hls.recoverMediaError();
+              mediaErrorRetryCountRef.current++;
+              if (mediaErrorRetryCountRef.current > 3) {
+                console.error("Fatal HLS media error limit reached. Triggering fallback...");
+                triggerPlaybackError();
+                hls.destroy();
+              } else {
+                hls.recoverMediaError();
+              }
               break;
             default:
+              console.error("Fatal HLS error unrecoverable. Triggering fallback:", data.details);
+              triggerPlaybackError();
               hls.destroy();
               break;
           }
@@ -676,6 +783,11 @@ export default function VideoPlayer({
     } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
       // Native Safari support
       video.src = src;
+      const handleNativeError = (e) => {
+        console.error("Native video element playback error:", e);
+        triggerPlaybackError();
+      };
+      video.addEventListener("error", handleNativeError);
       video.addEventListener("loadedmetadata", () => {
         if (initialTime > 0) {
           video.currentTime = initialTime / 1000;
@@ -685,6 +797,7 @@ export default function VideoPlayer({
     }
 
     return () => {
+      clearLoadingWatchdog();
       if (hlsRef.current) {
         hlsRef.current.destroy();
         hlsRef.current = null;
@@ -709,16 +822,27 @@ export default function VideoPlayer({
 
   // Skip overlays check
   useEffect(() => {
+    const skipIntroEnabled = localStorage.getItem("anistream_skip_intro") !== "false";
+    const skipOutroEnabled = localStorage.getItem("anistream_skip_outro") !== "false";
+
     // Check Skip Intro
     if (intro && intro.end > intro.start && currentTime >= intro.start && currentTime <= intro.end) {
-      setShowSkipIntro(true);
+      if (skipIntroEnabled && videoRef.current) {
+        videoRef.current.currentTime = intro.end;
+      } else {
+        setShowSkipIntro(true);
+      }
     } else {
       setShowSkipIntro(false);
     }
 
     // Check Skip Outro
     if (outro && outro.end > outro.start && currentTime >= outro.start && currentTime <= outro.end) {
-      setShowSkipOutro(true);
+      if (skipOutroEnabled && videoRef.current) {
+        videoRef.current.currentTime = outro.end;
+      } else {
+        setShowSkipOutro(true);
+      }
     } else {
       setShowSkipOutro(false);
     }
@@ -964,6 +1088,33 @@ export default function VideoPlayer({
     setShowSettings(false);
   };
 
+  const changeAudioTrack = (trackId) => {
+    if (hlsRef.current) {
+      hlsRef.current.audioTrack = trackId;
+      setCurrentAudioTrack(trackId);
+    }
+    setShowSettings(false);
+  };
+
+  const updateBuffer = (video) => {
+    if (video && video.buffered && video.buffered.length > 0) {
+      const time = video.currentTime;
+      let activeRangeEnd = 0;
+      for (let i = 0; i < video.buffered.length; i++) {
+        const start = video.buffered.start(i);
+        const end = video.buffered.end(i);
+        if (time >= start && time <= end) {
+          activeRangeEnd = end;
+          break;
+        }
+      }
+      if (activeRangeEnd === 0) {
+        activeRangeEnd = video.buffered.end(video.buffered.length - 1);
+      }
+      setBufferedEnd(activeRangeEnd);
+    }
+  };
+
   const handleSkipIntro = () => {
     if (videoRef.current && intro) {
       videoRef.current.currentTime = intro.end;
@@ -1001,46 +1152,147 @@ export default function VideoPlayer({
     };
   }, [src, duration]);
 
-  // If HLS source is not available, render the Iframe Web Player
-  if (!src && embedUrl) {
-    const cleanedEmbedUrl = embedUrl.replace(/(\/stream\/s-[1-9]\/)(\d+)\/(\d+)/, (m, p1, p2, p3) => p1 + p3);
+  // If HLS source is not available or has failed to play, render the Iframe Web Player
+  if ((!src || hasPlaybackError) && (embedUrl || malId)) {
+    const epNum = episodeNumber || 1;
+    const season = tmdbEpisodeInfo?.season || 1;
+    const episode = tmdbEpisodeInfo?.episode || epNum;
+
+    let finalEmbedUrl = "";
+    if (selectedBackupServer === "megaplay") {
+      finalEmbedUrl = `https://megaplay.buzz/stream/mal/${malId}/${epNum}/${audioCategory}`;
+    } else if (selectedBackupServer === "vidsrc-to") {
+      if (tmdbId) {
+        finalEmbedUrl = `https://vidsrc.to/embed/tv/${tmdbId}/${season}/${episode}`;
+      } else {
+        finalEmbedUrl = `https://vidsrc.to/embed/anime/${malId}/${epNum}`;
+      }
+    } else if (selectedBackupServer === "vidsrc-me") {
+      if (tmdbId) {
+        finalEmbedUrl = `https://vidsrc.me/embed/tv/${tmdbId}/${season}/${episode}`;
+      } else {
+        finalEmbedUrl = `https://vidsrc.me/embed/anime?mal=${malId}&ep=${epNum}`;
+      }
+    } else if (selectedBackupServer === "embed-su") {
+      if (tmdbId) {
+        finalEmbedUrl = `https://embed.su/embed/tv/${tmdbId}/${season}/${episode}`;
+      } else {
+        finalEmbedUrl = `https://vidsrc.to/embed/anime/${malId}/${epNum}`;
+      }
+    } else {
+      finalEmbedUrl = embedUrl;
+    }
+
+    const cleanedEmbedUrl = (finalEmbedUrl || "").replace(/(\/stream\/s-[1-9]\/)(\d+)\/(\d+)/, (m, p1, p2, p3) => p1 + p3);
     const separator = cleanedEmbedUrl.includes("?") ? "&" : "?";
+
     return (
-      <div className="iframe-player-wrapper">
-        {/* Floating Top Bar for Iframe Player */}
-        <div className="iframe-player-top-bar">
-          {onBack && (
-            <button className="player-back-btn" onClick={onBack} aria-label="Back" type="button">
-              <ArrowLeft size={20} />
-            </button>
+      <div className="iframe-layout-container">
+        <div className="iframe-player-wrapper">
+          {/* Floating Top Bar for Iframe Player */}
+          <div className="iframe-player-top-bar">
+            {onBack && (
+              <button className="player-back-btn" onClick={onBack} aria-label="Back" type="button">
+                <ArrowLeft size={20} />
+              </button>
+            )}
+            <div className="title-info">
+              <span className="anime-title">{animeTitle}</span>
+              <span className="episode-badge">Episode {episodeNumber}</span>
+            </div>
+          </div>
+
+          {showNotice && noticeData && (
+            <div className={`player-fallback-banner ${noticeData.type}`}>
+              <span className="notice-icon">
+                {noticeData.type === "warning" ? "⚠️" : "ℹ️"}
+              </span>
+              <span className="notice-message">{noticeData.message}</span>
+              <button className="notice-close" onClick={() => setShowNotice(false)} type="button">
+                <X size={14} />
+              </button>
+            </div>
           )}
-          <div className="title-info">
-            <span className="anime-title">{animeTitle}</span>
-            <span className="episode-badge">Episode {episodeNumber}</span>
+
+          <iframe 
+            src={`${cleanedEmbedUrl}${separator}autoPlay=1`} 
+            title="Episode Stream Player" 
+            allowFullScreen
+            allow="autoplay; fullscreen; picture-in-picture"
+            className="iframe-player-frame"
+          ></iframe>
+        </div>
+
+        {/* Server Selector inside Iframe Fallback */}
+        <div className="iframe-server-bar">
+          <span className="server-bar-label">Select Backup Server:</span>
+          <div className="server-bar-buttons">
+            {[
+              { id: "megaplay", name: "Backup Server 1 (MegaPlay - Direct MAL)" },
+              { id: "vidsrc-to", name: "Backup Server 2 (VidSrc.to)" },
+              { id: "vidsrc-me", name: "Backup Server 3 (VidSrc.me)" },
+              { id: "embed-su", name: "Backup Server 4 (Embed.su)" }
+            ].map((srv) => (
+              <button
+                key={srv.id}
+                className={`iframe-server-btn ${selectedBackupServer === srv.id ? "active" : ""}`}
+                onClick={() => setSelectedBackupServer(srv.id)}
+                type="button"
+              >
+                {srv.name}
+              </button>
+            ))}
           </div>
         </div>
 
-        {showNotice && noticeData && (
-          <div className={`player-fallback-banner ${noticeData.type}`}>
-            <span className="notice-icon">
-              {noticeData.type === "warning" ? "⚠️" : "ℹ️"}
-            </span>
-            <span className="notice-message">{noticeData.message}</span>
-            <button className="notice-close" onClick={() => setShowNotice(false)} type="button">
-              <X size={14} />
-            </button>
-          </div>
-        )}
-
-        <iframe 
-          src={`${cleanedEmbedUrl}${separator}autoPlay=1`} 
-          title="Episode Stream Player" 
-          allowFullScreen
-          allow="autoplay; fullscreen; picture-in-picture"
-          referrerPolicy="no-referrer"
-          className="iframe-player-frame"
-        ></iframe>
         <style>{`
+          .iframe-layout-container {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            width: 100%;
+          }
+          .iframe-server-bar {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            background: #111;
+            padding: 10px 16px;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+          }
+          .server-bar-label {
+            font-size: 0.85rem;
+            font-weight: 700;
+            color: var(--text-secondary);
+          }
+          .server-bar-buttons {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+          }
+          .iframe-server-btn {
+            background-color: var(--bg-card);
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-family: var(--font-family);
+            font-size: 0.8rem;
+            font-weight: 600;
+            transition: var(--transition);
+          }
+          .iframe-server-btn:hover {
+            background-color: #242424;
+            color: white;
+            border-color: #444;
+          }
+          .iframe-server-btn.active {
+            background-color: var(--primary);
+            color: white;
+            border-color: var(--primary);
+          }
           .player-fallback-banner {
             position: absolute;
             top: 60px;
@@ -1138,10 +1390,6 @@ export default function VideoPlayer({
             font-weight: 700;
           }
           .iframe-player-top-bar .player-back-btn {
-            background: none;
-            border: none;
-            color: white;
-            cursor: pointer;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -1152,6 +1400,23 @@ export default function VideoPlayer({
           }
           .iframe-player-top-bar .player-back-btn:hover {
             background-color: rgba(255, 255, 255, 0.15);
+          }
+          @media (max-width: 768px) {
+            .iframe-server-bar {
+              flex-direction: column;
+              align-items: flex-start;
+              gap: 8px;
+              padding: 8px 12px;
+            }
+            .server-bar-buttons {
+              width: 100%;
+            }
+            .iframe-server-btn {
+              flex: 1 1 auto;
+              text-align: center;
+              font-size: 0.75rem;
+              padding: 5px 10px;
+            }
           }
         `}</style>
       </div>
@@ -1336,12 +1601,22 @@ export default function VideoPlayer({
           setIsLoading(false);
         }}
         onPause={() => setIsPlaying(false)}
-        onTimeUpdate={(e) => setCurrentTime(e.target.currentTime)}
-        onProgress={(e) => {
+        onTimeUpdate={(e) => {
           const video = e.target;
-          if (video.buffered.length > 0) {
-            setBufferedEnd(video.buffered.end(video.buffered.length - 1));
+          setCurrentTime(video.currentTime);
+          updateBuffer(video);
+          if (video.currentTime > 0 && !video.paused) {
+            clearLoadingWatchdog();
           }
+        }}
+        onProgress={(e) => {
+          updateBuffer(e.target);
+        }}
+        onSeeking={(e) => {
+          updateBuffer(e.target);
+        }}
+        onSeeked={(e) => {
+          updateBuffer(e.target);
         }}
         onDurationChange={(e) => setDuration(e.target.duration)}
         onVolumeChange={(e) => {
@@ -1349,12 +1624,33 @@ export default function VideoPlayer({
           setVolume(video.volume);
           setIsMuted(video.muted);
         }}
-        onEnded={onEnded}
-        onWaiting={() => setIsLoading(true)}
-        onPlaying={() => setIsLoading(false)}
-        onCanPlay={() => setIsLoading(false)}
+        onEnded={() => {
+          const video = videoRef.current;
+          if (video && video.duration > 0 && Math.abs(video.currentTime - video.duration) < 3) {
+            if (onEnded) onEnded();
+          }
+        }}
+        onWaiting={() => {
+          setIsLoading(true);
+          startLoadingWatchdog();
+        }}
+        onPlaying={() => {
+          setIsLoading(false);
+          clearLoadingWatchdog();
+        }}
+        onCanPlay={() => {
+          setIsLoading(false);
+          clearLoadingWatchdog();
+        }}
         onLoadStart={() => setIsLoading(true)}
-        onLoadedData={() => setIsLoading(false)}
+        onLoadedData={() => {
+          setIsLoading(false);
+          clearLoadingWatchdog();
+        }}
+        onError={(e) => {
+          console.error("Native HTML5 video element error event triggered:", e);
+          triggerPlaybackError();
+        }}
         crossOrigin="anonymous"
       >
         {tracks.map((track, i) => (
@@ -1613,6 +1909,39 @@ export default function VideoPlayer({
                         ))}
                       </div>
                     </div>
+                    {(audioTracks.length > 0 || (availableAudioCategories && availableAudioCategories.length > 1)) && (
+                      <div className="settings-section">
+                        <h4>Audio</h4>
+                        <div className="settings-options scrollable full-width">
+                          {audioTracks.length > 0 ? (
+                            audioTracks.map((track) => (
+                              <button
+                                key={track.id}
+                                onClick={() => changeAudioTrack(track.id)}
+                                className={currentAudioTrack === track.id ? "active" : ""}
+                              >
+                                {track.name}
+                              </button>
+                            ))
+                          ) : (
+                            availableAudioCategories.map((cat) => (
+                              <button
+                                key={cat}
+                                onClick={() => {
+                                  if (cat !== audioCategory && onAudioCategoryChange) {
+                                    onAudioCategoryChange(cat);
+                                  }
+                                  setShowSettings(false);
+                                }}
+                                className={audioCategory === cat ? "active" : ""}
+                              >
+                                {cat === "sub" ? "Subbed (Japanese)" : "Dubbed (English)"}
+                              </button>
+                            ))
+                          )}
+                        </div>
+                      </div>
+                    )}
                     {tracks.length > 0 && (
                       <div className="settings-section">
                         <h4>Subtitles</h4>
@@ -1620,6 +1949,8 @@ export default function VideoPlayer({
                           <button 
                             onClick={() => {
                               setActiveTrackIndex(-1);
+                              localStorage.setItem("anistream_subtitles_enabled", "false");
+                              saveSettings();
                               setShowSettings(false);
                             }}
                             className={activeTrackIndex === -1 ? "active" : ""}
@@ -1631,6 +1962,8 @@ export default function VideoPlayer({
                               key={idx} 
                               onClick={() => {
                                 setActiveTrackIndex(idx);
+                                localStorage.setItem("anistream_subtitles_enabled", "true");
+                                saveSettings();
                                 setShowSettings(false);
                               }}
                               className={activeTrackIndex === idx ? "active" : ""}
@@ -1646,11 +1979,11 @@ export default function VideoPlayer({
                         <h4>Quality</h4>
                         <div className="settings-options scrollable">
                           <button 
-                            onClick={() => changeQuality(-1)}
-                            className={currentQuality === -1 ? "active" : ""}
-                          >
-                            Auto
-                          </button>
+                             onClick={() => changeQuality(-1)}
+                             className={currentQuality === -1 ? "active" : ""}
+                           >
+                             {currentQuality === -1 && activeQualityHeight ? `Auto (${activeQualityHeight}p)` : "Auto"}
+                           </button>
                           {hlsQualities.map(q => (
                             <button 
                               key={q.index} 
@@ -2010,6 +2343,22 @@ export default function VideoPlayer({
           flex-direction: column;
           gap: 12px;
           z-index: 50;
+          max-height: 280px;
+          overflow-y: auto;
+          scrollbar-width: thin;
+        }
+        .settings-panel::-webkit-scrollbar {
+          width: 4px;
+        }
+        .settings-panel::-webkit-scrollbar-track {
+          background: transparent;
+        }
+        .settings-panel::-webkit-scrollbar-thumb {
+          background: rgba(255, 255, 255, 0.15);
+          border-radius: 2px;
+        }
+        .settings-panel::-webkit-scrollbar-thumb:hover {
+          background: var(--primary);
         }
         .settings-section h4 {
           font-size: 0.75rem;
@@ -2026,6 +2375,11 @@ export default function VideoPlayer({
         .settings-options.scrollable {
           max-height: 120px;
           overflow-y: auto;
+        }
+        .settings-options.full-width button {
+          flex: 1 0 100% !important;
+          text-align: left;
+          padding: 6px 8px;
         }
         .settings-options button {
           flex: 1 0 calc(50% - 4px);
@@ -2323,6 +2677,8 @@ export default function VideoPlayer({
             width: 180px;
             bottom: calc(100% + 10px);
             padding: 10px;
+            max-height: min(220px, 75vh);
+            overflow-y: auto;
           }
           .anime-title {
             font-size: 0.95rem;

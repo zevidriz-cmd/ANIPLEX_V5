@@ -122,8 +122,10 @@ class ProfileSelectionViewModel @Inject constructor(
 
     fun signOut(onSuccess: () -> Unit) {
         viewModelScope.launch {
-            auth.signOut()
-            profileManager.clearActiveProfile()
+            kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+                profileManager.clearActiveProfile()
+                auth.signOut()
+            }
             onSuccess()
         }
     }

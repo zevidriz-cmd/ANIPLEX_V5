@@ -35,8 +35,86 @@ const LOCAL_ACCURATE_MAPPINGS = [
   { keywords: ["fairy tail", "fairytail"], malId: 6702, id: "489" },
   { keywords: ["dragon ball z", "dragonballz", "dbz"], malId: 813, id: "1456" },
   { keywords: ["dragon ball super", "dragonballsuper", "dbs"], malId: 30694, id: "132" },
-  { keywords: ["boruto"], malId: 34566, id: "4587" }
+  { keywords: ["boruto"], malId: 34566, id: "4587" },
+  { keywords: ["reincarnated as a slime", "slime", "scarlet bond"], malId: 48761, id: "7200" },
+  { keywords: ["demon slayer", "kimetsu no yaiba", "mugen train"], malId: 39597, id: "5870" },
+  { keywords: ["jujutsu kaisen", "jujutsu kaisen 0", "jujutsu kaisen movie"], malId: 48561, id: "6688" }
 ];
+
+const processSearchResults = (animes, query) => {
+  if (!animes || animes.length === 0) return [];
+  if (!query || !query.trim()) return animes;
+
+  const cleanedQuery = query.toLowerCase().trim();
+  const queryWords = cleanedQuery.replace(/[^\w\s]/g, '').split(/\s+/).filter(Boolean);
+
+  if (queryWords.length === 0) return animes;
+
+  const TYPE_DESCRIPTORS = ["movie", "series", "season", "special", "ova", "ona", "episode", "video"];
+  const importantQueryWords = queryWords.filter(w => w.length >= 4 && !TYPE_DESCRIPTORS.includes(w));
+
+  let processed = animes.map(anime => {
+    const animeName = anime.name.toLowerCase();
+    let score = 0;
+
+    // Exact match gets massive boost
+    if (animeName === cleanedQuery) {
+      score += 2000;
+    }
+    // Substring match gets a large boost
+    if (animeName.includes(cleanedQuery) || cleanedQuery.includes(animeName)) {
+      score += 800;
+    }
+
+    // Exact phrase matches (e.g. "reincarnated as a slime")
+    if (queryWords.length > 2) {
+      for (let i = 0; i < queryWords.length - 1; i++) {
+        const phrase = queryWords[i] + " " + queryWords[i + 1];
+        if (animeName.includes(phrase)) score += 150;
+      }
+    }
+
+    // Count overlap of words
+    const animeWords = animeName.replace(/[^\w\s]/g, '').split(/\s+/).filter(Boolean);
+    let matchCount = 0;
+    let importantMatchCount = 0;
+
+    for (const qw of queryWords) {
+      if (animeWords.includes(qw)) {
+        score += 15;
+        matchCount++;
+        if (qw.length >= 5) score += qw.length * 2;
+      }
+    }
+
+    // Check important unique words matching
+    for (const iw of importantQueryWords) {
+      if (animeName.includes(iw)) {
+        score += 50;
+        importantMatchCount++;
+      }
+    }
+
+    return { anime, score, importantMatchCount, importantQueryWordsCount: importantQueryWords.length };
+  });
+
+  // Filter out unrelated items if the query is specific (3+ words)
+  if (queryWords.length >= 3) {
+    processed = processed.filter(item => {
+      // Must match at least one important query word if there are any
+      if (item.importantQueryWordsCount > 0 && item.importantMatchCount === 0) {
+        return false;
+      }
+      // Score threshold to filter out unrelated garbage matches
+      return item.score >= 40;
+    });
+  }
+
+  // Sort by relevance score descending
+  processed.sort((a, b) => b.score - a.score);
+
+  return processed.map(item => item.anime);
+};
 
 export default function SearchPage() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -237,8 +315,43 @@ export default function SearchPage() {
           page: p
         });
       } else {
-        // Fetch from search API
-        data = await search(queryToSearch || "all", p);
+        // Fetch from search API with smart stop-word fallback query expansion
+        const stopWordsRegex = /\b(a|an|the)\b/i;
+        const hasStopWords = stopWordsRegex.test(queryToSearch);
+        const words = queryToSearch.trim().split(/\s+/);
+        
+        let originalPromise = search(queryToSearch || "all", p);
+        let fallbackPromise = null;
+        
+        if (hasStopWords && words.length > 1) {
+          const fallbackQuery = queryToSearch.replace(/\b(a|an|the)\b/gi, "").replace(/\s+/g, " ").trim();
+          if (fallbackQuery && fallbackQuery.toLowerCase() !== queryToSearch.trim().toLowerCase()) {
+            console.log(`[SearchPage] Triggering stop-word-free fallback search: "${fallbackQuery}"`);
+            fallbackPromise = search(fallbackQuery, p);
+          }
+        }
+        
+        const [originalData, fallbackData] = await Promise.all([
+          originalPromise,
+          fallbackPromise ? fallbackPromise.catch(() => null) : Promise.resolve(null)
+        ]);
+        
+        data = originalData;
+        let mergedAnimes = originalData?.animes ? [...originalData.animes] : [];
+        
+        if (fallbackData?.animes) {
+          const existingIds = new Set(mergedAnimes.map(a => String(a.id)));
+          fallbackData.animes.forEach(anime => {
+            if (!existingIds.has(String(anime.id))) {
+              mergedAnimes.push(anime);
+            }
+          });
+        }
+        
+        if (data) {
+          data.animes = mergedAnimes;
+        }
+
         if (hasFilters && data?.animes) {
           // Apply client-side filter for type if it is set
           let filtered = [...data.animes];
@@ -270,7 +383,7 @@ export default function SearchPage() {
         // B. Dynamic Jikan (MAL) search fallback to handle other shows
         try {
           // Only trigger Jikan lookup if we didn't find local match or want additional results
-          const jikanRes = await fetch(`https://api.jikan.moe/v4/anime?q=${encodeURIComponent(queryToSearch)}&limit=3`);
+          const jikanRes = await fetch(`https://api.jikan.moe/v4/anime?q=${encodeURIComponent(queryToSearch)}&limit=8`);
           if (jikanRes.ok) {
             const jikanJson = await jikanRes.json();
             const malIds = (jikanJson.data || []).map(item => item.mal_id);
@@ -327,6 +440,24 @@ export default function SearchPage() {
         }
       }
 
+      if (hasFilters) {
+        let filtered = [...finalAnimes];
+        if (type) {
+          filtered = filtered.filter(a => a.type?.toLowerCase() === type.toLowerCase());
+        }
+        if (status) {
+          filtered = filtered.filter(a => a.status?.toLowerCase() === status.toLowerCase());
+        }
+        if (selectedGenres.length > 0) {
+          filtered = filtered.filter(a => {
+            if (!a.genres) return true; // keep if undefined to be safe
+            return selectedGenres.some(sg => a.genres.includes(sg));
+          });
+        }
+        finalAnimes = filtered;
+      }
+
+      finalAnimes = processSearchResults(finalAnimes, queryToSearch);
       setResults(finalAnimes);
       setPage(data?.currentPage || 1);
       setTotalPages(data?.totalPages || 1);
@@ -409,7 +540,12 @@ export default function SearchPage() {
                   if (type) {
                     resolvedAnimes = resolvedAnimes.filter(a => a.type?.toLowerCase() === type.toLowerCase());
                   }
+                  if (status) {
+                    resolvedAnimes = resolvedAnimes.filter(a => a.status?.toLowerCase() === status.toLowerCase());
+                  }
                 }
+
+                resolvedAnimes = processSearchResults(resolvedAnimes, queryToSearch);
 
                 if (resolvedAnimes.length > 0) {
                   setResults(resolvedAnimes);
@@ -503,7 +639,12 @@ export default function SearchPage() {
             if (type) {
               fallbackResults = fallbackResults.filter(a => a.type?.toLowerCase() === type.toLowerCase());
             }
+            if (status) {
+              fallbackResults = fallbackResults.filter(a => a.status?.toLowerCase() === status.toLowerCase());
+            }
           }
+
+          fallbackResults = processSearchResults(fallbackResults, queryToSearch);
 
           if (fallbackResults.length > 0) {
             setResults(fallbackResults);
@@ -553,6 +694,13 @@ export default function SearchPage() {
       handleSearchSubmit(1);
     }
   }, []);
+
+  // Trigger search automatically when filters change for real-time reactivity
+  useEffect(() => {
+    if (keyword || type || status || selectedGenres.length > 0) {
+      handleSearchSubmit(1);
+    }
+  }, [type, status, selectedGenres, sort]);
 
   const handleKeyPress = (e) => {
     if (e.key === "Enter") {

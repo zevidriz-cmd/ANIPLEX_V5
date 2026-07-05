@@ -300,37 +300,69 @@ fun SearchableAnimeGrid(
                         SearchComponentShimmerLoader(columns)
                     }
                     is SearchUiState.Success -> {
-                        LazyVerticalGrid(
-                            columns = columns,
-                            state = gridState,
-                            horizontalArrangement = Arrangement.spacedBy(14.dp),
-                            verticalArrangement = Arrangement.spacedBy(14.dp),
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .testTag("search_results_grid")
-                        ) {
-                            items(state.results.size) { index ->
-                                val anime = state.results[index]
-                                AnimeCard(
-                                    anime = anime,
-                                    onClick = { animeId ->
-                                        focusManager.clearFocus()
-                                        keyboardController?.hide()
-                                        viewModel.recordSearchQuery(searchQuery)
-                                        onAnimeClick(animeId)
-                                    },
-                                    modifier = Modifier.fillMaxWidth()
-                                )
-                            }
-                            if (state.hasNextPage) {
-                                item(span = { GridItemSpan(maxLineSpan) }) {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(16.dp),
-                                        contentAlignment = Alignment.Center
+                        Column(modifier = Modifier.fillMaxSize()) {
+                            if (state.fallbackType == "anilist") {
+                                Card(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(bottom = 12.dp),
+                                    colors = CardDefaults.cardColors(containerColor = CrunchyrollOrange.copy(alpha = 0.15f)),
+                                    border = BorderStroke(1.dp, CrunchyrollOrange.copy(alpha = 0.4f)),
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(12.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                                     ) {
-                                        CircularProgressIndicator(color = CrunchyrollOrange, modifier = Modifier.size(24.dp))
+                                        Icon(
+                                            imageVector = Icons.Default.Warning,
+                                            contentDescription = "Warning",
+                                            tint = CrunchyrollOrange,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Text(
+                                            text = "Search server is experiencing downtime. Serving results via AniList backup.",
+                                            color = Color.White,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    }
+                                }
+                            }
+
+                            LazyVerticalGrid(
+                                columns = columns,
+                                state = gridState,
+                                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                                verticalArrangement = Arrangement.spacedBy(14.dp),
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .testTag("search_results_grid")
+                            ) {
+                                items(state.results.size) { index ->
+                                    val anime = state.results[index]
+                                    AnimeCard(
+                                        anime = anime,
+                                        onClick = { animeId ->
+                                            focusManager.clearFocus()
+                                            keyboardController?.hide()
+                                            viewModel.recordSearchQuery(searchQuery)
+                                            onAnimeClick(animeId)
+                                        },
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                }
+                                if (state.hasNextPage) {
+                                    item(span = { GridItemSpan(maxLineSpan) }) {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(16.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            CircularProgressIndicator(color = CrunchyrollOrange, modifier = Modifier.size(24.dp))
+                                        }
                                     }
                                 }
                             }

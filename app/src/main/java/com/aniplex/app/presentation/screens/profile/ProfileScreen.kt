@@ -37,6 +37,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.aniplex.app.theme.*
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @Composable
 fun ProfileScreen(
@@ -44,11 +46,12 @@ fun ProfileScreen(
     onWatchlistClick: () -> Unit,
     onHistoryClick: () -> Unit,
     onSwitchProfile: () -> Unit,
+    onScanTvClick: () -> Unit,
     modifier: Modifier = Modifier,
     viewModel: ProfileViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
-    val user = viewModel.currentUser
+    val user by viewModel.currentUser.collectAsStateWithLifecycle()
     val activeProfile by viewModel.activeProfile.collectAsStateWithLifecycle()
 
     val defaultAudio by viewModel.defaultAudioCategory.collectAsStateWithLifecycle()
@@ -57,18 +60,19 @@ fun ProfileScreen(
     val skipIntro by viewModel.skipIntro.collectAsStateWithLifecycle()
     val skipOutro by viewModel.skipOutro.collectAsStateWithLifecycle()
     val downloadOverCellular by viewModel.downloadOverCellular.collectAsStateWithLifecycle()
+    val preferredProvider by viewModel.preferredProvider.collectAsStateWithLifecycle()
+    val hevcDecoderEnabled by viewModel.hevcDecoderEnabled.collectAsStateWithLifecycle()
+    val dolbyAtmosEnabled by viewModel.dolbyAtmosEnabled.collectAsStateWithLifecycle()
+    val preferredAccentColor by viewModel.preferredAccentColor.collectAsStateWithLifecycle()
 
     val coroutineScope = rememberCoroutineScope()
 
     var qualityExpanded by remember { mutableStateOf(false) }
     val qualityOptions = listOf("Ultra HD 4K", "1080p FHD", "725p HD", "Data Saver")
 
-    // Performance Mode Switch State (Premium feature)
-    var isHevcDecoderEnabled by remember { mutableStateOf(true) }
-    var isDolbyAtmosEnabled by remember { mutableStateOf(true) }
+    var providerExpanded by remember { mutableStateOf(false) }
+    val providerOptions = listOf("Zoro (HD-1)", "Gogoanime (RapidCloud)")
 
-    // Visual Accent Picker
-    var selectedAccentColor by remember { mutableStateOf("Purple Neon") }
     val accentColors = listOf(
         Triple("Purple Neon", CrunchyrollOrange, "Celestial violet accent"),
         Triple("Cosmic Red", NetflixRed, "Radiant crimson flame"),
@@ -82,10 +86,7 @@ fun ProfileScreen(
     var speedTestStage by remember { mutableStateOf("Ready") }
     var speedProgress by remember { mutableStateOf(0f) }
     var speedValue by remember { mutableStateOf(0.0) }
-
-    // Interactive Deep Cache cleaner local state
-    var isCleaningCache by remember { mutableStateOf(false) }
-    var cacheCleanSuccess by remember { mutableStateOf(false) }
+    var speedPing by remember { mutableStateOf(14) }
 
     // Parse profile settings and avatar list
     val parsedSettings = remember(activeProfile?.avatarUrl) {
@@ -378,6 +379,32 @@ fun ProfileScreen(
                 title = "Profiles Settings & Access PIN Lock",
                 onClick = onSwitchProfile
             )
+            HorizontalDivider(color = SurfaceDarkVariant)
+
+            SettingsRow(
+                title = "Scan TV QR Code",
+                onClick = onScanTvClick
+            )
+            HorizontalDivider(color = SurfaceDarkVariant)
+
+            var isCheckingUpdates by remember { mutableStateOf(false) }
+            val updateViewModel: com.aniplex.app.presentation.screens.update.UpdateViewModel = hiltViewModel()
+
+            SettingsRow(
+                title = "Check for Updates",
+                valueText = if (isCheckingUpdates) "Checking..." else "Check",
+                onClick = {
+                    if (!isCheckingUpdates) {
+                        isCheckingUpdates = true
+                        updateViewModel.checkForUpdates { info ->
+                            isCheckingUpdates = false
+                            if (info == null) {
+                                Toast.makeText(context, "Your app is up to date.", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    }
+                }
+            )
         }
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -427,30 +454,70 @@ fun ProfileScreen(
                             )
                         }
                     }
-
                     if (!isSpeedTesting) {
                         Button(
                             onClick = {
                                 coroutineScope.launch {
                                     isSpeedTesting = true
-                                    speedProgress = 0f
+                                    speedProgress = 0.1f
                                     speedValue = 0.0
 
                                     speedTestStage = "Locating nearby stream node..."
-                                    delay(1000)
+                                    delay(400)
 
                                     speedTestStage = "Running latency check..."
-                                    delay(800)
+                                    val client = okhttp3.OkHttpClient.Builder()
+                                        .connectTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
+                                        .readTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
+                                        .build()
 
+                                    val request = okhttp3.Request.Builder()
+                                        .url("https://aniplex-proxy.f1886391.workers.dev/api/v2/home")
+                                        .build()
+
+                                    val startTime = System.currentTimeMillis()
+                                    var ping = 14L
+                                    var ok = false
+                                    var downloadSpeedMbps = 0.0
+
+                                    try {
+                                        withContext(Dispatchers.IO) {
+                                            client.newCall(request).execute().use { response ->
+                                                val endTime = System.currentTimeMillis()
+                                                ping = endTime - startTime
+                                                if (response.isSuccessful) {
+                                                    ok = true
+                                                    val bodyBytes = response.body?.bytes()
+                                                    val sizeInBytes = bodyBytes?.size ?: 0
+                                                    val downloadTimeSec = (endTime - startTime) / 1000.0
+                                                    if (downloadTimeSec > 0 && sizeInBytes > 0) {
+                                                        downloadSpeedMbps = (sizeInBytes * 8.0) / (1024.0 * 1024.0) / downloadTimeSec
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    } catch (e: Exception) {
+                                        ping = 120L
+                                    }
+
+                                    speedPing = ping.toInt()
+                                    speedProgress = 0.4f
                                     speedTestStage = "Testing 4K pipeline bandwidth..."
-                                    for (i in 1..20) {
-                                        speedProgress = i / 20f
-                                        speedValue = 35.0 + (Math.random() * 15.0) + (i * 6.5)
-                                        delay(80)
+                                    delay(400)
+
+                                    if (downloadSpeedMbps <= 0.0) {
+                                        val baseSpeed = if (ping < 50) 85.0 else if (ping < 150) 45.0 else 12.0
+                                        downloadSpeedMbps = baseSpeed + (Math.random() * 15.0)
+                                    }
+
+                                    for (i in 5..10) {
+                                        speedProgress = i / 10f
+                                        speedValue = downloadSpeedMbps + (Math.random() * 5.0) - 2.5
+                                        delay(120)
                                     }
 
                                     speedTestStage = "Optimizing live video buffers..."
-                                    delay(600)
+                                    delay(400)
 
                                     speedTestStage = "Completed"
                                 }
@@ -541,7 +608,7 @@ fun ProfileScreen(
 
                                 Spacer(modifier = Modifier.height(6.dp))
                                 Text(
-                                    text = "Download speed: ${speedValue.toInt()} Mbps (Ping: 14ms). Your streaming network setup is optimal. You are fully geared to stream 4K Ultra HD on multiple devices without throttling.",
+                                    text = "Download speed: ${speedValue.toInt()} Mbps (Ping: ${speedPing}ms). Your streaming network setup is optimal. You are fully geared to stream 4K Ultra HD on multiple devices without throttling.",
                                     color = Color.LightGray.copy(alpha = 0.85f),
                                     fontSize = 12.sp,
                                     lineHeight = 16.sp
@@ -591,7 +658,7 @@ fun ProfileScreen(
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     accentColors.forEach { (name, color, desc) ->
-                        val isSelected = selectedAccentColor == name
+                        val isSelected = preferredAccentColor == name
                         Box(
                             modifier = Modifier
                                 .size(40.dp)
@@ -603,7 +670,7 @@ fun ProfileScreen(
                                     shape = CircleShape
                                 )
                                 .clickable {
-                                    selectedAccentColor = name
+                                    viewModel.setPreferredAccentColor(name)
                                     Toast.makeText(context, "$name accent activated!", Toast.LENGTH_SHORT).show()
                                 },
                             contentAlignment = Alignment.Center
@@ -621,7 +688,7 @@ fun ProfileScreen(
                 }
                 
                 Spacer(modifier = Modifier.height(8.dp))
-                val currentDesc = accentColors.find { it.first == selectedAccentColor }?.third ?: ""
+                val currentDesc = accentColors.find { it.first == preferredAccentColor }?.third ?: ""
                 Text(
                     text = "Aura Mode: $currentDesc",
                     color = Color.Gray,
@@ -683,6 +750,48 @@ fun ProfileScreen(
                     }
                 }
             }
+            HorizontalDivider(color = SurfaceDarkVariant)
+
+            // Preferred Streaming Server Selection
+            Box {
+                SettingsRow(
+                    title = "Preferred Streaming Server",
+                    valueText = if (preferredProvider == "zoro") "Zoro (HD-1)" else "Gogoanime (RapidCloud)",
+                    onClick = { providerExpanded = true }
+                )
+                DropdownMenu(
+                    expanded = providerExpanded,
+                    onDismissRequest = { providerExpanded = false },
+                    modifier = Modifier.background(SurfaceDark)
+                ) {
+                    providerOptions.forEach { option ->
+                        DropdownMenuItem(
+                            text = { Text(option, color = Color.White) },
+                            onClick = {
+                                val value = if (option.startsWith("Zoro")) "zoro" else "gogoanime"
+                                viewModel.setPreferredProvider(value)
+                                providerExpanded = false
+                            }
+                        )
+                    }
+                }
+            }
+            HorizontalDivider(color = SurfaceDarkVariant)
+
+            // Subtitle Style Customizer
+            var showSubtitleCustomizer by remember { mutableStateOf(false) }
+            SettingsRow(
+                title = "Subtitle Styling & Layout",
+                valueText = "Configure",
+                onClick = { showSubtitleCustomizer = true }
+            )
+
+            if (showSubtitleCustomizer) {
+                SubtitleCustomizerOverlay(
+                    viewModel = viewModel,
+                    onDismiss = { showSubtitleCustomizer = false }
+                )
+            }
         }
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -730,173 +839,136 @@ fun ProfileScreen(
             // Live HEVC decoder switcher
             SettingsSwitchRow(
                 title = "GPU HEVC Decoding Stream Engine",
-                checked = isHevcDecoderEnabled,
-                onCheckedChange = { isHevcDecoderEnabled = it }
+                checked = hevcDecoderEnabled,
+                onCheckedChange = { viewModel.setHevcDecoderEnabled(it) }
             )
             HorizontalDivider(color = SurfaceDarkVariant)
 
             // Atmos spatial switcher
             SettingsSwitchRow(
                 title = "Spatial Surround Atmos soundstage",
-                checked = isDolbyAtmosEnabled,
-                onCheckedChange = { isDolbyAtmosEnabled = it }
+                checked = dolbyAtmosEnabled,
+                onCheckedChange = { viewModel.setDolbyAtmosEnabled(it) }
             )
         }
-
+        
         Spacer(modifier = Modifier.height(16.dp))
 
-        // STORAGE MANAGEMENT & CLEANER VISUAL BAR
+        // ACCOUNT SECURITY SETTINGS
         Text(
-            text = "Storage & Cache Optimization",
+            text = "Account Security & Credentials",
             fontSize = 13.sp,
             fontWeight = FontWeight.Bold,
             color = TextSecondary,
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp)
         )
 
-        Card(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 4.dp)
-                .border(1.dp, SurfaceDarkVariant, RoundedCornerShape(12.dp)),
-            colors = CardDefaults.cardColors(containerColor = SurfaceDark),
-            shape = RoundedCornerShape(12.dp)
+                .background(SurfaceDark, RoundedCornerShape(12.dp))
+                .border(1.dp, SurfaceDarkVariant, RoundedCornerShape(12.dp))
         ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.PieChart,
-                            contentDescription = null,
-                            tint = matchingAvatar.primaryColor,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(10.dp))
+            // Email display with Google provider badge
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column {
+                    Text(
+                        text = "Signed In As",
+                        color = TextSecondary,
+                        fontSize = 11.sp
+                    )
+                    Text(
+                        text = user?.email ?: "No email registered",
+                        color = Color.White,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+                if (viewModel.isGoogleUser) {
+                    Box(
+                        modifier = Modifier
+                            .background(
+                                color = Color(0xFF4285F4).copy(alpha = 0.15f),
+                                shape = RoundedCornerShape(6.dp)
+                            )
+                            .border(1.dp, Color(0xFF4285F4), RoundedCornerShape(6.dp))
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
                         Text(
-                            text = "Internal High-Speed Storage",
-                            fontSize = 14.sp,
-                            color = Color.White,
+                            text = "Managed by Google",
+                            color = Color(0xFF4285F4),
+                            fontSize = 10.sp,
                             fontWeight = FontWeight.Bold
                         )
                     }
-
-                    if (!isCleaningCache) {
-                        TextButton(
-                            onClick = {
-                                coroutineScope.launch {
-                                    isCleaningCache = true
-                                    delay(1500)
-                                    viewModel.clearCache {
-                                        isCleaningCache = false
-                                        cacheCleanSuccess = true
-                                        Toast.makeText(context, "Aniplex dynamic cache cleared!", Toast.LENGTH_SHORT).show()
-                                    }
+                }
+            }
+            
+            if (!viewModel.isGoogleUser) {
+                HorizontalDivider(color = SurfaceDarkVariant)
+                
+                var showChangeEmailDialog by remember { mutableStateOf(false) }
+                var showChangePasswordDialog by remember { mutableStateOf(false) }
+                
+                SettingsRow(
+                    title = "Change Account Email",
+                    valueText = "Update",
+                    onClick = { showChangeEmailDialog = true }
+                )
+                
+                HorizontalDivider(color = SurfaceDarkVariant)
+                
+                SettingsRow(
+                    title = "Change Account Password",
+                    valueText = "Update",
+                    onClick = { showChangePasswordDialog = true }
+                )
+                
+                if (showChangeEmailDialog) {
+                    ChangeEmailDialog(
+                        onDismiss = { showChangeEmailDialog = false },
+                        onSubmit = { currentPassword, newEmail, onComplete ->
+                            viewModel.changeEmail(
+                                password = currentPassword,
+                                newEmail = newEmail,
+                                onSuccess = {
+                                    Toast.makeText(context, "Email updated successfully", Toast.LENGTH_SHORT).show()
+                                    showChangeEmailDialog = false
+                                    onComplete(null)
+                                },
+                                onError = { error ->
+                                    onComplete(error)
                                 }
-                            }
-                        ) {
-                            Text(
-                                text = "Deep Clean Cache",
-                                color = matchingAvatar.primaryColor,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold
                             )
                         }
-                    } else {
-                        CircularProgressIndicator(
-                            color = matchingAvatar.primaryColor,
-                            strokeWidth = 2.dp,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                // Custom elegant segmented storage bar visualizer
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(10.dp)
-                        .clip(RoundedCornerShape(5.dp))
-                        .background(Color(0xFF2A2A3C))
-                ) {
-                    // Segment 1: Cache (vibrant lavender color)
-                    Box(
-                        modifier = Modifier
-                            .fillMaxHeight()
-                            .weight(if (cacheCleanSuccess) 0.05f else 0.2f)
-                            .background(matchingAvatar.primaryColor)
-                    )
-                    // Segment 2: Other apps data (medium dark slate grey)
-                    Box(
-                        modifier = Modifier
-                            .fillMaxHeight()
-                            .weight(0.45f)
-                            .background(Color(0xFF5D597A))
-                    )
-                    // Segment 3: Available Free Space
-                    Box(
-                        modifier = Modifier
-                            .fillMaxHeight()
-                            .weight(if (cacheCleanSuccess) 0.5f else 0.35f)
-                            .background(Color(0xFF1F1E2E))
                     )
                 }
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(10.dp)
-                                .clip(CircleShape)
-                                .background(matchingAvatar.primaryColor)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = if (cacheCleanSuccess) "Aniplex files (0.1 GB)" else "Aniplex Files (1.2 GB)",
-                            color = Color.LightGray,
-                            fontSize = 11.sp
-                        )
-                    }
-
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(10.dp)
-                                .clip(CircleShape)
-                                .background(Color(0xFF5D597A))
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "Other data (14.5 GB)",
-                            color = Color.LightGray,
-                            fontSize = 11.sp
-                        )
-                    }
-
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(10.dp)
-                                .clip(CircleShape)
-                                .border(1.dp, Color.Gray, CircleShape)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = if (cacheCleanSuccess) "Free (17.4 GB)" else "Free (16.3 GB)",
-                            color = Color.LightGray,
-                            fontSize = 11.sp
-                        )
-                    }
+                
+                if (showChangePasswordDialog) {
+                    ChangePasswordDialog(
+                        onDismiss = { showChangePasswordDialog = false },
+                        onSubmit = { currentPassword, newPassword, onComplete ->
+                            viewModel.changePassword(
+                                password = currentPassword,
+                                newPassword = newPassword,
+                                onSuccess = {
+                                    Toast.makeText(context, "Password updated successfully", Toast.LENGTH_SHORT).show()
+                                    showChangePasswordDialog = false
+                                    onComplete(null)
+                                },
+                                onError = { error ->
+                                    onComplete(error)
+                                }
+                            )
+                        }
+                    )
                 }
             }
         }
@@ -944,7 +1016,7 @@ fun ProfileScreen(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text(
-                text = "Version 4.210.3 (9958)",
+                text = "Version ${com.aniplex.app.BuildConfig.VERSION_NAME} (${com.aniplex.app.BuildConfig.VERSION_CODE})",
                 fontSize = 11.sp,
                 color = TextMuted
             )
@@ -1049,3 +1121,582 @@ fun SettingsSwitchRow(
         )
     }
 }
+
+@Composable
+fun SubtitleCustomizerOverlay(
+    viewModel: ProfileViewModel,
+    onDismiss: () -> Unit
+) {
+    val sizeScale by viewModel.subtitleSizeScale.collectAsStateWithLifecycle()
+    val color by viewModel.subtitleColor.collectAsStateWithLifecycle()
+    val bgOpacity by viewModel.subtitleBgOpacity.collectAsStateWithLifecycle()
+    val style by viewModel.subtitleStyle.collectAsStateWithLifecycle()
+    val position by viewModel.subtitlePosition.collectAsStateWithLifecycle()
+
+    var tempSizeScale by remember(sizeScale) { mutableStateOf(sizeScale) }
+    var tempColor by remember(color) { mutableStateOf(color) }
+    var tempBgOpacity by remember(bgOpacity) { mutableStateOf(bgOpacity) }
+    var tempStyle by remember(style) { mutableStateOf(style) }
+    var tempPosition by remember(position) { mutableStateOf(position) }
+
+    var previewMode by remember { mutableStateOf("Anime Frame") } // "Anime Frame", "Dark", "Light"
+
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onDismiss,
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(BackgroundVoid),
+            color = BackgroundVoid
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(16.dp)
+            ) {
+                // Header Row
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 16.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    IconButton(onClick = onDismiss) {
+                        Icon(imageVector = Icons.Default.Close, contentDescription = "Close", tint = Color.White)
+                    }
+                    Text(
+                        text = "Subtitle Styling & Layout",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                    TextButton(
+                        onClick = {
+                            viewModel.setSubtitleSizeScale(tempSizeScale)
+                            viewModel.setSubtitleColor(tempColor)
+                            viewModel.setSubtitleBgOpacity(tempBgOpacity)
+                            viewModel.setSubtitleStyle(tempStyle)
+                            viewModel.setSubtitlePosition(tempPosition)
+                            onDismiss()
+                        }
+                    ) {
+                        Text("Save", color = NetflixRed, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    }
+                }
+
+                // Interactive Live Preview Box
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(16f / 9f)
+                        .clip(RoundedCornerShape(12.dp))
+                        .border(1.dp, SurfaceDarkVariant, RoundedCornerShape(12.dp)),
+                    colors = CardDefaults.cardColors(containerColor = SurfaceDark)
+                ) {
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        when (previewMode) {
+                            "Anime Frame" -> {
+                                coil.compose.AsyncImage(
+                                    model = "https://images.unsplash.com/photo-1607604276583-eef5d076aa5f?w=800",
+                                    contentDescription = "Anime Frame Backdrop",
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .background(Color.Black.copy(alpha = 0.15f))
+                                )
+                            }
+                            "Dark" -> {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .background(Color(0xFF0F0F0F))
+                                )
+                            }
+                            "Light" -> {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .background(Color(0xFFE5E5E5))
+                                )
+                            }
+                        }
+
+                        // Subtitle text positioned dynamically
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(bottom = (100 * tempPosition).dp),
+                            contentAlignment = Alignment.BottomCenter
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .padding(horizontal = 24.dp)
+                                    .background(
+                                        color = Color.Black.copy(alpha = tempBgOpacity),
+                                        shape = RoundedCornerShape(4.dp)
+                                    )
+                                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                val fontColor = when (tempColor.lowercase()) {
+                                    "yellow" -> Color.Yellow
+                                    "cyan" -> Color.Cyan
+                                    "red" -> NetflixRed
+                                    else -> Color.White
+                                }
+                                val fontSize = (14 * tempSizeScale).sp
+
+                                Box(contentAlignment = Alignment.Center) {
+                                    if (tempStyle.lowercase().contains("outlined") || tempStyle == "classic_outline") {
+                                        Text(
+                                            text = "Lorem Ipsum is simply dummy text.",
+                                            color = Color.Black,
+                                            fontSize = fontSize,
+                                            fontWeight = FontWeight.Bold,
+                                            textAlign = TextAlign.Center,
+                                            style = androidx.compose.ui.text.TextStyle(
+                                                shadow = androidx.compose.ui.graphics.Shadow(
+                                                    color = Color.Black,
+                                                    offset = androidx.compose.ui.geometry.Offset(0f, 0f),
+                                                    blurRadius = 6f
+                                                )
+                                            )
+                                        )
+                                    } else if (tempStyle.lowercase().contains("shadow") || tempStyle == "default") {
+                                        Text(
+                                            text = "Lorem Ipsum is simply dummy text.",
+                                            color = Color.Black.copy(alpha = 0.8f),
+                                            fontSize = fontSize,
+                                            fontWeight = FontWeight.Bold,
+                                            textAlign = TextAlign.Center,
+                                            modifier = Modifier.offset(x = 1.dp, y = 1.dp)
+                                        )
+                                    }
+
+                                    Text(
+                                        text = "Lorem Ipsum is simply dummy text.",
+                                        color = fontColor,
+                                        fontSize = fontSize,
+                                        fontWeight = FontWeight.Bold,
+                                        textAlign = TextAlign.Center
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Preview mode selector buttons
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    listOf("Anime Frame", "Dark", "Light").forEach { mode ->
+                        val isSelected = previewMode == mode
+                        Button(
+                            onClick = { previewMode = mode },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (isSelected) NetflixRed else SurfaceDark,
+                                contentColor = if (isSelected) Color.White else Color.LightGray
+                            )
+                        ) {
+                            Text(mode, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                // Font Size Slider
+                Text("Font Size: ${(18 * tempSizeScale).toInt()}sp", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                Slider(
+                    value = tempSizeScale,
+                    onValueChange = { tempSizeScale = it },
+                    valueRange = 0.75f..1.75f,
+                    colors = SliderDefaults.colors(
+                        thumbColor = NetflixRed,
+                        activeTrackColor = NetflixRed,
+                        inactiveTrackColor = SurfaceDark
+                    )
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Position Offset Slider
+                Text("Vertical Position: ${(tempPosition * 100).toInt()}% from bottom", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                Slider(
+                    value = tempPosition,
+                    onValueChange = { tempPosition = it },
+                    valueRange = 0.05f..0.30f,
+                    colors = SliderDefaults.colors(
+                        thumbColor = NetflixRed,
+                        activeTrackColor = NetflixRed,
+                        inactiveTrackColor = SurfaceDark
+                    )
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Background Opacity Slider
+                Text("Background Box Opacity: ${(tempBgOpacity * 100).toInt()}%", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                Slider(
+                    value = tempBgOpacity,
+                    onValueChange = { tempBgOpacity = it },
+                    valueRange = 0.0f..1.0f,
+                    colors = SliderDefaults.colors(
+                        thumbColor = NetflixRed,
+                        activeTrackColor = NetflixRed,
+                        inactiveTrackColor = SurfaceDark
+                    )
+                )
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                // Font Style Selectors
+                Text("Font Style", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    listOf(
+                        "None" to "none",
+                        "Outlined" to "classic_outline",
+                        "Drop Shadow" to "default"
+                    ).forEach { (label, key) ->
+                        val isSelected = tempStyle == key
+                        Button(
+                            onClick = { tempStyle = key },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (isSelected) NetflixRed else SurfaceDark,
+                                contentColor = if (isSelected) Color.White else Color.LightGray
+                            )
+                        ) {
+                            Text(label, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                // Font Color Selectors
+                Text("Font Color", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    listOf("White", "Yellow", "Cyan", "Red").forEach { c ->
+                        val isSelected = tempColor.equals(c, ignoreCase = true)
+                        Button(
+                            onClick = { tempColor = c },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (isSelected) NetflixRed else SurfaceDark,
+                                contentColor = if (isSelected) Color.White else Color.LightGray
+                            )
+                        ) {
+                            Text(c, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(32.dp))
+
+                // Actions: Reset / Recommended
+                Button(
+                    onClick = {
+                        tempSizeScale = 1.0f
+                        tempColor = "White"
+                        tempBgOpacity = 0.35f
+                        tempStyle = "classic_outline"
+                        tempPosition = 0.10f
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                        .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(12.dp)),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text("Restore Recommended Defaults", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+
+                Spacer(modifier = Modifier.height(48.dp))
+            }
+        }
+    }
+}
+
+@Composable
+fun ChangeEmailDialog(
+    onDismiss: () -> Unit,
+    onSubmit: (currentPassword: String, newEmail: String, onComplete: (String?) -> Unit) -> Unit
+) {
+    var currentPassword by remember { mutableStateOf("") }
+    var newEmail by remember { mutableStateOf("") }
+    var confirmEmail by remember { mutableStateOf("") }
+    
+    var isSubmitting by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+    
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = "Change Account Email",
+                color = Color.White,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                if (errorMessage != null) {
+                    Text(
+                        text = errorMessage ?: "",
+                        color = Color.Red,
+                        fontSize = 12.sp
+                    )
+                }
+                
+                OutlinedTextField(
+                    value = currentPassword,
+                    onValueChange = { currentPassword = it },
+                    label = { Text("Current Password") },
+                    visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
+                        focusedBorderColor = CrunchyrollOrange,
+                        unfocusedBorderColor = Color.Gray,
+                        focusedLabelColor = CrunchyrollOrange
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                
+                OutlinedTextField(
+                    value = newEmail,
+                    onValueChange = { newEmail = it },
+                    label = { Text("New Email Address") },
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
+                        focusedBorderColor = CrunchyrollOrange,
+                        unfocusedBorderColor = Color.Gray,
+                        focusedLabelColor = CrunchyrollOrange
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                
+                OutlinedTextField(
+                    value = confirmEmail,
+                    onValueChange = { confirmEmail = it },
+                    label = { Text("Confirm New Email") },
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
+                        focusedBorderColor = CrunchyrollOrange,
+                        unfocusedBorderColor = Color.Gray,
+                        focusedLabelColor = CrunchyrollOrange
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (currentPassword.isEmpty() || newEmail.isEmpty()) {
+                        errorMessage = "All fields are required"
+                        return@Button
+                    }
+                    if (newEmail != confirmEmail) {
+                        errorMessage = "Email confirmation does not match"
+                        return@Button
+                    }
+                    
+                    isSubmitting = true
+                    errorMessage = null
+                    onSubmit(currentPassword, newEmail) { err ->
+                        isSubmitting = false
+                        if (err != null) {
+                            errorMessage = err
+                        }
+                    }
+                },
+                enabled = !isSubmitting,
+                colors = ButtonDefaults.buttonColors(containerColor = CrunchyrollOrange)
+            ) {
+                if (isSubmitting) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        color = Color.White,
+                        strokeWidth = 2.dp
+                    )
+                } else {
+                    Text("Confirm")
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !isSubmitting) {
+                Text("Cancel", color = Color.Gray)
+            }
+        },
+        containerColor = SurfaceDark
+    )
+}
+
+@Composable
+fun ChangePasswordDialog(
+    onDismiss: () -> Unit,
+    onSubmit: (currentPassword: String, newPassword: String, onComplete: (String?) -> Unit) -> Unit
+) {
+    var currentPassword by remember { mutableStateOf("") }
+    var newPassword by remember { mutableStateOf("") }
+    var confirmPassword by remember { mutableStateOf("") }
+    
+    var isSubmitting by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+    
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = "Change Account Password",
+                color = Color.White,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                if (errorMessage != null) {
+                    Text(
+                        text = errorMessage ?: "",
+                        color = Color.Red,
+                        fontSize = 12.sp
+                    )
+                }
+                
+                OutlinedTextField(
+                    value = currentPassword,
+                    onValueChange = { currentPassword = it },
+                    label = { Text("Current Password") },
+                    visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
+                        focusedBorderColor = CrunchyrollOrange,
+                        unfocusedBorderColor = Color.Gray,
+                        focusedLabelColor = CrunchyrollOrange
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                
+                OutlinedTextField(
+                    value = newPassword,
+                    onValueChange = { newPassword = it },
+                    label = { Text("New Password") },
+                    visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
+                        focusedBorderColor = CrunchyrollOrange,
+                        unfocusedBorderColor = Color.Gray,
+                        focusedLabelColor = CrunchyrollOrange
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                
+                OutlinedTextField(
+                    value = confirmPassword,
+                    onValueChange = { confirmPassword = it },
+                    label = { Text("Confirm New Password") },
+                    visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
+                        focusedBorderColor = CrunchyrollOrange,
+                        unfocusedBorderColor = Color.Gray,
+                        focusedLabelColor = CrunchyrollOrange
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (currentPassword.isEmpty() || newPassword.isEmpty()) {
+                        errorMessage = "All fields are required"
+                        return@Button
+                    }
+                    if (newPassword.length < 6) {
+                        errorMessage = "Password must be at least 6 characters"
+                        return@Button
+                    }
+                    if (newPassword != confirmPassword) {
+                        errorMessage = "Password confirmation does not match"
+                        return@Button
+                    }
+                    
+                    isSubmitting = true
+                    errorMessage = null
+                    onSubmit(currentPassword, newPassword) { err ->
+                        isSubmitting = false
+                        if (err != null) {
+                            errorMessage = err
+                        }
+                    }
+                },
+                enabled = !isSubmitting,
+                colors = ButtonDefaults.buttonColors(containerColor = CrunchyrollOrange)
+            ) {
+                if (isSubmitting) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        color = Color.White,
+                        strokeWidth = 2.dp
+                    )
+                } else {
+                    Text("Confirm")
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !isSubmitting) {
+                Text("Cancel", color = Color.Gray)
+            }
+        },
+        containerColor = SurfaceDark
+    )
+}
+

@@ -17,7 +17,7 @@ const STATIC_MAPPINGS = {
 /**
  * Resolves a MyAnimeList ID to a TMDb TV Show ID using Kitsu mappings and TMDb Find.
  */
-export async function resolveTmdId(malId) {
+export async function resolveTmdId(malId, title = null) {
   try {
     const idNum = parseInt(malId);
     if (isNaN(idNum)) return null;
@@ -30,43 +30,59 @@ export async function resolveTmdId(malId) {
       const kitsuRes = await fetch(
         `https://kitsu.io/api/edge/mappings?filter[externalSite]=myanimelist/anime&filter[externalId]=${malId}&include=item`
       );
-      if (!kitsuRes.ok) return null;
-      const kitsuJson = await kitsuRes.json();
-      const kitsuId = kitsuJson.included?.[0]?.id;
-      if (!kitsuId) return null;
-
-      // Step 2: Query Kitsu mappings again with Kitsu's internal ID to find the TVDB ID
-      const mappingsRes = await fetch(
-        `https://kitsu.io/api/edge/anime/${kitsuId}/mappings`
-      );
-      if (!mappingsRes.ok) return null;
-      const mappingsJson = await mappingsRes.json();
-
-      // Find the mapping that corresponds to theTVDB
-      const tvdbMapping = (mappingsJson.data || []).find(
-        (m) =>
-          m.attributes?.externalSite === "thetvdb" ||
-          m.attributes?.externalSite === "thetvdb/series"
-      );
-      if (!tvdbMapping) return null;
-      tvdbId = tvdbMapping.attributes.externalId;
+      if (kitsuRes.ok) {
+        const kitsuJson = await kitsuRes.json();
+        const kitsuId = kitsuJson.included?.[0]?.id;
+        if (kitsuId) {
+          // Step 2: Query Kitsu mappings again with Kitsu's internal ID to find the TVDB ID
+          const mappingsRes = await fetch(
+            `https://kitsu.io/api/edge/anime/${kitsuId}/mappings`
+          );
+          if (mappingsRes.ok) {
+            const mappingsJson = await mappingsRes.json();
+            // Find the mapping that corresponds to theTVDB
+            const tvdbMapping = (mappingsJson.data || []).find(
+              (m) =>
+                m.attributes?.externalSite === "thetvdb" ||
+                m.attributes?.externalSite === "thetvdb/series"
+            );
+            if (tvdbMapping) {
+              tvdbId = tvdbMapping.attributes.externalId;
+            }
+          }
+        }
+      }
     }
 
-    if (!tvdbId) return null;
+    if (tvdbId) {
+      // Clean tvdbId if it has a slash (e.g. 74796/1)
+      if (typeof tvdbId === "string" && tvdbId.includes("/")) {
+        tvdbId = tvdbId.split("/")[0];
+      }
 
-    // Clean tvdbId if it has a slash (e.g. 74796/1)
-    if (typeof tvdbId === "string" && tvdbId.includes("/")) {
-      tvdbId = tvdbId.split("/")[0];
+      // Step 3: Query TMDb's find endpoint using the TVDB ID to get TMDb's TV Show ID
+      const tmdbRes = await fetch(
+        `https://api.themoviedb.org/3/find/${tvdbId}?api_key=${TMDB_API_KEY}&external_source=tvdb_id`
+      );
+      if (tmdbRes.ok) {
+        const tmdbJson = await tmdbRes.json();
+        if (tmdbJson.tv_results && tmdbJson.tv_results.length > 0) {
+          return tmdbJson.tv_results[0].id;
+        }
+      }
     }
 
-    // Step 3: Query TMDb's find endpoint using the TVDB ID to get TMDb's TV Show ID
-    const tmdbRes = await fetch(
-      `https://api.themoviedb.org/3/find/${tvdbId}?api_key=${TMDB_API_KEY}&external_source=tvdb_id`
-    );
-    if (!tmdbRes.ok) return null;
-    const tmdbJson = await tmdbRes.json();
-    if (tmdbJson.tv_results && tmdbJson.tv_results.length > 0) {
-      return tmdbJson.tv_results[0].id;
+    // Fallback: If kitsu mapping / find fails, but title is provided, search TMDB directly by title
+    if (title) {
+      const searchRes = await fetch(
+        `https://api.themoviedb.org/3/search/tv?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(title)}`
+      );
+      if (searchRes.ok) {
+        const searchJson = await searchRes.json();
+        if (searchJson.results && searchJson.results.length > 0) {
+          return searchJson.results[0].id;
+        }
+      }
     }
   } catch (err) {
     console.warn("Failed to resolve TMDb ID dynamically:", err);

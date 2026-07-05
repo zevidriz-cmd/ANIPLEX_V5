@@ -13,7 +13,7 @@
   --secondary: #F5A623;
   --green: #46D369;
   --font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  --transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  --transition: opacity 0.18s cubic-bezier(0.4, 0, 0.2, 1), transform 0.18s cubic-bezier(0.4, 0, 0.2, 1), background-color 0.18s cubic-bezier(0.4, 0, 0.2, 1), border-color 0.18s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.18s cubic-bezier(0.4, 0, 0.2, 1);
   --header-height: 70px;
 }
 
@@ -76,12 +76,28 @@ body {
 .shimmer {
   background: linear-gradient(
     90deg,
-    #141414 25%,
-    #242424 50%,
-    #141414 75%
+    #141416 25%,
+    #202026 50%,
+    #141416 75%
   );
   background-size: 200% 100%;
-  animation: shimmer-anim 1.5s infinite;
+  animation: shimmer-anim 1.4s infinite linear;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Pulsing effect to make it feel alive */
+.shimmer-pulse {
+  animation: shimmer-pulse-anim 2s infinite ease-in-out;
+}
+
+@keyframes shimmer-pulse-anim {
+  0%, 100% {
+    opacity: 0.5;
+  }
+  50% {
+    opacity: 1;
+  }
 }
 
 @keyframes shimmer-anim {
@@ -95,17 +111,15 @@ body {
 
 /* Animations */
 .fade-in {
-  animation: fadeIn 0.4s ease-out forwards;
+  animation: fadeIn 0.22s cubic-bezier(0.25, 1, 0.5, 1) forwards;
 }
 
 @keyframes fadeIn {
   from {
     opacity: 0;
-    transform: translateY(10px);
   }
   to {
     opacity: 1;
-    transform: translateY(0);
   }
 }
 
@@ -304,6 +318,14 @@ body {
   color: white;
   box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
   text-transform: uppercase;
+  overflow: hidden;
+}
+
+.drawer-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
 }
 
 .drawer-avatar.avatar_orange { background: linear-gradient(135deg, #FF9900, #FF5E00); }
@@ -656,6 +678,240 @@ body {
   }
   .genre-hero-container h1 {
     font-size: 1.6rem !important;
+  }
+}
+
+/* Shimmer Card Loader */
+.shimmer-card-loading {
+  background-color: #111113;
+  border-radius: 12px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  transition: transform 0.2s ease;
+  width: 100%;
+}
+.shimmer-poster {
+  width: 100%;
+  padding-top: 142%; /* 3:4.2 aspect ratio matching AnimeCard */
+  border-radius: 12px 12px 0 0;
+}
+.shimmer-info-box {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 12px 12px;
+}
+.shimmer-text {
+  height: 14px;
+  width: 85%;
+  border-radius: 4px;
+}
+.shimmer-subtext {
+  height: 10px;
+  width: 55%;
+  border-radius: 3px;
+}
+
+/* Shimmer Landscape Card */
+.shimmer-landscape-card {
+  width: 220px;
+  height: 155px;
+  border-radius: 10px;
+  background-color: #111113;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  box-sizing: border-box;
+  flex-shrink: 0;
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.25);
+}
+.shimmer-landscape-inner {
+  width: 100%;
+  height: 100px;
+  border-radius: 8px;
+}
+.shimmer-landscape-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.shimmer-time-badge {
+  height: 10px;
+  width: 35%;
+  border-radius: 2px;
+}
+.shimmer-landscape-title {
+  height: 12px;
+  width: 80%;
+  border-radius: 3px;
+}
+
+/* Billboard Shimmer */
+.billboard-shimmer-loading {
+  width: 100%;
+  height: 60vh;
+  margin-bottom: 2rem;
+  background-color: #111113;
+  position: relative;
+}
+.billboard-shimmer-loading::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 100%;
+  height: 150px;
+  background: linear-gradient(to top, #0a0a0c, transparent);
+}
+
+/* Details Shimmer */
+.details-shimmer {
+  padding-bottom: 4rem;
+}
+.banner-placeholder-wrapper {
+  position: relative;
+  width: 100%;
+  min-height: 60vh;
+  display: flex;
+  align-items: flex-end;
+  padding: 8rem 0 3rem;
+  box-sizing: border-box;
+}
+.banner-placeholder {
+  position: absolute;
+  inset: 0;
+  background-color: #111113;
+  z-index: 0;
+  border-radius: 0;
+}
+.banner-hero-container {
+  display: flex;
+  gap: 2.5rem;
+  width: 100%;
+  z-index: 2;
+  align-items: flex-end;
+}
+.poster-placeholder {
+  width: 240px;
+  aspect-ratio: 1/1.42;
+  border-radius: 8px;
+  flex-shrink: 0;
+  align-self: flex-end;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.8);
+}
+.meta-placeholder {
+  flex-grow: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1.2rem;
+  padding-bottom: 0.5rem;
+}
+.title-placeholder {
+  height: 38px;
+  width: 55%;
+  border-radius: 6px;
+}
+.stats-placeholder-row {
+  display: flex;
+  gap: 0.8rem;
+  align-items: center;
+}
+.stat-pill-placeholder {
+  height: 22px;
+  width: 60px;
+  border-radius: 4px;
+}
+.desc-line {
+  height: 14px;
+  border-radius: 4px;
+}
+.btn-row-placeholder {
+  display: flex;
+  gap: 1rem;
+  margin-top: 0.5rem;
+}
+.btn-placeholder {
+  height: 44px;
+  width: 150px;
+  border-radius: 8px;
+}
+.episodes-placeholder-section, .recommendations-placeholder-section {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  padding: 0 1.5rem;
+}
+.section-title-placeholder {
+  height: 26px;
+  width: 160px;
+  border-radius: 4px;
+}
+.episodes-grid-placeholder {
+  display: grid;
+  grid-template-cols: repeat(auto-fill, minmax(65px, 1fr));
+  gap: 0.8rem;
+}
+.episode-square-placeholder {
+  height: 42px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.03);
+}
+.rec-grid-placeholder {
+  display: grid;
+  grid-template-cols: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 1.5rem;
+}
+
+@media (max-width: 768px) {
+  .banner-placeholder-wrapper {
+    flex-direction: column;
+    min-height: auto;
+    padding: 0;
+  }
+  .banner-placeholder {
+    position: relative;
+    width: 100%;
+    height: 0;
+    padding-top: 56.25%; /* 16:9 Banner Aspect Ratio */
+    z-index: 1;
+  }
+  .banner-hero-container {
+    display: block;
+    width: 100%;
+    padding: 1.5rem 4%;
+    margin-top: 0;
+    position: relative;
+    z-index: 3;
+  }
+  .poster-placeholder {
+    display: none !important;
+  }
+  .meta-placeholder {
+    padding-top: 0.5rem;
+    align-items: stretch;
+    width: 100%;
+  }
+  .title-placeholder {
+    width: 85%;
+    height: 28px;
+  }
+  .stats-placeholder-row {
+    justify-content: flex-start;
+  }
+  .btn-row-placeholder {
+    justify-content: flex-start;
+    width: 100%;
+  }
+  .rec-grid-placeholder {
+    grid-template-cols: repeat(auto-fill, minmax(130px, 1fr));
+    gap: 1rem;
   }
 }
 

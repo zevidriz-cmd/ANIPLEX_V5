@@ -4,7 +4,11 @@ import {
   signInWithEmailAndPassword, 
   createUserWithEmailAndPassword, 
   signOut,
-  signInWithPopup
+  signInWithPopup,
+  updateEmail,
+  updatePassword,
+  reauthenticateWithCredential,
+  EmailAuthProvider
 } from "firebase/auth";
 import { auth, googleProvider } from "../config/firebase";
 
@@ -34,6 +38,24 @@ export function AuthProvider({ children }) {
     return signOut(auth);
   }
 
+  function changeEmail(currentPassword, newEmail) {
+    const user = auth.currentUser;
+    if (!user) return Promise.reject(new Error("No user signed in"));
+    const credential = EmailAuthProvider.credential(user.email, currentPassword);
+    return reauthenticateWithCredential(user, credential).then(() => {
+      return updateEmail(user, newEmail);
+    });
+  }
+
+  function changePassword(currentPassword, newPassword) {
+    const user = auth.currentUser;
+    if (!user) return Promise.reject(new Error("No user signed in"));
+    const credential = EmailAuthProvider.credential(user.email, currentPassword);
+    return reauthenticateWithCredential(user, credential).then(() => {
+      return updatePassword(user, newPassword);
+    });
+  }
+
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setCurrentUser(user);
@@ -49,7 +71,9 @@ export function AuthProvider({ children }) {
     signup,
     login,
     loginWithGoogle,
-    logout
+    logout,
+    changeEmail,
+    changePassword
   };
 
   return (

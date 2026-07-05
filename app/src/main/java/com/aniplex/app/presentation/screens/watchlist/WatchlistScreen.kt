@@ -5,6 +5,8 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -170,16 +172,20 @@ fun WatchlistScreen(
                 when (page) {
                     0 -> {
                         // Watchlist Tab
+                        val statusFilter by watchlistViewModel.statusFilter.collectAsStateWithLifecycle()
                         WatchlistTabContent(
                             state = watchlistState,
                             onAnimeClick = onAnimeClick,
                             onRemove = { watchlistViewModel.removeFromWatchlist(it) },
                             sortOrder = sortOrder,
                             onSortOrderChange = { watchlistViewModel.setSortOrder(it) },
-                            onToggleFavorite = { id, currentVal -> watchlistViewModel.toggleFavorite(id, currentVal) }
+                            onToggleFavorite = { id, currentVal -> watchlistViewModel.toggleFavorite(id, currentVal) },
+                            statusFilter = statusFilter,
+                            onStatusFilterChange = { watchlistViewModel.setStatusFilter(it) }
                         )
                     }
                     1 -> {
+                        // History Tab
                         // History Tab
                         HistoryTabContent(
                             state = historyState,
@@ -212,37 +218,76 @@ fun WatchlistTabContent(
     onRemove: (String) -> Unit,
     sortOrder: SortOrder,
     onSortOrderChange: (SortOrder) -> Unit,
-    onToggleFavorite: (String, Boolean) -> Unit
+    onToggleFavorite: (String, Boolean) -> Unit,
+    statusFilter: WatchlistStatusFilter,
+    onStatusFilterChange: (WatchlistStatusFilter) -> Unit
 ) {
-    when (state) {
-        is WatchlistUiState.Loading -> {
-            LazyColumn(
-                contentPadding = PaddingValues(vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                items(8) {
-                    ScheduleItemShimmer()
+    Column(modifier = Modifier.fillMaxSize()) {
+        // Status Filter Capsule Chips Row
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            WatchlistStatusFilter.values().forEach { filter ->
+                val isSelected = filter == statusFilter
+                val label = when (filter) {
+                    WatchlistStatusFilter.ALL -> "All Shows"
+                    WatchlistStatusFilter.WATCHING -> "Watching"
+                    WatchlistStatusFilter.PLANNING -> "Plan to Watch"
+                    WatchlistStatusFilter.COMPLETED -> "Completed"
+                }
+
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(if (isSelected) CrunchyrollOrange else SurfaceDark)
+                        .border(1.dp, if (isSelected) CrunchyrollOrange else SurfaceDarkVariant, RoundedCornerShape(16.dp))
+                        .clickable { onStatusFilterChange(filter) }
+                        .padding(horizontal = 14.dp, vertical = 6.dp)
+                ) {
+                    Text(
+                        text = label,
+                        color = if (isSelected) Color.Black else Color.White,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
             }
         }
-        is WatchlistUiState.Empty -> {
-            EmptyWatchlistState()
-        }
-        is WatchlistUiState.Error -> {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = state.message,
-                    color = ErrorColor,
-                    fontSize = 14.sp,
-                    modifier = Modifier.padding(16.dp)
-                )
+
+        when (state) {
+            is WatchlistUiState.Loading -> {
+                LazyColumn(
+                    contentPadding = PaddingValues(vertical = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    items(8) {
+                        ScheduleItemShimmer()
+                    }
+                }
             }
-        }
-        is WatchlistUiState.Success -> {
-            Column(modifier = Modifier.fillMaxSize()) {
+            is WatchlistUiState.Empty -> {
+                EmptyWatchlistState()
+            }
+            is WatchlistUiState.Error -> {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = state.message,
+                        color = ErrorColor,
+                        fontSize = 14.sp,
+                        modifier = Modifier.padding(16.dp)
+                    )
+                }
+            }
+            is WatchlistUiState.Success -> {
+                Column(modifier = Modifier.fillMaxSize()) {
                 var showSortMenu by remember { mutableStateOf(false) }
 
                 // Sorting Header (Stitch Design: Selected Sort Order + sort + tune buttons)
@@ -364,6 +409,7 @@ fun WatchlistTabContent(
             }
         }
     }
+}
 }
 
 @Composable

@@ -29,3 +29,6 @@ __pycache__/
 
 # Kotlin cache
 .kotlin/
+
+# Local Netlify folder
+.netlify

@@ -54,10 +54,14 @@ fun TvExoVideoPlayer(
     val context = LocalContext.current
     val exoPlayer = state.exoPlayerRef
 
+    val hasIntroNow = state.skipTimes.isDuringIntro(state.currentPositionMs)
+    val hasOutroNow = state.skipTimes.isDuringOutro(state.currentPositionMs)
+
     var isControlsVisible by remember { mutableStateOf(true) }
     var controlsTimeoutKey by remember { mutableStateOf(0) }
     val playFocusRequester = remember { FocusRequester() }
     val rootFocusRequester = remember { FocusRequester() }
+    val skipFocusRequester = remember { FocusRequester() }
 
     // Auto-hide controls after 5 seconds of inactivity
     LaunchedEffect(isControlsVisible, controlsTimeoutKey) {
@@ -67,10 +71,18 @@ fun TvExoVideoPlayer(
         }
     }
 
-    LaunchedEffect(isControlsVisible) {
+    LaunchedEffect(isControlsVisible, state.showSettings) {
+        if (state.showSettings) {
+            // Let the settings menu handle its focus
+            return@LaunchedEffect
+        }
         if (isControlsVisible) {
             try {
-                playFocusRequester.requestFocus()
+                if (hasIntroNow || hasOutroNow) {
+                    skipFocusRequester.requestFocus()
+                } else {
+                    playFocusRequester.requestFocus()
+                }
             } catch (e: Exception) {
                 // Ignore focus request errors
             }
@@ -93,13 +105,14 @@ fun TvExoVideoPlayer(
             .onFocusChanged { isRootFocused = it.isFocused }
             .focusable()
             .onPreviewKeyEvent { event ->
+                if (state.showSettings) return@onPreviewKeyEvent false
                 if (event.type == KeyEventType.KeyDown) {
                     controlsTimeoutKey++
                     val wasHidden = !isControlsVisible
                     if (wasHidden) {
                         if (isRootFocused) {
                             isControlsVisible = true
-                            // Seek immediately on waking up if left/right was pressed
+                            // Seek or click immediately on waking up
                             when (event.key) {
                                 Key.DirectionLeft -> {
                                     exoPlayer?.let {
@@ -115,11 +128,25 @@ fun TvExoVideoPlayer(
                                         callbacks.onPositionChanged(newPos)
                                     }
                                 }
+                                Key.DirectionCenter, Key.Spacebar, Key.Enter -> {
+                                    if (hasIntroNow || hasOutroNow) {
+                                        val targetPos = if (hasIntroNow) state.skipTimes.introEnd else state.skipTimes.outroEnd
+                                        exoPlayer?.let {
+                                            it.seekTo(targetPos)
+                                            callbacks.onPositionChanged(targetPos)
+                                        }
+                                    } else {
+                                        if (state.isPlaying) {
+                                            exoPlayer?.pause()
+                                        } else {
+                                            exoPlayer?.play()
+                                        }
+                                    }
+                                }
                             }
                             true // Consume wakeup click
                         } else {
-                            // Focus is on a child (e.g. Skip button). Let it handle center click.
-                            if (event.key == Key.DirectionCenter || event.key == Key.Spacebar) {
+                            if (event.key == Key.DirectionCenter || event.key == Key.Spacebar || event.key == Key.Enter) {
                                 false
                             } else {
                                 isControlsVisible = true
@@ -235,12 +262,8 @@ fun TvExoVideoPlayer(
             }
 
             // Skip Intro / Skip Outro Floating Button Overlay for TV
-            val hasIntroNow = state.skipTimes.isDuringIntro(state.currentPositionMs)
-            val hasOutroNow = state.skipTimes.isDuringOutro(state.currentPositionMs)
-            
             if (hasIntroNow || hasOutroNow) {
                 var isSkipFocused by remember { mutableStateOf(false) }
-                val skipFocusRequester = remember { FocusRequester() }
                 
                 LaunchedEffect(hasIntroNow, hasOutroNow) {
                     try {
@@ -296,7 +319,7 @@ fun TvExoVideoPlayer(
 
             // Dynamic Custom Controls Overlay
             AnimatedVisibility(
-                visible = isControlsVisible,
+                visible = isControlsVisible && !state.showSettings,
                 enter = fadeIn(),
                 exit = fadeOut()
             ) {

@@ -14,7 +14,7 @@ import javax.inject.Inject
 sealed interface SearchUiState {
     data object Idle : SearchUiState
     data object Loading : SearchUiState
-    data class Success(val results: List<Anime>, val hasNextPage: Boolean) : SearchUiState
+    data class Success(val results: List<Anime>, val hasNextPage: Boolean, val fallbackType: String = "") : SearchUiState
     data class Error(val message: String) : SearchUiState
     data object Empty : SearchUiState
 }
@@ -61,86 +61,75 @@ class SearchViewModel @Inject constructor(
     private var searchJob: kotlinx.coroutines.Job? = null
     private var suggestionsJob: kotlinx.coroutines.Job? = null
 
-    private fun levenshteinDistance(s1: String, s2: String): Int {
-        val len1 = s1.length
-        val len2 = s2.length
-        val dp = Array(len1 + 1) { IntArray(len2 + 1) }
+    private fun processSearchResults(animes: List<Anime>, query: String): List<Anime> {
+        val q = query.trim().lowercase()
+        if (q.isEmpty()) return animes
 
-        for (i in 0..len1) dp[i][0] = i
-        for (j in 0..len2) dp[0][j] = j
+        val queryWords = q.split(Regex("[^a-zA-Z0-9]+")).filter { it.isNotEmpty() }
+        if (queryWords.isEmpty()) return animes
 
-        for (i in 1..len1) {
-            for (j in 1..len2) {
-                val cost = if (s1[i - 1] == s2[j - 1]) 0 else 1
-                dp[i][j] = minOf(
-                    dp[i - 1][j] + 1,
-                    dp[i][j - 1] + 1,
-                    dp[i - 1][j - 1] + cost
-                )
+        return animes.map { anime ->
+            val title = anime.title.trim().lowercase()
+            val titleWords = title.split(Regex("[^a-zA-Z0-9]+")).filter { it.isNotEmpty() }
+
+            var score = 0.0
+
+            // 1. Exact Match (highest priority)
+            if (title == q) {
+                score += 10000.0
+            } else if (title.replace(Regex("[^a-zA-Z0-9]+"), "") == q.replace(Regex("[^a-zA-Z0-9]+"), "")) {
+                score += 8000.0
             }
-        }
-        return dp[len1][len2]
-    }
 
-    private fun calculateMatchScore(query: String, anime: Anime): Int {
-        val title = anime.title.lowercase().trim()
-        val q = query.lowercase().trim()
-        if (q.isEmpty()) return 0
-
-        var score = 0
-
-        val cleanTitle = title.replace(Regex("[^a-z0-9]"), "")
-        val cleanQ = q.replace(Regex("[^a-z0-9]"), "")
-
-        // 1. Exact Match prioritization
-        if (title == q) {
-            score += 100000
-        } else if (cleanQ.isNotEmpty() && cleanTitle == cleanQ) {
-            score += 80000
-        }
-
-        // 2. Starts-with prioritization
-        if (title.startsWith(q)) {
-            score += 50000
-        } else if (cleanQ.isNotEmpty() && cleanTitle.startsWith(cleanQ)) {
-            score += 40000
-        }
-
-        // 3. Word boundary contains prioritization (e.g., query starts a word in title)
-        if (title.contains(" $q") || title.contains("$q ")) {
-            score += 20000
-        }
-
-        // 4. Substring contains prioritization
-        if (title.contains(q)) {
-            score += 10000
-        } else if (cleanQ.isNotEmpty() && cleanTitle.contains(cleanQ)) {
-            score += 5000
-        }
-
-        // 5. Typo tolerance / Similarity
-        if (cleanQ.isNotEmpty() && cleanTitle.isNotEmpty()) {
-            val distance = levenshteinDistance(cleanTitle, cleanQ)
-            if (distance <= 2) {
-                score += (2000 - (distance * 500))
+            // 2. Starts With Match
+            if (title.startsWith(q)) {
+                score += 5000.0
             }
-        }
 
-        // 6. Tie-breaker type prioritization (very minor so text match always wins)
-        val type = anime.type.lowercase().trim()
-        if (type == "tv" || type == "tv series" || type.contains("tv")) {
-            score += 400
-        } else if (type == "ona" || type.contains("ona")) {
-            score += 300
-        } else if (type == "movie" || type.contains("movie")) {
-            if (!q.contains("movie") && !q.contains("film")) {
-                score -= 100
-            } else {
-                score += 200
+            // 3. Word Overlap Calculation
+            var overlapCount = 0
+            for (qw in queryWords) {
+                if (titleWords.contains(qw)) {
+                    overlapCount++
+                }
             }
-        }
+            val overlapRatio = overlapCount.toDouble() / queryWords.size
+            score += overlapRatio * 3000.0
 
-        return score
+            // 4. Consecutive Word Match Sequence (Phrase matching)
+            if (queryWords.size > 1) {
+                var maxConsecutive = 0
+                var currentConsecutive = 0
+                for (tw in titleWords) {
+                    if (currentConsecutive < queryWords.size && tw == queryWords[currentConsecutive]) {
+                        currentConsecutive++
+                        if (currentConsecutive > maxConsecutive) {
+                            maxConsecutive = currentConsecutive
+                        }
+                    } else {
+                        currentConsecutive = 0
+                    }
+                }
+                score += (maxConsecutive.toDouble() / queryWords.size) * 1500.0
+            }
+
+            // 5. Length Penalty (Shorter, more precise matches win over long titles)
+            val lengthDiff = Math.abs(title.length - q.length)
+            score -= lengthDiff * 5.0
+
+            // 6. Type Tie-Breaker
+            val type = anime.type.lowercase().trim()
+            if (type == "tv" || type.contains("tv")) {
+                score += 100.0
+            } else if (type == "movie" || type.contains("movie")) {
+                score += 50.0
+            }
+
+            anime to score
+        }.sortedWith(
+            compareByDescending<Pair<Anime, Double>> { it.second }
+                .thenBy { it.first.title }
+        ).map { it.first }
     }
 
     init {
@@ -178,13 +167,9 @@ class SearchViewModel @Inject constructor(
                     suggestionsJob = viewModelScope.launch {
                         repository.getSuggestions(q).collect { result ->
                             if (result is Result.Success) {
-                                val ranked = result.data.map { anime ->
-                                    val score = calculateMatchScore(q, anime)
-                                    anime to score
-                                }.sortedWith(
-                                    compareByDescending<Pair<Anime, Int>> { it.second }
-                                        .thenBy { it.first.title }
-                                ).map { it.first }
+                                val ranked = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                                    processSearchResults(result.data, q)
+                                }
                                 _suggestions.value = ranked
                             }
                         }
@@ -261,52 +246,55 @@ class SearchViewModel @Inject constructor(
                         isCurrentlyLoadingNextPage = false
                         val newItems = result.data
                         
-                        // Apply strict scoping client-side filters on search results if query is active
-                        val filteredItems = if (queryVal.isNotEmpty() && hasFilters) {
-                            newItems.filter { anime ->
-                                val matchesType = typeVal == null || run {
-                                    val aType = anime.type.replace(" ", "").replace("-", "").lowercase()
-                                    val fType = typeVal.replace(" ", "").replace("-", "").lowercase()
-                                    aType == fType || aType.contains(fType) || fType.contains(aType)
+                        viewModelScope.launch(kotlinx.coroutines.Dispatchers.Default) {
+                            // Apply strict scoping client-side filters on search results if query is active
+                            val filteredItems = if (queryVal.isNotEmpty() && hasFilters) {
+                                newItems.filter { anime ->
+                                    val matchesType = typeVal == null || run {
+                                        val aType = anime.type.replace(" ", "").replace("-", "").lowercase()
+                                        val fType = typeVal.replace(" ", "").replace("-", "").lowercase()
+                                        aType == fType || aType.contains(fType) || fType.contains(aType)
+                                    }
+                                    val matchesLanguage = langVal == null || when (langVal) {
+                                        "sub" -> anime.subEpisodes > 0
+                                        "dub" -> anime.dubEpisodes > 0
+                                        "sub-dub" -> anime.subEpisodes > 0 || anime.dubEpisodes > 0
+                                        else -> true
+                                    }
+                                    matchesType && matchesLanguage
                                 }
-                                val matchesLanguage = langVal == null || when (langVal) {
-                                    "sub" -> anime.subEpisodes > 0
-                                    "dub" -> anime.dubEpisodes > 0
-                                    "sub-dub" -> anime.subEpisodes > 0 || anime.dubEpisodes > 0
-                                    else -> true
-                                }
-                                matchesType && matchesLanguage
+                            } else {
+                                newItems
                             }
-                        } else {
-                            newItems
-                        }
 
-                        // Apply smart fuzzy-match sorting/ranking on search results
-                        val rankedItems = if (queryVal.isNotBlank()) {
-                            filteredItems.map { anime ->
-                                val score = calculateMatchScore(queryVal, anime)
-                                anime to score
-                            }.sortedWith(
-                                compareByDescending<Pair<Anime, Int>> { it.second }
-                                    .thenBy { it.first.title }
-                            ).map { it.first }
-                        } else {
-                            filteredItems
-                        }
+                            // Apply smart fuzzy-match sorting/ranking on search results
+                            val rankedItems = if (queryVal.isNotBlank()) {
+                                processSearchResults(filteredItems, queryVal)
+                            } else {
+                                filteredItems
+                            }
 
-                        allResults.addAll(rankedItems)
-                        
-                        // Deduplicate entries by ID to ensure a completely pristine visual grid
-                        val deDuplicated = allResults.distinctBy { it.id }
-                        allResults.clear()
-                        allResults.addAll(deDuplicated)
-                        
-                        if (allResults.isEmpty()) {
-                            _uiState.value = SearchUiState.Empty
-                        } else {
-                            // Assume next page is available if we got a full batch of items
-                            val hasNext = newItems.size >= 15
-                            _uiState.value = SearchUiState.Success(allResults.toList(), hasNext)
+                            val isBackupActive = newItems.any { it.isBackup }
+
+                            // Update results on main thread
+                            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                                isCurrentlyLoadingNextPage = false
+                                allResults.addAll(rankedItems)
+                                val deDuplicated = allResults.distinctBy { it.id }
+                                allResults.clear()
+                                allResults.addAll(deDuplicated)
+
+                                if (allResults.isEmpty()) {
+                                    _uiState.value = SearchUiState.Empty
+                                } else {
+                                    val hasNext = newItems.size >= 15
+                                    _uiState.value = SearchUiState.Success(
+                                        results = allResults.toList(),
+                                        hasNextPage = hasNext,
+                                        fallbackType = if (isBackupActive) "anilist" else ""
+                                    )
+                                }
+                            }
                         }
                     }
                     is Result.Error -> {

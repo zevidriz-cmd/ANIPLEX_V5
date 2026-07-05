@@ -132,7 +132,14 @@ function RequireAuth({ children }) {
   const { currentUser, loading } = useAuth();
 
   if (loading) {
-    return <div className="loading-screen flex-center">Loading session...</div>;
+    return (
+      <div className="loading-screen flex-center">
+        <div className="pulsing-brand-loader">
+          <span className="brand-logo-text red-neon-text">ANISTREAM</span>
+          <div className="brand-loader-bar"></div>
+        </div>
+      </div>
+    );
   }
 
   if (!currentUser) {
@@ -148,7 +155,14 @@ function RequireProfile({ children }) {
   const { activeProfile, loading: profileLoading } = useProfile();
 
   if (authLoading || profileLoading) {
-    return <div className="loading-screen flex-center">Loading profiles...</div>;
+    return (
+      <div className="loading-screen flex-center">
+        <div className="pulsing-brand-loader">
+          <span className="brand-logo-text red-neon-text">ANISTREAM</span>
+          <div className="brand-loader-bar"></div>
+        </div>
+      </div>
+    );
   }
 
   if (!currentUser) {
@@ -181,10 +195,56 @@ function AppLayout({ children }) {
         .loading-screen {
           height: 100vh;
           width: 100vw;
-          background-color: var(--bg);
-          font-size: 1.2rem;
-          font-weight: 600;
-          color: var(--text-secondary);
+          background-color: #0A0A0A;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          position: fixed;
+          inset: 0;
+          z-index: 99999;
+        }
+        .pulsing-brand-loader {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 1rem;
+        }
+        .brand-logo-text {
+          font-family: 'Outfit', sans-serif;
+          font-size: 2.2rem;
+          font-weight: 900;
+          letter-spacing: 0.1em;
+          color: #e50914;
+        }
+        .red-neon-text {
+          text-shadow: 0 0 10px rgba(229, 9, 20, 0.6), 0 0 25px rgba(229, 9, 20, 0.3);
+          animation: logoPulse 2s infinite ease-in-out;
+        }
+        .brand-loader-bar {
+          width: 120px;
+          height: 3px;
+          background: #2a2a2a;
+          border-radius: 9999px;
+          position: relative;
+          overflow: hidden;
+        }
+        .brand-loader-bar::after {
+          content: '';
+          position: absolute;
+          left: -50%;
+          width: 50%;
+          height: 100%;
+          background: #e50914;
+          box-shadow: 0 0 8px #e50914;
+          animation: loadingSlide 1.2s infinite ease-in-out;
+        }
+        @keyframes logoPulse {
+          0%, 100% { transform: scale(1); opacity: 0.85; }
+          50% { transform: scale(1.04); opacity: 1; }
+        }
+        @keyframes loadingSlide {
+          0% { left: -50%; }
+          100% { left: 100%; }
         }
       `}</style>
     </div>

@@ -9,6 +9,7 @@ import com.aniplex.app.domain.model.Episode
 import com.aniplex.app.domain.model.HistoryItem
 import com.aniplex.app.domain.model.Result
 import com.aniplex.app.domain.model.Season
+import com.aniplex.app.domain.model.StoryArc
 import com.aniplex.app.domain.repository.AnimeRepository
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
@@ -277,6 +278,9 @@ class DetailViewModel @Inject constructor(
     private val _resolutionError = MutableStateFlow<String?>(null)
     val resolutionError: StateFlow<String?> = _resolutionError.asStateFlow()
 
+    private val _storyArcsState = MutableStateFlow<DetailState<List<StoryArc>>>(DetailState.Loading)
+    val storyArcsState: StateFlow<DetailState<List<StoryArc>>> = _storyArcsState.asStateFlow()
+
     fun loadAnimeData(animeId: String, forceRefresh: Boolean = false) {
         if (animeId.startsWith("mal-")) {
             val malId = animeId.substringAfter("mal-")
@@ -287,6 +291,7 @@ class DetailViewModel @Inject constructor(
         _episodesState.value = DetailState.Loading
         _charactersState.value = DetailState.Loading
         _seasonsState.value = DetailState.Loading
+        _storyArcsState.value = DetailState.Loading
 
         viewModelScope.launch {
             try {
@@ -323,6 +328,7 @@ class DetailViewModel @Inject constructor(
                         } else {
                             _seasonsState.value = DetailState.Success(emptyList())
                         }
+                        checkAndLoadStoryArcs()
                     }
                     is Result.Error -> _detailState.value = DetailState.Error(result.message)
                 }
@@ -334,7 +340,10 @@ class DetailViewModel @Inject constructor(
             repository.getEpisodes(animeId, forceRefresh).collect { result ->
                 when (result) {
                     is Result.Loading -> _episodesState.value = DetailState.Loading
-                    is Result.Success -> _episodesState.value = DetailState.Success(result.data)
+                    is Result.Success -> {
+                        _episodesState.value = DetailState.Success(result.data)
+                        checkAndLoadStoryArcs()
+                    }
                     is Result.Error -> _episodesState.value = DetailState.Error(result.message)
                 }
             }
@@ -449,6 +458,7 @@ class DetailViewModel @Inject constructor(
                     "id" to animeDetail.id,
                     "name" to animeDetail.name,
                     "poster" to animeDetail.poster,
+                    "status" to "planning",
                     "addedAt" to System.currentTimeMillis()
                 )
                 try {
@@ -597,6 +607,25 @@ class DetailViewModel @Inject constructor(
                     totalDuration = 100L,
                     updatedAt = System.currentTimeMillis()
                 )
+
+                // Also update watchlist status to completed
+                val watchlistRef = if (profileId != null) {
+                    firestore.collection("users").document(userId)
+                        .collection("profiles").document(profileId)
+                        .collection("watchlist").document(animeId)
+                } else {
+                    firestore.collection("users").document(userId)
+                        .collection("watchlist").document(animeId)
+                }
+                val watchlistData = hashMapOf(
+                    "id" to animeId,
+                    "name" to title,
+                    "poster" to poster,
+                    "status" to "completed",
+                    "addedAt" to System.currentTimeMillis()
+                )
+                watchlistRef.set(watchlistData, com.google.firebase.firestore.SetOptions.merge()).await()
+                _isWatchlisted.value = true
             } catch (e: Exception) {
                 // Squelch
             }
@@ -620,6 +649,22 @@ class DetailViewModel @Inject constructor(
                 _watchHistory.value = null
             } catch (e: Exception) {
                 // Squelch
+            }
+        }
+    }
+
+    private fun checkAndLoadStoryArcs() {
+        val detail = (detailState.value as? DetailState.Success)?.data
+        val eps = (episodesState.value as? DetailState.Success)?.data
+        if (detail != null && eps != null) {
+            viewModelScope.launch {
+                repository.getTmdbStoryArcs(detail.malId, detail.name, eps).collect { result ->
+                    when (result) {
+                        is Result.Loading -> _storyArcsState.value = DetailState.Loading
+                        is Result.Success -> _storyArcsState.value = DetailState.Success(result.data)
+                        is Result.Error -> _storyArcsState.value = DetailState.Error(result.message)
+                    }
+                }
             }
         }
     }

@@ -143,59 +143,64 @@ class HomeViewModel @Inject constructor(
             calendar.add(java.util.Calendar.DAY_OF_YEAR, -1)
             val beforeYesterdayStr = sdfStr.format(calendar.time)
 
-            val itemsList = mutableListOf<RecentlyAddedItem>()
+            val dates = listOf(todayStr, yesterdayStr, beforeYesterdayStr)
+            val itemsList = java.util.Collections.synchronizedList(mutableListOf<RecentlyAddedItem>())
 
-            for (dateStr in listOf(todayStr, yesterdayStr, beforeYesterdayStr)) {
-                var result: Result<List<com.aniplex.app.domain.model.ScheduleItem>>? = null
-                repository.getSchedules(dateStr).collect { res ->
-                    if (res is Result.Success || res is Result.Error) {
-                        result = res
+            val jobs = dates.map { dateStr ->
+                launch {
+                    var result: Result<List<com.aniplex.app.domain.model.ScheduleItem>>? = null
+                    repository.getSchedules(dateStr).collect { res ->
+                        if (res is Result.Success || res is Result.Error) {
+                            result = res
+                        }
                     }
-                }
-                if (result is Result.Success) {
-                    val label = when (dateStr) {
-                        todayStr -> "Today"
-                        yesterdayStr -> "Yesterday"
-                        else -> {
-                            val sdfDisplay = java.text.SimpleDateFormat("MMMM d", java.util.Locale.US)
-                            try {
-                                val dateObj = sdfStr.parse(dateStr)
-                                if (dateObj != null) sdfDisplay.format(dateObj) else dateStr
-                            } catch (e: Exception) {
-                                dateStr
+                    if (result is Result.Success) {
+                        val label = when (dateStr) {
+                            todayStr -> "Today"
+                            yesterdayStr -> "Yesterday"
+                            else -> {
+                                val sdfDisplay = java.text.SimpleDateFormat("MMMM d", java.util.Locale.US)
+                                try {
+                                    val dateObj = sdfStr.parse(dateStr)
+                                    if (dateObj != null) sdfDisplay.format(dateObj) else dateStr
+                                } catch (e: Exception) {
+                                    dateStr
+                                }
                             }
                         }
-                    }
 
-                    val mapped = (result as Result.Success).data.mapNotNull { schedule ->
-                        val timestamp = parseScheduleItemTimestamp(dateStr, schedule.time) ?: System.currentTimeMillis()
-                        
-                        // Show only already released episodes
-                        if (timestamp <= System.currentTimeMillis()) {
-                            val anime = Anime(
-                                id = schedule.id,
-                                title = schedule.title,
-                                poster = schedule.poster ?: "",
-                                subEpisodes = schedule.episode,
-                                dubEpisodes = 0
-                            )
-                            val epsText = "Episode ${schedule.episode} • Subtitled"
+                        val mapped = (result as Result.Success).data.mapNotNull { schedule ->
+                            val timestamp = parseScheduleItemTimestamp(dateStr, schedule.time) ?: System.currentTimeMillis()
                             
-                            RecentlyAddedItem(
-                                anime = anime,
-                                dayLabel = formatLocalDay(timestamp),
-                                timeLabel = formatLocalTime(timestamp),
-                                timestamp = timestamp,
-                                subtitleText = epsText
-                            )
-                        } else {
-                            null
+                            // Show only already released episodes
+                            if (timestamp <= System.currentTimeMillis()) {
+                                val anime = Anime(
+                                    id = schedule.id,
+                                    title = schedule.title,
+                                    poster = schedule.poster ?: "",
+                                    subEpisodes = schedule.episode,
+                                    dubEpisodes = 0
+                                )
+                                val epsText = "Episode ${schedule.episode} • Subtitled"
+                                
+                                RecentlyAddedItem(
+                                    anime = anime,
+                                    dayLabel = formatLocalDay(timestamp),
+                                    timeLabel = formatLocalTime(timestamp),
+                                    timestamp = timestamp,
+                                    subtitleText = epsText
+                                )
+                            } else {
+                                null
+                            }
                         }
+                        itemsList.addAll(mapped)
                     }
-                    itemsList.addAll(mapped)
                 }
             }
             
+            jobs.forEach { it.join() }
+
             // Sort descending chronologically
             val sortedList = itemsList.distinctBy { it.anime.id }.sortedByDescending { it.timestamp }
             _recentlyAddedEpisodes.value = sortedList

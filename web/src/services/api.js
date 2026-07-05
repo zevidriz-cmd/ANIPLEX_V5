@@ -144,10 +144,9 @@ export async function getDirectStream(episodeId, server = "hd-1", category = "su
     const fileUrl = sourcesNewJson?.sources?.file;
     if (!fileUrl) throw new Error("HLS master.m3u8 file not found in response");
 
-    // Rewrite the fileUrl to go through our Netlify function proxy (to bypass Cloudflare WAF on playlist domains)
+    // Rewrite the fileUrl to go through our proxy (to bypass Cloudflare WAF on playlist domains)
     const cleanFileUrl = fileUrl.replace(/https:\/\//, '');
-    const netlifyProxyBase = 'https://anistream-web-f1886391.netlify.app/.netlify/functions/stream-proxy';
-    const proxiedFileUrl = `${netlifyProxyBase}/${cleanFileUrl}`;
+    const proxiedFileUrl = `${STREAM_PROXY_BASE}/${cleanFileUrl}`;
 
     // Rewrite subtitle tracks to go through proxy too
     const proxiedTracks = (sourcesNewJson?.tracks || []).map(track => {
@@ -194,10 +193,23 @@ export async function getBackupStream(malId, epNumber, title, onStatusUpdate = n
       const paheData = await fetchBackupFromApi(malId, epNumber, title, "animepahe");
       return paheData;
     } catch (paheErr) {
-      console.error(`[Backup Flow] All backup streaming providers failed.`);
-      throw new Error("No backup streams could be resolved from Gogoanime or AnimePahe.");
+      console.warn(`[Backup Flow] AnimePahe backup failed:`, paheErr);
+      // Try MegaPlay Direct as 3rd fallback (extracts .m3u8 for our custom player)
+      try {
+        if (onStatusUpdate) onStatusUpdate("Extracting MegaPlay direct stream...");
+        console.log(`[Backup Flow] Attempting MegaPlay direct stream extraction...`);
+        const megaData = await getMegaplayDirectStream(malId, epNumber);
+        return megaData;
+      } catch (megaErr) {
+        console.error(`[Backup Flow] All backup streaming providers failed (including MegaPlay direct).`);
+        throw new Error("No backup streams could be resolved from any provider.");
+      }
     }
   }
+}
+
+export async function getSingleBackupStream(malId, epNumber, title, provider) {
+  return await fetchBackupFromApi(malId, epNumber, title, provider);
 }
 
 async function fetchBackupFromApi(malId, epNumber, title, provider) {
@@ -207,7 +219,8 @@ async function fetchBackupFromApi(malId, epNumber, title, provider) {
   if (title) params.append("title", title);
   params.append("provider", provider);
 
-  const res = await fetch(`/.netlify/functions/fallback-stream?${params.toString()}`);
+  const netlifyBase = "https://anistream-web.netlify.app";
+  const res = await fetch(`${netlifyBase}/.netlify/functions/fallback-stream?${params.toString()}`);
   if (!res.ok) {
     throw new Error(`Fallback API failed with status ${res.status}`);
   }
@@ -224,8 +237,7 @@ async function fetchBackupFromApi(malId, epNumber, title, provider) {
 
   // Proxy the HLS master playlist URL
   const cleanHlsUrl = hlsSource.url.replace(/https:\/\//, '');
-  const netlifyProxyBase = 'https://anistream-web-f1886391.netlify.app/.netlify/functions/stream-proxy';
-  const proxiedHlsUrl = `${netlifyProxyBase}/${cleanHlsUrl}`;
+  const proxiedHlsUrl = `${STREAM_PROXY_BASE}/${cleanHlsUrl}`;
 
   // Proxy subtitle track files
   const proxiedTracks = (json.subtitles || []).map(track => {
@@ -250,7 +262,97 @@ async function fetchBackupFromApi(malId, epNumber, title, provider) {
   };
 }
 
+/**
+ * Extract MegaPlay's direct .m3u8 stream via their MAL-based URL.
+ * This gives us smooth playback in our custom HLS.js player instead of
+ * the buffering-heavy iframe fallback.
+ */
+export async function getMegaplayDirectStream(malId, epNumber, audioCategory = "sub") {
+  try {
+    // 1. Fetch MegaPlay's MAL-based player page
+    const megaplayPageUrl = `megaplay.buzz/stream/mal/${malId}/${epNumber}/${audioCategory}`;
+    const pageRes = await fetch(`${STREAM_PROXY_BASE}/${megaplayPageUrl}`);
+    if (!pageRes.ok) throw new Error(`MegaPlay page fetch failed: ${pageRes.status}`);
+    const pageHtml = await pageRes.text();
 
+    // 2. Try to extract embedded player URL (s-1, s-2, etc.)
+    const embedMatch = pageHtml.match(/src=["'](https:\/\/megaplay\.buzz\/stream\/s-[1-9]\/\d+\/(?:sub|dub))["']/);
+    let playerHtml = pageHtml;
+
+    if (embedMatch) {
+      // Fetch the inner player page
+      const innerUrl = embedMatch[1].replace(/https:\/\//, '');
+      const innerRes = await fetch(`${STREAM_PROXY_BASE}/${innerUrl}`);
+      if (innerRes.ok) {
+        playerHtml = await innerRes.text();
+      }
+    }
+
+    // 3. Extract data-id from the player HTML
+    const dataIdMatch = playerHtml.match(/data-id=["'](\d+)["']/);
+    const dataId = dataIdMatch ? dataIdMatch[1] : null;
+    if (!dataId) throw new Error("Could not extract data-id from MegaPlay player");
+
+    // 4. Try getSources first, fall back to getSourcesNew
+    let sourcesJson;
+    let resolved = false;
+
+    try {
+      const res = await fetch(`${STREAM_PROXY_BASE}/megaplay.buzz/stream/getSources?id=${dataId}`, {
+        headers: { "X-Requested-With": "XMLHttpRequest" }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.sources?.file) {
+          sourcesJson = data;
+          resolved = true;
+        }
+      }
+    } catch (e) {
+      console.warn("MegaPlay getSources failed, trying getSourcesNew:", e);
+    }
+
+    if (!resolved) {
+      const res = await fetch(`${STREAM_PROXY_BASE}/megaplay.buzz/stream/getSourcesNew?id=${dataId}`, {
+        headers: { "X-Requested-With": "XMLHttpRequest" }
+      });
+      if (!res.ok) throw new Error(`MegaPlay getSourcesNew failed: ${res.status}`);
+      sourcesJson = await res.json();
+    }
+
+    const fileUrl = sourcesJson?.sources?.file;
+    if (!fileUrl) throw new Error("MegaPlay HLS master.m3u8 not found");
+
+    // 5. Proxy the HLS URL and subtitle tracks
+    const cleanFileUrl = fileUrl.replace(/https:\/\//, '');
+    const proxiedFileUrl = `${STREAM_PROXY_BASE}/${cleanFileUrl}`;
+
+    const proxiedTracks = (sourcesJson?.tracks || []).map(track => {
+      if (track.file) {
+        const cleanTrackUrl = track.file.replace(/https:\/\//, '');
+        return {
+          ...track,
+          file: `${STREAM_PROXY_BASE}/${cleanTrackUrl}`
+        };
+      }
+      return track;
+    });
+
+    console.log(`[MegaPlay Direct] Successfully extracted stream for MAL ${malId} ep ${epNumber}`);
+
+    return {
+      hlsUrl: proxiedFileUrl,
+      tracks: proxiedTracks,
+      intro: sourcesJson?.intro || { start: 0, end: 0 },
+      outro: sourcesJson?.outro || { start: 0, end: 0 },
+      provider: "megaplay-direct"
+    };
+
+  } catch (err) {
+    console.error("[MegaPlay Direct] Extraction failed:", err);
+    throw err;
+  }
+}
 
 export async function getSeasons(malId) {
   return fetchJson(`${BASE_URL}/seasons/${malId}`);

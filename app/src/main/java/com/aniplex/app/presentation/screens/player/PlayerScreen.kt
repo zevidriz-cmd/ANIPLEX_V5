@@ -26,6 +26,8 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -39,6 +41,8 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.changedToUp
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -47,6 +51,15 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.foundation.focusable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -176,8 +189,17 @@ data class PlayerScreenState(
     val showSubtitleStyleDialog: Boolean,
     val showEpisodesSelector: Boolean,
     val selectedServer: String = "s-1",
+    val preferredProvider: String = "zoro",
     val showServerDialog: Boolean = false,
-    val isDiagnosticsEnabled: Boolean = false
+    val isDiagnosticsEnabled: Boolean = false,
+    val subtitleColor: String = "White",
+    val subtitleBgOpacity: Float = 0.35f,
+    val subtitleSizeScale: Float = 1.0f,
+    val showSubtitleColorDialog: Boolean = false,
+    val showSubtitleBgOpacityDialog: Boolean = false,
+    val subtitlePosition: Float = 0.10f,
+    val screenFitMode: String = "Fit",
+    val isUpNextDismissed: Boolean = false
 )
 
 data class PlayerCallbacks(
@@ -224,15 +246,22 @@ data class PlayerCallbacks(
     val onShowVersionDialogChange: (Boolean) -> Unit,
     val onSubtitleStyleChange: (String) -> Unit,
     val onShowSubtitleStyleDialogChange: (Boolean) -> Unit,
+    val onSubtitleColorChange: (String) -> Unit,
+    val onShowSubtitleColorDialogChange: (Boolean) -> Unit,
+    val onSubtitleBgOpacityChange: (Float) -> Unit,
+    val onShowSubtitleBgOpacityDialogChange: (Boolean) -> Unit,
+    val onSubtitleSizeScaleChange: (Float) -> Unit,
     val onShowEpisodesSelectorChange: (Boolean) -> Unit,
     val onEpisodeSelect: (Episode) -> Unit,
     val onServerSelected: (String) -> Unit,
     val onShowServerDialogChange: (Boolean) -> Unit,
     val onDebugClick: () -> Unit,
-    val onDiagnosticsChange: (Boolean) -> Unit
+    val onDiagnosticsChange: (Boolean) -> Unit,
+    val onScreenFitChange: (String) -> Unit = {},
+    val onDismissUpNext: () -> Unit = {}
 )
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun PlayerScreen(
     episodeId: String,
@@ -245,12 +274,13 @@ fun PlayerScreen(
     modifier: Modifier,
     resumePlayback: Boolean,
     initialProgressParam: Long,
+    isTv: Boolean = false,
     viewModel: PlayerViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
     val configuration = LocalConfiguration.current
     var isLandscape by remember(configuration.orientation) {
-        mutableStateOf(configuration.orientation == Configuration.ORIENTATION_LANDSCAPE)
+        mutableStateOf(isTv || configuration.orientation == Configuration.ORIENTATION_LANDSCAPE)
     }
     var showSettings by remember { mutableStateOf(false) }
 
@@ -273,6 +303,10 @@ fun PlayerScreen(
     var subtitlesEnabled by remember { mutableStateOf(viewModel.subtitlesEnabled) }
     var qualityOption by remember { mutableStateOf(viewModel.preferredQuality) }
     var subtitleSizeSp by remember { mutableStateOf(18f) } // Default to 18sp
+    var screenFitMode by remember { mutableStateOf("Fit") }
+    var isUpNextDismissed by remember(episodeId) { mutableStateOf(false) }
+
+
 
     // Lifted playback and sniffer states
     var capturedStreamUrl by remember { mutableStateOf<String?>(null) }
@@ -313,14 +347,20 @@ fun PlayerScreen(
     var gestureIndicatorValue by remember { mutableStateOf(0f) }
     var showGestureIndicator by remember { mutableStateOf(false) }
 
-    // Playback settings dialogs visibility states
-    var selectedServer by remember { mutableStateOf("s-1") }
+    val preferredProvider = viewModel.preferredProvider
+    val availableServers = remember(preferredProvider) {
+        if (preferredProvider == "gogoanime") {
+            listOf("s-2", "s-1", "s-3")
+        } else {
+            listOf("s-1", "s-2", "s-3")
+        }
+    }
+
+    var selectedServer by remember(preferredProvider) { mutableStateOf(availableServers.first()) }
     var showServerDialog by remember { mutableStateOf(false) }
     var showDownloadServerDialog by remember { mutableStateOf(false) }
     var autoStartDownloadAfterExtraction by remember { mutableStateOf(false) }
     var isDiagnosticsEnabled by remember { mutableStateOf(DebugLogManager.isLoggingEnabled) }
-
-    val availableServers = remember { listOf("s-1", "s-2", "s-3") }
 
     val getEmbedUrl = remember<(String, String, String) -> String> {
         { srv, epId, cat ->
@@ -345,10 +385,17 @@ fun PlayerScreen(
     var showSubtitleSizeDialog by remember { mutableStateOf(false) }
     var showVersionDialog by remember { mutableStateOf(false) }
     var preferredAnimeVersion by remember { mutableStateOf(viewModel.preferredAnimeVersion) }
-    var subtitleStyle by remember { mutableStateOf("classic_outline") }
+    var subtitleStyle by remember { mutableStateOf(viewModel.subtitleStyle) }
     var showSubtitleStyleDialog by remember { mutableStateOf(false) }
     var showEpisodesSelector by remember { mutableStateOf(false) }
     var showDebugExportDialog by remember { mutableStateOf(false) }
+
+    var subtitleColor by remember { mutableStateOf(viewModel.subtitleColor) }
+    var subtitleBgOpacity by remember { mutableStateOf(viewModel.subtitleBgOpacity) }
+    var subtitleSizeScale by remember { mutableStateOf(viewModel.subtitleSizeScale) }
+    var subtitlePosition by remember { mutableStateOf(viewModel.subtitlePosition) }
+    var showSubtitleColorDialog by remember { mutableStateOf(false) }
+    var showSubtitleBgOpacityDialog by remember { mutableStateOf(false) }
 
     // Scroll states
     val metadataScrollState = rememberScrollState()
@@ -662,8 +709,11 @@ fun PlayerScreen(
             val nextUrl = getEmbedUrl(nextServer, episodeId, activeCategory)
             resetPlayerState(nextUrl, isNewEpisode = false)
         } else {
-            extractionState = ExtractionState.ERROR
-            android.widget.Toast.makeText(context, "All servers failed. HLS stream not found.", android.widget.Toast.LENGTH_SHORT).show()
+            // All Zoro servers exhausted - run the full fallback chain
+            // (Gogoanime → AnimePahe → MegaPlay Direct → MegaPlay Iframe)
+            DebugLogManager.log("ANIPLEX_PLAYER", "All Zoro servers exhausted. Running multi-provider fallback chain...")
+            android.widget.Toast.makeText(context, "Switching to backup providers...", android.widget.Toast.LENGTH_SHORT).show()
+            viewModel.runFallbackChain(activeCategory)
         }
     }
 
@@ -686,6 +736,10 @@ fun PlayerScreen(
                 if (extractionState != ExtractionState.READY) {
                     extractionState = ExtractionState.EXTRACTING
                 }
+            }
+            is PlayerUiState.IframeFallback -> {
+                // Iframe fallback is self-contained; mark extraction as READY
+                extractionState = ExtractionState.READY
             }
             else -> {
                 extractionState = ExtractionState.EXTRACTING
@@ -745,14 +799,17 @@ fun PlayerScreen(
     // Reset orientation to portrait on leaving player screen
     DisposableEffect(Unit) {
         onDispose {
-            val activity = context as? Activity
-            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+            if (!isTv) {
+                val activity = context as? Activity
+                activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+            }
         }
     }
 
     LaunchedEffect(episodeId, activeCategory) {
-        if (selectedServer != "s-1") {
-            selectedServer = "s-1"
+        val defaultServer = availableServers.firstOrNull() ?: "s-1"
+        if (selectedServer != defaultServer) {
+            selectedServer = defaultServer
         }
     }
 
@@ -882,6 +939,18 @@ fun PlayerScreen(
         val renderersFactory = androidx.media3.exoplayer.DefaultRenderersFactory(context)
             .setEnableDecoderFallback(true)
 
+        if (!viewModel.hevcDecoderEnabled) {
+            renderersFactory.setMediaCodecSelector { mimeType, requiresSecureDecoder, requiresTunnelingDecoder ->
+                val decoders = androidx.media3.exoplayer.mediacodec.MediaCodecSelector.DEFAULT
+                    .getDecoderInfos(mimeType, requiresSecureDecoder, requiresTunnelingDecoder)
+                if (mimeType.equals(androidx.media3.common.MimeTypes.VIDEO_H265, ignoreCase = true)) {
+                    emptyList()
+                } else {
+                    decoders
+                }
+            }
+        }
+
         val loadControl = androidx.media3.exoplayer.DefaultLoadControl.Builder()
             .setAllocator(androidx.media3.exoplayer.upstream.DefaultAllocator(true, 65536))
             .setBufferDurationsMs(
@@ -894,8 +963,19 @@ fun PlayerScreen(
             .setPrioritizeTimeOverSizeThresholds(true)
             .build()
 
+        val audioAttributes = androidx.media3.common.AudioAttributes.Builder()
+            .setUsage(androidx.media3.common.C.USAGE_MEDIA)
+            .setContentType(
+                if (viewModel.dolbyAtmosEnabled) 
+                    androidx.media3.common.C.AUDIO_CONTENT_TYPE_MOVIE 
+                else 
+                    androidx.media3.common.C.AUDIO_CONTENT_TYPE_SPEECH
+            )
+            .build()
+
         ExoPlayer.Builder(context, renderersFactory)
             .setLoadControl(loadControl)
+            .setAudioAttributes(audioAttributes, true)
             .build()
     }
 
@@ -906,7 +986,7 @@ fun PlayerScreen(
 
     val onPlaybackEndedAction by rememberUpdatedState {
         val nextEp = episodes.find { it.number == currentEpNum + 1 }
-        if (viewModel.autoplayNextEpisode && nextEp != null) {
+        if (viewModel.autoplayNextEpisode && nextEp != null && !isUpNextDismissed) {
             val nextUrl = getEmbedUrl(selectedServer, nextEp.id, activeCategory)
             localResumePlayback = false
             resetPlayerState(nextUrl)
@@ -1061,8 +1141,8 @@ fun PlayerScreen(
             val okHttpClient = OkHttpClient.Builder()
                 .followRedirects(true)
                 .followSslRedirects(true)
-                .connectTimeout(25, java.util.concurrent.TimeUnit.SECONDS)
-                .readTimeout(25, java.util.concurrent.TimeUnit.SECONDS)
+                .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+                .readTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
                 .build()
 
             val dataSourceFactory = OkHttpDataSource.Factory(okHttpClient)
@@ -1195,9 +1275,11 @@ fun PlayerScreen(
         }
     }
 
-    BackHandler(enabled = isLandscape || showSettings) {
+    BackHandler(enabled = isTv || isLandscape || showSettings) {
         if (showSettings) {
             showSettings = false
+        } else if (isTv) {
+            onBackClick()
         } else if (isLandscape) {
             val activity = context as? Activity
             activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
@@ -1299,8 +1381,17 @@ fun PlayerScreen(
         showSubtitleStyleDialog = showSubtitleStyleDialog,
         showEpisodesSelector = showEpisodesSelector,
         selectedServer = selectedServer,
+        preferredProvider = preferredProvider,
         showServerDialog = showServerDialog,
-        isDiagnosticsEnabled = isDiagnosticsEnabled
+        isDiagnosticsEnabled = isDiagnosticsEnabled,
+        subtitleColor = subtitleColor,
+        subtitleBgOpacity = subtitleBgOpacity,
+        subtitleSizeScale = subtitleSizeScale,
+        showSubtitleColorDialog = showSubtitleColorDialog,
+        showSubtitleBgOpacityDialog = showSubtitleBgOpacityDialog,
+        subtitlePosition = subtitlePosition,
+        screenFitMode = screenFitMode,
+        isUpNextDismissed = isUpNextDismissed
     )
 
     val callbacks = PlayerCallbacks(
@@ -1480,6 +1571,24 @@ fun PlayerScreen(
             DebugLogManager.log("USER_ACTION", "Toggled Subtitle styling customization modal visibility: $it")
             showSubtitleStyleDialog = it
         },
+        onSubtitleColorChange = {
+            subtitleColor = it
+            viewModel.subtitleColor = it
+        },
+        onShowSubtitleColorDialogChange = {
+            showSubtitleColorDialog = it
+        },
+        onSubtitleBgOpacityChange = {
+            subtitleBgOpacity = it
+            viewModel.subtitleBgOpacity = it
+        },
+        onShowSubtitleBgOpacityDialogChange = {
+            showSubtitleBgOpacityDialog = it
+        },
+        onSubtitleSizeScaleChange = {
+            subtitleSizeScale = it
+            viewModel.subtitleSizeScale = it
+        },
         onShowEpisodesSelectorChange = {
             DebugLogManager.log("USER_ACTION", "Toggled Episode selection drawer overlay visibility: $it")
             showEpisodesSelector = it
@@ -1517,7 +1626,9 @@ fun PlayerScreen(
             } else {
                 DebugLogManager.clear()
             }
-        }
+        },
+        onScreenFitChange = { screenFitMode = it },
+        onDismissUpNext = { isUpNextDismissed = true }
     )
 
     if (showDownloadServerDialog) {
@@ -1725,6 +1836,7 @@ fun PlayerScreen(
     PlayerScreenContent(
         state = state,
         callbacks = callbacks,
+        isTv = isTv,
         modifier = modifier
     )
 }
@@ -1733,9 +1845,22 @@ fun PlayerScreen(
 private fun PlayerScreenContent(
     state: PlayerScreenState,
     callbacks: PlayerCallbacks,
+    isTv: Boolean,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    
+    var selectedChunkIndex by remember(state.episodes) { mutableStateOf(0) }
+    
+    LaunchedEffect(state.currentEpisode, state.episodes) {
+        val curEp = state.currentEpisode
+        if (curEp != null) {
+            val index = state.episodes.indexOfFirst { it.id == curEp.id }
+            if (index != -1) {
+                selectedChunkIndex = index / 25
+            }
+        }
+    }
     
     Box(
         modifier = modifier
@@ -1746,6 +1871,7 @@ private fun PlayerScreenContent(
             PlayerContainer(
                 state = state,
                 callbacks = callbacks,
+                isTv = isTv,
                 modifier = if (state.isLandscape) {
                     Modifier.fillMaxSize()
                 } else {
@@ -1973,13 +2099,180 @@ private fun PlayerScreenContent(
 
                     Spacer(modifier = Modifier.height(24.dp))
 
+                    // In-Player Episodes Grid Section
+                    if (state.episodes.isNotEmpty()) {
+                        val totalEpisodes = state.episodes.size
+                        val chunks = state.episodes.chunked(25)
+                        
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Episodes List",
+                                color = Color.White,
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            
+                            if (chunks.size > 1) {
+                                var dropdownExpanded by remember { mutableStateOf(false) }
+                                Box {
+                                    Row(
+                                        modifier = Modifier
+                                            .background(Color(0xFF1D1D1D), RoundedCornerShape(8.dp))
+                                            .border(1.dp, Color(0xFF2C2C2C), RoundedCornerShape(8.dp))
+                                            .clickable { dropdownExpanded = true }
+                                            .padding(horizontal = 12.dp, vertical = 6.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        val startEp = selectedChunkIndex * 25 + 1
+                                        val endEp = minOf((selectedChunkIndex + 1) * 25, totalEpisodes)
+                                        Text(
+                                            text = "Episodes $startEp-$endEp",
+                                            color = Color.White,
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                        Icon(
+                                            imageVector = Icons.Default.ArrowDropDown,
+                                            contentDescription = "Select Episode range",
+                                            tint = Color.White,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                    }
+                                    
+                                    DropdownMenu(
+                                        expanded = dropdownExpanded,
+                                        onDismissRequest = { dropdownExpanded = false },
+                                        modifier = Modifier.background(Color(0xFF1D1D1D))
+                                    ) {
+                                        chunks.forEachIndexed { idx, _ ->
+                                            val start = idx * 25 + 1
+                                            val end = minOf((idx + 1) * 25, totalEpisodes)
+                                            DropdownMenuItem(
+                                                text = { 
+                                                    Text(
+                                                        text = "Episodes $start-$end", 
+                                                        color = Color.White,
+                                                        fontSize = 13.sp
+                                                    ) 
+                                                },
+                                                onClick = {
+                                                    selectedChunkIndex = idx
+                                                    dropdownExpanded = false
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        
+                        Spacer(modifier = Modifier.height(10.dp))
+                        
+                        // Legend
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(8.dp)
+                                        .clip(CircleShape)
+                                        .background(Color(0xFFff4d4d))
+                                )
+                                Text(
+                                    text = "Filler",
+                                    color = Color.Gray,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                        }
+                        
+                        Spacer(modifier = Modifier.height(14.dp))
+                        
+                        // FlowRow episodes grid
+                        val activeChunk = if (selectedChunkIndex in chunks.indices) chunks[selectedChunkIndex] else emptyList()
+                        
+                        FlowRow(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            activeChunk.forEach { ep ->
+                                val isCurrent = state.currentEpisode?.id == ep.id
+                                val isFiller = ep.isFiller
+                                
+                                Box(
+                                    modifier = Modifier
+                                        .width(62.dp)
+                                        .height(40.dp)
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(
+                                            if (isCurrent) CrunchyrollOrange else Color(0xFF1D1D1D)
+                                        )
+                                        .border(
+                                            width = if (isCurrent) 0.dp else if (isFiller) 1.5.dp else 1.dp,
+                                            color = if (isCurrent) Color.Transparent 
+                                                    else if (isFiller) Color(0xFFff4d4d) 
+                                                    else Color(0xFF2C2C2C),
+                                            shape = RoundedCornerShape(6.dp)
+                                        )
+                                        .clickable {
+                                            if (!isCurrent) {
+                                                callbacks.onEpisodeSelect(ep)
+                                            }
+                                        },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = "Ep ${ep.number}",
+                                        color = if (isCurrent) Color.Black else Color.White,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                        }
+                        
+                        Spacer(modifier = Modifier.height(24.dp))
+                    }
+
                     // Description
+                    val description = state.animeDetail?.description ?: "No description available."
+                    var isDescriptionExpanded by remember { mutableStateOf(false) }
+                    
                     Text(
-                        text = state.animeDetail?.description ?: "No description available.",
+                        text = description,
                         color = Color.LightGray,
                         fontSize = 14.sp,
-                        lineHeight = 20.sp
+                        lineHeight = 20.sp,
+                        maxLines = if (isDescriptionExpanded) Int.MAX_VALUE else 3,
+                        overflow = TextOverflow.Ellipsis
                     )
+                    
+                    if (description.length > 100) {
+                        Text(
+                            text = if (isDescriptionExpanded) "Less Details" else "More Details",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = CrunchyrollOrange,
+                            modifier = Modifier
+                                .clickable { isDescriptionExpanded = !isDescriptionExpanded }
+                                .padding(vertical = 8.dp)
+                                .fillMaxWidth(),
+                            textAlign = TextAlign.Center
+                        )
+                    }
 
                     Spacer(modifier = Modifier.height(24.dp))
 
@@ -1989,68 +2282,6 @@ private fun PlayerScreenContent(
                     Text(text = "16+", color = Color.Gray, fontSize = 14.sp)
                     Text(text = "Profanity, Suggestive Dialogue", color = Color.Gray, fontSize = 14.sp)
 
-                    Spacer(modifier = Modifier.height(32.dp))
-
-                    // Next Episode
-                    Text(text = "Next Episode", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    val nextEp = state.episodes.find { it.number == currentEpNum + 1 }
-                    if (nextEp != null) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    callbacks.onNextEpisodeClick?.invoke()
-                                },
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Box(modifier = Modifier
-                                .width(160.dp)
-                                .aspectRatio(16f / 9f)
-                                .clip(RoundedCornerShape(8.dp))) {
-                                AsyncImage(
-                                    model = state.animeDetail?.poster,
-                                    contentDescription = nextEp.title,
-                                    contentScale = ContentScale.Crop,
-                                    modifier = Modifier.fillMaxSize()
-                                )
-                                Box(modifier = Modifier
-                                    .fillMaxSize()
-                                    .background(Color.Black.copy(alpha = 0.3f)), contentAlignment = Alignment.Center) {
-                                    Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.White, modifier = Modifier.size(32.dp))
-                                }
-                            }
-                            Spacer(modifier = Modifier.width(16.dp))
-                            Text(
-                                text = "${nextEp.number}. ${nextEp.title}",
-                                color = Color.White,
-                                fontSize = 14.sp,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f)
-                            )
-                            IconButton(onClick = {
-                                Toast.makeText(context, "Download started for Episode ${nextEp.number}", Toast.LENGTH_SHORT).show()
-                            }) {
-                                Icon(Icons.Default.Download, contentDescription = "Download Next Episode", tint = Color.White)
-                            }
-                        }
-                    } else {
-                        Text("No further episodes.", color = Color.Gray)
-                    }
-
-                    Spacer(modifier = Modifier.height(32.dp))
-
-                    Text(
-                        text = "All Episodes",
-                        color = CrunchyrollOrange,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier
-                            .align(Alignment.CenterHorizontally)
-                            .clickable { callbacks.onBackClick() }
-                    )
-                    
                     Spacer(modifier = Modifier.height(48.dp))
                 }
             }
@@ -2058,8 +2289,8 @@ private fun PlayerScreenContent(
 
         AnimatedVisibility(
             visible = state.showSettings,
-            enter = slideInVertically(initialOffsetY = { it }),
-            exit = slideOutVertically(targetOffsetY = { it }),
+            enter = slideInHorizontally(initialOffsetX = { it }),
+            exit = slideOutHorizontally(targetOffsetX = { it }),
             modifier = Modifier.fillMaxSize()
         ) {
             PlaybackSettingsOverlay(
@@ -2134,6 +2365,7 @@ enum class ExtractionState {
 fun PlayerContainer(
     state: PlayerScreenState,
     callbacks: PlayerCallbacks,
+    isTv: Boolean,
     modifier: Modifier = Modifier
 ) {
     Box(modifier = modifier.background(Color.Black)) {
@@ -2172,10 +2404,31 @@ fun PlayerContainer(
                                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                         CircularProgressIndicator(color = CrunchyrollOrange)
                                         Spacer(modifier = Modifier.height(16.dp))
+                                        val loadingMessage = when (state.preferredProvider) {
+                                            "gogoanime" -> {
+                                                if (state.selectedServer == "s-1") "Connecting to Gogoanime primary server..."
+                                                else "Connecting to Gogoanime backup server..."
+                                            }
+                                            else -> {
+                                                when (state.selectedServer) {
+                                                    "s-1" -> "Connecting to Zoro primary server..."
+                                                    "s-2" -> "Connecting to Zoro backup server..."
+                                                    "s-3" -> "Connecting to Megastream backup server..."
+                                                    else -> "Connecting to primary server..."
+                                                }
+                                            }
+                                        }
                                         Text(
-                                            text = "Loading stream...",
+                                            text = loadingMessage,
                                             color = Color.White,
-                                            fontSize = 14.sp
+                                            fontSize = 16.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                        Text(
+                                            text = "Extracting secure links and subtitles",
+                                            color = Color.Gray,
+                                            fontSize = 12.sp
                                         )
                                     }
                                 }
@@ -2204,13 +2457,198 @@ fun PlayerContainer(
                             }
                             ExtractionState.READY -> {
                                 if (state.capturedStreamUrl != null) {
-                                    ExoVideoPlayer(
-                                        state = state,
-                                        callbacks = callbacks,
-                                        modifier = Modifier.fillMaxSize()
-                                    )
+                                    if (isTv) {
+                                        TvExoVideoPlayer(
+                                            state = state,
+                                            callbacks = callbacks,
+                                            modifier = Modifier.fillMaxSize()
+                                        )
+                                    } else {
+                                        ExoVideoPlayer(
+                                            state = state,
+                                            callbacks = callbacks,
+                                            modifier = Modifier.fillMaxSize()
+                                        )
+                                    }
                                 }
                             }
+                        }
+                    }
+                }
+                is PlayerUiState.IframeFallback -> {
+                    // Fullscreen interactive WebView for iframe fallback (MegaPlay, VidSrc, Embed.su)
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        var iframeWebView by remember { mutableStateOf<android.webkit.WebView?>(null) }
+                        var loadError by remember(uiState.iframeUrl) { mutableStateOf<String?>(null) }
+                        
+                        if (loadError != null) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(Color.Black)
+                                    .padding(24.dp),
+                                verticalArrangement = Arrangement.Center,
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.CloudOff,
+                                    contentDescription = "Stream Offline",
+                                    tint = CrunchyrollOrange,
+                                    modifier = Modifier.size(64.dp)
+                                )
+                                Spacer(modifier = Modifier.height(16.dp))
+                                Text(
+                                    text = "Backup Stream Offline",
+                                    color = Color.White,
+                                    fontSize = 18.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    text = loadError ?: "Failed to connect to the backup stream. Please switch to another Server or Category.",
+                                    color = Color.Gray,
+                                    fontSize = 14.sp,
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+                        } else {
+                            AndroidView(
+                                factory = { ctx ->
+                                    android.webkit.WebView(ctx).apply {
+                                        settings.javaScriptEnabled = true
+                                        settings.domStorageEnabled = true
+                                        settings.mediaPlaybackRequiresUserGesture = false
+                                        settings.allowContentAccess = true
+                                        settings.loadWithOverviewMode = true
+                                        settings.useWideViewPort = true
+                                        settings.userAgentString = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Mobile Safari/537.36"
+                                        
+                                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.LOLLIPOP) {
+                                            settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                                        }
+                                        
+                                        val cookieManager = android.webkit.CookieManager.getInstance()
+                                        cookieManager.setAcceptCookie(true)
+                                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.LOLLIPOP) {
+                                            cookieManager.setAcceptThirdPartyCookies(this, true)
+                                        }
+
+                                        setBackgroundColor(android.graphics.Color.BLACK)
+                                        
+                                        webViewClient = object : android.webkit.WebViewClient() {
+                                            override fun onReceivedError(
+                                                view: android.webkit.WebView?,
+                                                request: android.webkit.WebResourceRequest?,
+                                                error: android.webkit.WebResourceError?
+                                            ) {
+                                                super.onReceivedError(view, request, error)
+                                                if (request?.isForMainFrame == true) {
+                                                    val desc = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                                                        error?.description?.toString()
+                                                    } else null
+                                                    loadError = desc ?: "Failed to load the streaming page."
+                                                }
+                                            }
+
+                                            override fun onReceivedHttpError(
+                                                view: android.webkit.WebView?,
+                                                request: android.webkit.WebResourceRequest?,
+                                                errorResponse: android.webkit.WebResourceResponse?
+                                            ) {
+                                                super.onReceivedHttpError(view, request, errorResponse)
+                                                if (request?.isForMainFrame == true) {
+                                                    val status = errorResponse?.statusCode ?: -1
+                                                    if (status == 404 || status >= 500) {
+                                                        loadError = "Server returned error code: $status"
+                                                    }
+                                                }
+                                            }
+
+                                            override fun shouldOverrideUrlLoading(
+                                                view: android.webkit.WebView?,
+                                                request: android.webkit.WebResourceRequest?
+                                            ): Boolean {
+                                                val url = request?.url?.toString() ?: return false
+                                                val host = request.url.host ?: ""
+                                                val allowedDomains = listOf(
+                                                    "megaplay.buzz", "vidsrc.to", "vidsrc.me", "embed.su",
+                                                    "kryzox.xyz", "animeplay.cfd", "4animo.xyz"
+                                                )
+                                                val isAllowed = allowedDomains.any { host.contains(it) }
+                                                if (!isAllowed) {
+                                                    DebugLogManager.log("IFRAME_WEBVIEW", "Blocked redirect/ad navigation to: $url")
+                                                    return true // Block ad redirects
+                                                }
+                                                return false // Allow load
+                                            }
+                                        }
+
+                                        webChromeClient = android.webkit.WebChromeClient()
+                                        iframeWebView = this
+                                        loadUrl(uiState.iframeUrl)
+                                    }
+                                },
+                                update = { webView ->
+                                    if (webView.url != uiState.iframeUrl) {
+                                        webView.loadUrl(uiState.iframeUrl)
+                                    }
+                                },
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
+
+                        // Floating back button overlay
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(12.dp),
+                            contentAlignment = Alignment.TopStart
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .background(
+                                        Color.Black.copy(alpha = 0.5f),
+                                        shape = androidx.compose.foundation.shape.CircleShape
+                                    )
+                                    .clickable { callbacks.onBackClick() },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "←",
+                                    color = Color.White,
+                                    fontSize = 20.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+
+                        // Fallback provider label
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(12.dp),
+                            contentAlignment = Alignment.TopEnd
+                        ) {
+                            val providerLabel = when (uiState.provider) {
+                                "megaplay" -> "MegaPlay"
+                                "vidsrc-to" -> "VidSrc.to"
+                                "vidsrc-me" -> "VidSrc.me"
+                                "embed-su" -> "Embed.su"
+                                else -> "Backup Player"
+                            }
+                            Text(
+                                text = "▶ $providerLabel (Iframe)",
+                                color = Color.White,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Medium,
+                                modifier = Modifier
+                                    .background(
+                                        Color.Black.copy(alpha = 0.5f),
+                                        shape = androidx.compose.foundation.shape.RoundedCornerShape(6.dp)
+                                    )
+                                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                            )
                         }
                     }
                 }
@@ -2261,7 +2699,11 @@ fun ExoVideoPlayer(
                         player = exoPlayer
                         visibility = android.view.View.VISIBLE
                         useController = false
-                        resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+                        resizeMode = when (state.screenFitMode) {
+                            "Stretch" -> AspectRatioFrameLayout.RESIZE_MODE_FILL
+                            "Zoom" -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                            else -> AspectRatioFrameLayout.RESIZE_MODE_FIT
+                        }
                         layoutParams = ViewGroup.LayoutParams(
                             ViewGroup.LayoutParams.MATCH_PARENT,
                             ViewGroup.LayoutParams.MATCH_PARENT
@@ -2278,98 +2720,91 @@ fun ExoVideoPlayer(
 
                         subtitleView?.visibility = android.view.View.VISIBLE
                         subtitleView?.apply {
-                            val styleCompat = when (state.subtitleStyle) {
-                                "yellow" -> androidx.media3.ui.CaptionStyleCompat(
-                                    AndroidColor.YELLOW,
-                                    AndroidColor.TRANSPARENT,
-                                    AndroidColor.TRANSPARENT,
-                                    androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_DROP_SHADOW,
-                                    AndroidColor.BLACK,
-                                    null
-                                )
-                                "cyan" -> androidx.media3.ui.CaptionStyleCompat(
-                                    AndroidColor.CYAN,
-                                    AndroidColor.TRANSPARENT,
-                                    AndroidColor.TRANSPARENT,
-                                    androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_OUTLINE,
-                                    AndroidColor.BLACK,
-                                    null
-                                )
-                                "classic_outline" -> androidx.media3.ui.CaptionStyleCompat(
-                                    AndroidColor.WHITE,
-                                    AndroidColor.TRANSPARENT,
-                                    AndroidColor.TRANSPARENT,
-                                    androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_OUTLINE,
-                                    AndroidColor.BLACK,
-                                    null
-                                )
-                                "caption_box" -> androidx.media3.ui.CaptionStyleCompat(
-                                    AndroidColor.WHITE,
-                                    AndroidColor.parseColor("#99000000"),
-                                    AndroidColor.TRANSPARENT,
-                                    androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_NONE,
-                                    AndroidColor.BLACK,
-                                    null
-                                )
-                                else -> androidx.media3.ui.CaptionStyleCompat(
-                                    AndroidColor.WHITE,
-                                    AndroidColor.TRANSPARENT,
-                                    AndroidColor.TRANSPARENT,
-                                    androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_DROP_SHADOW,
-                                    AndroidColor.BLACK,
-                                    null
-                                )
+                            val parsedForegroundColor = when (state.subtitleColor.lowercase()) {
+                                "yellow" -> AndroidColor.YELLOW
+                                "cyan" -> AndroidColor.CYAN
+                                "red" -> AndroidColor.RED
+                                else -> AndroidColor.WHITE
                             }
+                            val parsedBackgroundColor = AndroidColor.argb(
+                                (state.subtitleBgOpacity * 255).toInt().coerceIn(0, 255),
+                                0, 0, 0
+                            )
+                            val parsedEdgeType = when (state.subtitleStyle) {
+                                "classic_outline", "cyan" -> androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_OUTLINE
+                                "default", "yellow" -> androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_DROP_SHADOW
+                                else -> androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_NONE
+                            }
+                            val parsedEdgeColor = if (parsedEdgeType != androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_NONE) {
+                                AndroidColor.BLACK
+                            } else {
+                                AndroidColor.TRANSPARENT
+                            }
+                            val styleCompat = androidx.media3.ui.CaptionStyleCompat(
+                                parsedForegroundColor,
+                                parsedBackgroundColor,
+                                AndroidColor.TRANSPARENT,
+                                parsedEdgeType,
+                                parsedEdgeColor,
+                                null
+                            )
                             setStyle(styleCompat)
-                            setFixedTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, state.subtitleSizeSp)
+                            setFixedTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, state.subtitleSizeSp * state.subtitleSizeScale)
+                            post {
+                                val lp = layoutParams as? android.widget.FrameLayout.LayoutParams
+                                if (lp != null) {
+                                    lp.gravity = android.view.Gravity.BOTTOM or android.view.Gravity.CENTER_HORIZONTAL
+                                    lp.bottomMargin = (this@apply.height * state.subtitlePosition).toInt().coerceAtLeast(0)
+                                    layoutParams = lp
+                                }
+                            }
                         }
                     }
                 },
                 update = { view ->
-                    val styleCompat = when (state.subtitleStyle) {
-                        "yellow" -> androidx.media3.ui.CaptionStyleCompat(
-                            AndroidColor.YELLOW,
-                            AndroidColor.TRANSPARENT,
-                            AndroidColor.TRANSPARENT,
-                            androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_DROP_SHADOW,
-                            AndroidColor.BLACK,
-                            null
-                        )
-                        "cyan" -> androidx.media3.ui.CaptionStyleCompat(
-                            AndroidColor.CYAN,
-                            AndroidColor.TRANSPARENT,
-                            AndroidColor.TRANSPARENT,
-                            androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_OUTLINE,
-                            AndroidColor.BLACK,
-                            null
-                        )
-                        "classic_outline" -> androidx.media3.ui.CaptionStyleCompat(
-                            AndroidColor.WHITE,
-                            AndroidColor.TRANSPARENT,
-                            AndroidColor.TRANSPARENT,
-                            androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_OUTLINE,
-                            AndroidColor.BLACK,
-                            null
-                        )
-                        "caption_box" -> androidx.media3.ui.CaptionStyleCompat(
-                            AndroidColor.WHITE,
-                            AndroidColor.parseColor("#99000000"),
-                            AndroidColor.TRANSPARENT,
-                            androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_NONE,
-                            AndroidColor.BLACK,
-                            null
-                        )
-                        else -> androidx.media3.ui.CaptionStyleCompat(
-                            AndroidColor.WHITE,
-                            AndroidColor.TRANSPARENT,
-                            AndroidColor.TRANSPARENT,
-                            androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_DROP_SHADOW,
-                            AndroidColor.BLACK,
-                            null
-                        )
+                    view.resizeMode = when (state.screenFitMode) {
+                        "Stretch" -> AspectRatioFrameLayout.RESIZE_MODE_FILL
+                        "Zoom" -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                        else -> AspectRatioFrameLayout.RESIZE_MODE_FIT
                     }
+                    val parsedForegroundColor = when (state.subtitleColor.lowercase()) {
+                        "yellow" -> AndroidColor.YELLOW
+                        "cyan" -> AndroidColor.CYAN
+                        "red" -> AndroidColor.RED
+                        else -> AndroidColor.WHITE
+                    }
+                    val parsedBackgroundColor = AndroidColor.argb(
+                        (state.subtitleBgOpacity * 255).toInt().coerceIn(0, 255),
+                        0, 0, 0
+                    )
+                    val parsedEdgeType = when (state.subtitleStyle) {
+                        "classic_outline", "cyan" -> androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_OUTLINE
+                        "default", "yellow" -> androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_DROP_SHADOW
+                        else -> androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_NONE
+                    }
+                    val parsedEdgeColor = if (parsedEdgeType != androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_NONE) {
+                        AndroidColor.BLACK
+                    } else {
+                        AndroidColor.TRANSPARENT
+                    }
+                    val styleCompat = androidx.media3.ui.CaptionStyleCompat(
+                        parsedForegroundColor,
+                        parsedBackgroundColor,
+                        AndroidColor.TRANSPARENT,
+                        parsedEdgeType,
+                        parsedEdgeColor,
+                        null
+                    )
                     view.subtitleView?.setStyle(styleCompat)
-                    view.subtitleView?.setFixedTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, state.subtitleSizeSp)
+                    view.subtitleView?.setFixedTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, state.subtitleSizeSp * state.subtitleSizeScale)
+                    view.subtitleView?.post {
+                        val lp = view.subtitleView?.layoutParams as? android.widget.FrameLayout.LayoutParams
+                        if (lp != null) {
+                            lp.gravity = android.view.Gravity.BOTTOM or android.view.Gravity.CENTER_HORIZONTAL
+                            lp.bottomMargin = (view.height * state.subtitlePosition).toInt().coerceAtLeast(0)
+                            view.subtitleView?.layoutParams = lp
+                        }
+                    }
                 },
                 modifier = Modifier.fillMaxSize()
             )
@@ -3029,6 +3464,33 @@ fun ExoVideoPlayer(
                 }
             }
 
+            val currentEpNum = state.currentEpisode?.number ?: 1
+            val nextEp = state.episodes.find { it.number == currentEpNum + 1 }
+            val timeRemainingMs = state.durationMs - state.currentPositionMs
+            val showUpNext = nextEp != null && 
+                             !state.isUpNextDismissed && 
+                             state.durationMs > 0 && 
+                             timeRemainingMs in 1..15000L
+                             
+            if (showUpNext && nextEp != null) {
+                UpNextOverlay(
+                    nextEpNumber = nextEp.number,
+                    nextEpTitle = nextEp.title,
+                    posterUrl = state.animeDetail?.poster,
+                    timeRemainingSeconds = (timeRemainingMs / 1000).toInt().coerceAtLeast(0),
+                    onDismiss = {
+                        callbacks.onDismissUpNext()
+                    },
+                    onPlayClick = {
+                        callbacks.onNextEpisodeClick?.invoke()
+                    },
+                    isTv = false,
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(bottom = if (hasIntroNow || hasOutroNow) 152.dp else 96.dp, end = 24.dp)
+                )
+            }
+
             if (showChaptersSelector) {
                 Box(
                     modifier = Modifier
@@ -3322,360 +3784,234 @@ fun PlaybackSettingsOverlay(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    Scaffold(
-        modifier = modifier.fillMaxSize(),
-        topBar = {
-            TopAppBar(
-                title = { Text("Playback Settings", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold) },
-                navigationIcon = {
-                    IconButton(onClick = callbacks.onSettingsBackClick) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back",
-                            tint = Color.White
-                        )
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color(0xFF0A0A0A),
-                    titleContentColor = Color.White
-                )
-            )
-        },
-        containerColor = Color(0xFF0A0A0A)
-    ) { innerPadding ->
-        Column(
+    
+    val speedFocusRequester = remember { FocusRequester() }
+    val fitFocusRequester = remember { FocusRequester() }
+    val audioFocusRequester = remember { FocusRequester() }
+    val qualityFocusRequester = remember { FocusRequester() }
+    val subtitleFocusRequester = remember { FocusRequester() }
+
+    LaunchedEffect(Unit) {
+        try {
+            speedFocusRequester.requestFocus()
+        } catch (e: Exception) {}
+    }
+    
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.4f))
+            .clickable { callbacks.onSettingsBackClick() }
+    ) {
+        // Sidebar Content
+        Row(
             modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .background(Color(0xFF0A0A0A))
-                .verticalScroll(state.settingsScrollState)
+                .width(361.dp)
+                .fillMaxHeight()
+                .align(Alignment.CenterEnd)
         ) {
-            // Autoplay Row
-            SettingsToggleRow(
-                label = "Autoplay",
-                checked = state.autoplayNextEpisode,
-                onCheckedChange = callbacks.onAutoplayChange
+            // Left divider line
+            Box(
+                modifier = Modifier
+                    .width(1.dp)
+                    .fillMaxHeight()
+                    .background(Color(0xFF222222))
             )
-            HorizontalDivider(color = Color(0xFF1F1F1F), thickness = 1.dp)
-
-            // Audio Row
-            SettingsClickableRow(
-                label = "Audio",
-                value = if (state.activeCategory == "dub") "English (Dub)" else "Japanese (Sub)",
-                onClick = { callbacks.onShowAudioDialogChange(true) }
-            )
-            HorizontalDivider(color = Color(0xFF1F1F1F), thickness = 1.dp)
-
-            // Subtitles Row
-            SettingsClickableRow(
-                label = "Subtitles/CC",
-                value = when (state.currentSubtitleSelection) {
-                    "off" -> "Off"
-                    "en" -> "English"
-                    "ar" -> "Arabic"
-                    "es" -> "Spanish"
-                    "fr" -> "French"
-                    else -> "Track: ${state.currentSubtitleSelection}"
-                },
-                onClick = { callbacks.onShowSubtitlesDialogChange(true) }
-            )
-            HorizontalDivider(color = Color(0xFF1F1F1F), thickness = 1.dp)
-
-            // Subtitle Size Row
-            SettingsClickableRow(
-                label = "Subtitle Size",
-                value = when (state.subtitleSizeSp) {
-                    14f -> "Small"
-                    18f -> "Normal"
-                    22f -> "Large"
-                    26f -> "Extra Large"
-                    else -> "Normal"
-                },
-                onClick = { callbacks.onShowSubtitleSizeDialogChange(true) }
-            )
-            HorizontalDivider(color = Color(0xFF1F1F1F), thickness = 1.dp)
-
-            // Subtitle Style Row
-            SettingsClickableRow(
-                label = "Subtitle Style",
-                value = when (state.subtitleStyle) {
-                    "classic_outline" -> "White with Outline"
-                    "yellow" -> "Crunchyroll Yellow"
-                    "cyan" -> "Neon Cyan Glow"
-                    "caption_box" -> "Black Background Box"
-                    else -> "White Drop Shadow"
-                },
-                onClick = { callbacks.onShowSubtitleStyleDialogChange(true) }
-            )
-            HorizontalDivider(color = Color(0xFF1F1F1F), thickness = 1.dp)
-
-            // Quality Row
-            SettingsClickableRow(
-                label = "Quality",
-                value = state.qualityOption,
-                onClick = { callbacks.onShowQualityDialogChange(true) }
-            )
-            HorizontalDivider(color = Color(0xFF1F1F1F), thickness = 1.dp)
-
-            // Streaming Server Row
-            SettingsClickableRow(
-                label = "Streaming Server",
-                value = when (state.selectedServer) {
-                    "s-1" -> "Server 1 (Primary - CF)"
-                    "s-2" -> "Server 2 (Backup - Animo)"
-                    "s-3" -> "Server 3 (Alternative - Kryz)"
-                    else -> state.selectedServer
-                },
-                onClick = { callbacks.onShowServerDialogChange(true) }
-            )
-            HorizontalDivider(color = Color(0xFF1F1F1F), thickness = 1.dp)
-
-            // Playback Speed Row
-            SettingsClickableRow(
-                label = "Playback Speed",
-                value = if (state.playbackSpeed == 1.0f) "Normal" else "${state.playbackSpeed}x",
-                onClick = { callbacks.onShowSpeedDialogChange(true) }
-            )
-            HorizontalDivider(color = Color(0xFF1F1F1F), thickness = 1.dp)
-
-            // Anime Version Row (Censored/Uncensored)
-            SettingsClickableRow(
-                label = "Release Version",
-                value = if (state.preferredAnimeVersion == "uncensored") "Uncut (Uncensored)" else "TV (Censored)",
-                onClick = { callbacks.onShowVersionDialogChange(true) }
-            )
-            HorizontalDivider(color = Color(0xFF1F1F1F), thickness = 1.dp)
-
-            // Report a Problem Row
-            SettingsClickableRow(
-                label = "Report a Problem",
-                value = "",
-                onClick = {
-                    Toast.makeText(context, "Problem reported. Thank you!", Toast.LENGTH_SHORT).show()
-                }
-            )
-            HorizontalDivider(color = Color(0xFF1F1F1F), thickness = 1.dp)
-
-            // Diagnostics Debugger Toggle Row
-            SettingsToggleRow(
-                label = "Enable Diagnostics & Logs",
-                checked = state.isDiagnosticsEnabled,
-                onCheckedChange = callbacks.onDiagnosticsChange
-            )
-            HorizontalDivider(color = Color(0xFF1F1F1F), thickness = 1.dp)
-
-            if (state.isDiagnosticsEnabled) {
-                // Debug Logs & Cookies Exporter Row
-                SettingsClickableRow(
-                    label = "Export Debug Logs & Cookies",
-                    value = "Troubleshoot & Save logs",
-                    onClick = {
-                        callbacks.onDebugClick()
+            Surface(
+                color = Color(0xFF0F0F0F),
+                modifier = Modifier
+                    .width(360.dp)
+                    .fillMaxHeight()
+                    .clickable(enabled = false) {} // Prevent click propagation to background
+            ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                // Header
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    IconButton(onClick = callbacks.onSettingsBackClick) {
+                        Icon(Icons.Default.ArrowBack, contentDescription = "Close", tint = Color.White)
                     }
+                    Text(
+                        text = "Playback Settings",
+                        color = Color.White,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                HorizontalDivider(color = Color(0xFF222222))
+
+                // Playback Speed
+                SettingsSectionHeader("PLAYBACK SPEED")
+                val speeds = listOf(0.5f, 1.0f, 1.25f, 1.5f, 2.0f)
+                val currentSpeedIndex = speeds.indexOf(state.playbackSpeed).coerceAtLeast(1)
+                SettingsButtonGroup(
+                    items = speeds.map { if (it == 1.0f) "Normal" else "${it}x" },
+                    selectedIndex = currentSpeedIndex,
+                    onItemSelected = { index ->
+                        callbacks.onSpeedChange(speeds[index])
+                    },
+                    focusRequester = speedFocusRequester,
+                    onUpPressed = { subtitleFocusRequester.requestFocus() },
+                    onDownPressed = { fitFocusRequester.requestFocus() }
                 )
-                HorizontalDivider(color = Color(0xFF1F1F1F), thickness = 1.dp)
-            }
-        }
 
-        if (state.showServerDialog) {
-            SettingsDialog(
-                title = "Select Streaming Server",
-                onDismiss = { callbacks.onShowServerDialogChange(false) }
-            ) {
-                val options = listOf(
-                    "s-1" to "Server 1 (Primary - CF)",
-                    "s-2" to "Server 2 (Backup - Animo)",
-                    "s-3" to "Server 3 (Alternative - Kryz)"
+                // Screen Fit
+                SettingsSectionHeader("SCREEN FIT")
+                val fitModes = listOf("Fit", "Stretch", "Zoom")
+                val currentFitIndex = fitModes.indexOf(state.screenFitMode).coerceAtLeast(0)
+                SettingsButtonGroup(
+                    items = fitModes,
+                    selectedIndex = currentFitIndex,
+                    onItemSelected = { index ->
+                        callbacks.onScreenFitChange(fitModes[index])
+                    },
+                    focusRequester = fitFocusRequester,
+                    onUpPressed = { speedFocusRequester.requestFocus() },
+                    onDownPressed = { audioFocusRequester.requestFocus() }
                 )
-                LazyColumn {
-                    items(options) { (key, label) ->
-                        SettingsDialogRow(
-                            label = label,
-                            selected = state.selectedServer == key,
-                            onClick = {
-                                callbacks.onServerSelected(key)
-                                Toast.makeText(context, "Streaming Server set to: $label", Toast.LENGTH_SHORT).show()
-                                callbacks.onShowServerDialogChange(false)
-                            }
-                        )
-                    }
-                }
-            }
-        }
 
-        if (state.showVersionDialog) {
-            SettingsDialog(
-                title = "Select Anime Version",
-                onDismiss = { callbacks.onShowVersionDialogChange(false) }
-            ) {
-                val options = listOf("uncensored" to "Uncut (Uncensored)", "censored" to "TV Broadcast (Censored)")
-                LazyColumn {
-                    items(options) { (key, label) ->
-                        SettingsDialogRow(
-                            label = label,
-                            selected = state.preferredAnimeVersion == key,
-                            onClick = {
-                                callbacks.onVersionChange(key)
-                                Toast.makeText(context, "Preference set to: $label", Toast.LENGTH_SHORT).show()
-                                callbacks.onShowVersionDialogChange(false)
-                            }
-                        )
-                    }
-                }
-            }
-        }
-
-        if (state.showAudioDialog) {
-            SettingsDialog(
-                title = "Select Audio Language",
-                onDismiss = { callbacks.onShowAudioDialogChange(false) }
-            ) {
-                val options = listOf("sub" to "Japanese (Sub)", "dub" to "English (Dub)")
-                LazyColumn {
-                    items(options) { (key, label) ->
-                        SettingsDialogRow(
-                            label = label,
-                            selected = state.activeCategory == key,
-                            onClick = {
-                                callbacks.onAudioChange(key)
-                                callbacks.onShowAudioDialogChange(false)
-                            }
-                        )
-                    }
-                }
-            }
-        }
-
-        if (state.showSubtitlesDialog) {
-            SettingsDialog(
-                title = "Subtitles",
-                onDismiss = { callbacks.onShowSubtitlesDialogChange(false) }
-            ) {
-                LazyColumn {
-                    items(state.capturedSubtitles) { sub ->
-                        val label = when (sub.langCode) {
-                            "en" -> "English"
-                            "ar" -> "Arabic"
-                            "es" -> "Spanish"
-                            "fr" -> "French"
-                            else -> "Track: ${sub.langCode}"
-                        }
-                        SettingsDialogRow(
-                            label = label,
-                            selected = state.currentSubtitleSelection == sub.langCode,
-                            onClick = {
-                                callbacks.onSubtitleSelectionChange(sub.langCode)
-                                callbacks.onShowSubtitlesDialogChange(false)
-                            }
-                        )
-                    }
-                    item {
-                        SettingsDialogRow(
-                            label = "Off",
-                            selected = state.currentSubtitleSelection == "off",
-                            onClick = {
-                                callbacks.onSubtitleSelectionChange("off")
-                                callbacks.onShowSubtitlesDialogChange(false)
-                            }
-                        )
-                    }
-                }
-            }
-        }
-
-        if (state.showQualityDialog) {
-            SettingsDialog(
-                title = "Select Video Quality",
-                onDismiss = { callbacks.onShowQualityDialogChange(false) }
-            ) {
-                val options = listOf("Auto", "1080p", "720p", "480p")
-                LazyColumn {
-                    items(options) { label ->
-                        SettingsDialogRow(
-                            label = label,
-                            selected = state.qualityOption == label,
-                            onClick = {
-                                callbacks.onQualityChange(label)
-                                callbacks.onShowQualityDialogChange(false)
-                            }
-                        )
-                    }
-                }
-            }
-        }
-
-        if (state.showSpeedDialog) {
-            SettingsDialog(
-                title = "Select Playback Speed",
-                onDismiss = { callbacks.onShowSpeedDialogChange(false) }
-            ) {
-                val options = listOf(0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f)
-                LazyColumn {
-                    items(options) { value ->
-                        SettingsDialogRow(
-                            label = if (value == 1.0f) "Normal (1.0x)" else "${value}x",
-                            selected = state.playbackSpeed == value,
-                            onClick = {
-                                callbacks.onSpeedChange(value)
-                                callbacks.onShowSpeedDialogChange(false)
-                            }
-                        )
-                    }
-                }
-            }
-        }
-
-        if (state.showSubtitleSizeDialog) {
-            SettingsDialog(
-                title = "Select Subtitle Size",
-                onDismiss = { callbacks.onShowSubtitleSizeDialogChange(false) }
-            ) {
-                val options = listOf(
-                    14f to "Small",
-                    18f to "Normal",
-                    22f to "Large",
-                    26f to "Extra Large"
+                // Audio
+                SettingsSectionHeader("AUDIO")
+                val audioModes = listOf("sub", "dub")
+                val audioLabels = listOf("Subbed", "Dubbed")
+                val currentAudioIndex = audioModes.indexOf(state.activeCategory).coerceAtLeast(0)
+                SettingsButtonGroup(
+                    items = audioLabels,
+                    selectedIndex = currentAudioIndex,
+                    onItemSelected = { index ->
+                        callbacks.onAudioChange(audioModes[index])
+                    },
+                    focusRequester = audioFocusRequester,
+                    onUpPressed = { fitFocusRequester.requestFocus() },
+                    onDownPressed = { qualityFocusRequester.requestFocus() }
                 )
-                LazyColumn {
-                    items(options) { (value, label) ->
-                        SettingsDialogRow(
-                            label = label,
-                            selected = state.subtitleSizeSp == value,
-                            onClick = {
-                                callbacks.onSubtitleSizeChange(value)
-                                callbacks.onShowSubtitleSizeDialogChange(false)
-                            }
-                        )
+
+                // Quality
+                SettingsSectionHeader("QUALITY")
+                val qualities = listOf("Auto", "1080p", "720p", "480p")
+                val currentQualityIndex = qualities.indexOf(state.qualityOption).coerceAtLeast(0)
+                SettingsButtonGroup(
+                    items = qualities,
+                    selectedIndex = currentQualityIndex,
+                    onItemSelected = { index ->
+                        callbacks.onQualityChange(qualities[index])
+                    },
+                    focusRequester = qualityFocusRequester,
+                    onUpPressed = { audioFocusRequester.requestFocus() },
+                    onDownPressed = { subtitleFocusRequester.requestFocus() }
+                )
+
+                // Subtitles selection
+                SettingsSectionHeader("SUBTITLES/CC")
+                val subtitleTracks = state.capturedSubtitles.map { it.langCode } + "off"
+                val subtitleLabels = state.capturedSubtitles.map { 
+                    when (it.langCode) {
+                        "en" -> "English"
+                        "ar" -> "Arabic"
+                        "es" -> "Spanish"
+                        "fr" -> "French"
+                        else -> "Track: ${it.langCode}"
                     }
-                }
+                } + "Off"
+                val currentSubIndex = subtitleTracks.indexOf(state.currentSubtitleSelection).coerceAtLeast(0)
+                SettingsButtonGroup(
+                    items = subtitleLabels,
+                    selectedIndex = currentSubIndex,
+                    onItemSelected = { index ->
+                        callbacks.onSubtitleSelectionChange(subtitleTracks[index])
+                    },
+                    focusRequester = subtitleFocusRequester,
+                    onUpPressed = { qualityFocusRequester.requestFocus() },
+                    onDownPressed = { speedFocusRequester.requestFocus() }
+                )
+
             }
         }
+    }
+}
+}
 
-        if (state.showSubtitleStyleDialog) {
-            SettingsDialog(
-                title = "Select Subtitle Style",
-                onDismiss = { callbacks.onShowSubtitleStyleDialogChange(false) }
-            ) {
-                val styles = listOf(
-                    "classic_outline" to "White with Outline",
-                    "yellow" to "Crunchyroll Yellow",
-                    "cyan" to "Neon Cyan Glow",
-                    "caption_box" to "Black Background Box",
-                    "default" to "White Drop Shadow"
-                )
-                LazyColumn {
-                    items(styles) { (key, label) ->
-                        SettingsDialogRow(
-                            label = label,
-                            selected = state.subtitleStyle == key,
-                            onClick = {
-                                callbacks.onSubtitleStyleChange(key)
-                                callbacks.onShowSubtitleStyleDialogChange(false)
+@Composable
+fun SettingsSectionHeader(text: String) {
+    Text(
+        text = text,
+        color = Color.Gray,
+        fontSize = 11.sp,
+        fontWeight = FontWeight.Bold,
+        letterSpacing = 0.5.sp,
+        modifier = Modifier.padding(bottom = 2.dp)
+    )
+}
+
+@Composable
+fun SettingsButtonGroup(
+    items: List<String>,
+    selectedIndex: Int,
+    onItemSelected: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+    focusRequester: FocusRequester? = null,
+    onUpPressed: (() -> Unit)? = null,
+    onDownPressed: (() -> Unit)? = null
+) {
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        items.forEachIndexed { index, label ->
+            val isSelected = index == selectedIndex
+            var isFocused by remember { mutableStateOf(false) }
+            
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(36.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(if (isSelected) CrunchyrollOrange else Color(0xFF222222))
+                    .border(
+                        width = if (isFocused) 2.dp else 1.dp,
+                        color = if (isFocused) Color.White else if (isSelected) CrunchyrollOrange else Color(0xFF333333),
+                        shape = RoundedCornerShape(6.dp)
+                    )
+                    .then(if (isSelected && focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
+                    .onFocusChanged { isFocused = it.isFocused }
+                    .focusable()
+                    .onPreviewKeyEvent { event ->
+                        if (event.type == KeyEventType.KeyDown) {
+                            when (event.key) {
+                                Key.DirectionUp -> {
+                                    if (onUpPressed != null) {
+                                        onUpPressed()
+                                        true
+                                    } else false
+                                }
+                                Key.DirectionDown -> {
+                                    if (onDownPressed != null) {
+                                        onDownPressed()
+                                        true
+                                    } else false
+                                }
+                                else -> false
                             }
-                        )
+                        } else false
                     }
-                }
+                    .clickable { onItemSelected(index) },
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = label,
+                    color = if (isSelected) Color.White else Color.LightGray,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold
+                )
             }
         }
     }
@@ -3946,3 +4282,153 @@ fun InPlayerEpisodeSelectorOverlay(
 }
 
 data class SegmentChapter(val title: String, val startMs: Long)
+
+@Composable
+fun UpNextOverlay(
+    nextEpNumber: Int,
+    nextEpTitle: String,
+    posterUrl: String?,
+    timeRemainingSeconds: Int,
+    onDismiss: () -> Unit,
+    onPlayClick: () -> Unit,
+    isTv: Boolean,
+    modifier: Modifier = Modifier
+) {
+    var isFocused by remember { mutableStateOf(false) }
+    
+    Box(
+        modifier = modifier
+            .padding(16.dp)
+            .width(if (isTv) 320.dp else 280.dp)
+            .background(Color(0xFF141414), RoundedCornerShape(12.dp))
+            .border(
+                width = if (isFocused) 2.dp else 1.dp,
+                color = if (isFocused) CrunchyrollOrange else Color(0xFF2C2C2C),
+                shape = RoundedCornerShape(12.dp)
+            )
+            .onFocusChanged { isFocused = it.isFocused }
+            .focusable(isTv)
+            .clickable(enabled = isTv) { onPlayClick() }
+            .padding(12.dp)
+    ) {
+        // Close Button
+        IconButton(
+            onClick = onDismiss,
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .size(24.dp)
+        ) {
+            Icon(
+                imageVector = Icons.Default.Close,
+                contentDescription = "Dismiss",
+                tint = Color.LightGray,
+                modifier = Modifier.size(16.dp)
+            )
+        }
+
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                text = "UP NEXT",
+                color = CrunchyrollOrange,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 0.5.sp
+            )
+
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Poster image with Play button overlay
+                Box(
+                    modifier = Modifier
+                        .size(width = 64.dp, height = 90.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(Color(0xFF222222))
+                ) {
+                    if (!posterUrl.isNullOrEmpty()) {
+                        AsyncImage(
+                            model = posterUrl,
+                            contentDescription = nextEpTitle,
+                            contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.Black.copy(alpha = 0.35f))
+                            .clickable { onPlayClick() },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(28.dp)
+                                .background(Color.White.copy(alpha = 0.8f), CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.PlayArrow,
+                                contentDescription = "Play",
+                                tint = Color.Black,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+                }
+
+                // Info Column
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    Text(
+                        text = nextEpTitle,
+                        color = Color.White,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 2,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = "Episode $nextEpNumber",
+                        color = Color.LightGray,
+                        fontSize = 12.sp
+                    )
+                    
+                    Spacer(modifier = Modifier.height(4.dp))
+                    
+                    Text(
+                        text = if (timeRemainingSeconds <= 10) {
+                            "Autoplay in ${timeRemainingSeconds}s"
+                        } else {
+                            "Up next soon"
+                        },
+                        color = Color.Gray,
+                        fontSize = 11.sp
+                    )
+                }
+            }
+
+            // Play Now Button
+            Button(
+                onClick = onPlayClick,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = CrunchyrollOrange,
+                    contentColor = Color.White
+                ),
+                shape = RoundedCornerShape(6.dp),
+                contentPadding = PaddingValues(vertical = 8.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(36.dp)
+            ) {
+                Text(
+                    text = "Play Now",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+    }
+}

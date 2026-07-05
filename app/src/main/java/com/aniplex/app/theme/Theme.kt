@@ -32,10 +32,25 @@ private val DarkColorScheme = darkColorScheme(
 
 @Composable
 fun ANIPLEXTheme(
+    accentColor: Color = CrunchyrollOrange,
     content: @Composable () -> Unit
 ) {
+    val dynamicColorScheme = darkColorScheme(
+        primary = accentColor,
+        secondary = accentColor,
+        background = BackgroundVoid,
+        surface = SurfaceDark,
+        surfaceVariant = SurfaceDarkVariant,
+        onPrimary = Color.White,
+        onSecondary = Color.White,
+        onBackground = TextPrimary,
+        onSurface = TextPrimary,
+        onSurfaceVariant = TextSecondary,
+        error = ErrorColor
+    )
+
     MaterialTheme(
-        colorScheme = DarkColorScheme,
+        colorScheme = dynamicColorScheme,
         typography = Typography,
         shapes = AppShapes,
         content = content

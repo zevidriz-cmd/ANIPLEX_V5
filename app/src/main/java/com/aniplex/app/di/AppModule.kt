@@ -6,6 +6,7 @@ import com.aniplex.app.data.local.dao.CacheDao
 import com.aniplex.app.data.local.dao.DownloadDao
 import com.aniplex.app.data.local.database.AppDatabase
 import com.aniplex.app.data.remote.api.HiAnimeApiService
+import com.aniplex.app.data.remote.api.FallbackApiService
 import com.aniplex.app.data.repository.AnimeRepositoryImpl
 import com.aniplex.app.data.repository.AuthRepositoryImpl
 import com.aniplex.app.data.local.preferences.PreferenceManager
@@ -32,6 +33,7 @@ object AppModule {
 
     // Upstream fallback API base URL (now pointing to our Cloudflare Jikan proxy)
     private const val BASE_URL = "https://aniplex-proxy.f1886391.workers.dev/"
+    private const val NETLIFY_BASE_URL = "https://anistream-web.netlify.app/"
 
     @Provides
     @Singleton
@@ -41,7 +43,11 @@ object AppModule {
     @Singleton
     fun provideOkHttpClient(): OkHttpClient {
         val loggingInterceptor = HttpLoggingInterceptor().apply {
-            level = HttpLoggingInterceptor.Level.BODY
+            level = if (com.aniplex.app.BuildConfig.DEBUG) {
+                HttpLoggingInterceptor.Level.BASIC
+            } else {
+                HttpLoggingInterceptor.Level.NONE
+            }
         }
 
         return OkHttpClient.Builder()
@@ -68,6 +74,17 @@ object AppModule {
             .addConverterFactory(GsonConverterFactory.create())
             .build()
             .create(HiAnimeApiService::class.java)
+    }
+
+    @Provides
+    @Singleton
+    fun provideFallbackApiService(okHttpClient: OkHttpClient): FallbackApiService {
+        return Retrofit.Builder()
+            .baseUrl(NETLIFY_BASE_URL)
+            .client(okHttpClient)
+            .addConverterFactory(GsonConverterFactory.create())
+            .build()
+            .create(FallbackApiService::class.java)
     }
 
     @Provides
@@ -108,13 +125,14 @@ object AppModule {
     @Singleton
     fun provideAnimeRepository(
         apiService: HiAnimeApiService,
+        fallbackApiService: FallbackApiService,
         cacheDao: CacheDao,
         gson: Gson,
         okHttpClient: OkHttpClient,
         preferenceManager: PreferenceManager,
         aniSkipApiService: com.aniplex.app.data.remote.api.AniSkipApiService
     ): AnimeRepository {
-        return AnimeRepositoryImpl(apiService, cacheDao, gson, okHttpClient, preferenceManager, aniSkipApiService)
+        return AnimeRepositoryImpl(apiService, fallbackApiService, cacheDao, gson, okHttpClient, preferenceManager, aniSkipApiService)
     }
 
     @Provides

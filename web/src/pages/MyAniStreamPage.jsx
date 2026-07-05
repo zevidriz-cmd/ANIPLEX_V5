@@ -4,19 +4,123 @@ import { useAuth } from "../context/AuthContext";
 import { useProfile } from "../context/ProfileContext";
 import { 
   User, RefreshCw, Sliders, ToggleLeft, ToggleRight, 
-  Settings, Type, Trash2, ArrowLeft, LogOut, History
+  Settings, Type, Trash2, ArrowLeft, LogOut, History, Activity, Shield
 } from "lucide-react";
 
 export default function MyAniStreamPage() {
-  const { currentUser, logout } = useAuth();
-  const { activeProfile, selectProfile } = useProfile();
+  const { currentUser, logout, changeEmail, changePassword } = useAuth();
+  const { activeProfile, selectProfile, saveSettings } = useProfile();
   const navigate = useNavigate();
+
+  // Account Settings Credentials States
+  const [emailModalOpen, setEmailModalOpen] = useState(false);
+  const [passwordModalOpen, setPasswordModalOpen] = useState(false);
+  
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newEmail, setNewEmail] = useState("");
+  const [confirmEmail, setConfirmEmail] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [modalError, setModalError] = useState("");
+  const [modalSuccess, setModalSuccess] = useState("");
+
+  const isGoogleUser = currentUser?.providerData?.some(p => p.providerId === "google.com");
+
+  const handleEmailSubmit = async () => {
+    if (!currentPassword || !newEmail || !confirmEmail) {
+      setModalError("All fields are required");
+      return;
+    }
+    if (newEmail !== confirmEmail) {
+      setModalError("Email confirmation does not match");
+      return;
+    }
+    
+    setIsSubmitting(true);
+    setModalError("");
+    setModalSuccess("");
+    
+    try {
+      await changeEmail(currentPassword, newEmail);
+      setModalSuccess("Email updated successfully!");
+      setCurrentPassword("");
+      setNewEmail("");
+      setConfirmEmail("");
+      setTimeout(() => {
+        setEmailModalOpen(false);
+      }, 1500);
+    } catch (err) {
+      setModalError(err.message || "Failed to update email. Please check your password.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handlePasswordSubmit = async () => {
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      setModalError("All fields are required");
+      return;
+    }
+    if (newPassword.length < 6) {
+      setModalError("New password must be at least 6 characters long");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setModalError("Password confirmation does not match");
+      return;
+    }
+    
+    setIsSubmitting(true);
+    setModalError("");
+    setModalSuccess("");
+    
+    try {
+      await changePassword(currentPassword, newPassword);
+      setModalSuccess("Password updated successfully!");
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+      setTimeout(() => {
+        setPasswordModalOpen(false);
+      }, 1500);
+    } catch (err) {
+      setModalError(err.message || "Failed to update password. Please check your current password.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const getAvatarUrl = (key) => {
+    const mapping = {
+      avatar_orange: "/avatars/avatar_shonen.png",
+      avatar_blue: "/avatars/avatar_cyber.png",
+      avatar_green: "/avatars/avatar_ninja.png",
+      avatar_pink: "/avatars/avatar_girl.png",
+      avatar_purple: "/avatars/avatar_mascot.png",
+      avatar_shonen: "/avatars/avatar_shonen.png",
+      avatar_girl: "/avatars/avatar_girl.png",
+      avatar_ninja: "/avatars/avatar_ninja.png",
+      avatar_mascot: "/avatars/avatar_mascot.png",
+      avatar_cyber: "/avatars/avatar_cyber.png",
+      avatar_retro: "/avatars/avatar_retro.png"
+    };
+    return mapping[key] || "/avatars/avatar_shonen.png";
+  };
 
   // Settings State
   const [qualityCap, setQualityCap] = useState("Auto");
   const [autoplay, setAutoplay] = useState(true);
   const [audioPreference, setAudioPreference] = useState("sub");
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
+  const [skipIntro, setSkipIntro] = useState(true);
+  const [skipOutro, setSkipOutro] = useState(true);
+
+  // Streaming Provider Preferences States
+  const [zoroEnabled, setZoroEnabled] = useState(true);
+  const [gogoanimeEnabled, setGogoanimeEnabled] = useState(true);
+  const [preferredProvider, setPreferredProvider] = useState("zoro");
 
   // Subtitle custom states
   const COLORS = ["#FFFFFF", "#FFE600", "#4ADE80", "#22D3EE", "#60A5FA", "#F472B6", "#F87171", "#1F2937"];
@@ -32,12 +136,96 @@ export default function MyAniStreamPage() {
   const [subPosition, setSubPosition] = useState(10);
   const [subOpacity, setSubOpacity] = useState(60);
 
+  // Diagnostics State
+  const [diagnostics, setDiagnostics] = useState({
+    zoro: { status: "idle", details: "" },
+    fallback: { status: "idle", details: "" },
+    proxy: { status: "idle", details: "" }
+  });
+  const [isRunningDiagnostics, setIsRunningDiagnostics] = useState(false);
+
+  const runDiagnostics = async () => {
+    setIsRunningDiagnostics(true);
+    setDiagnostics({
+      zoro: { status: "testing", details: "" },
+      fallback: { status: "testing", details: "" },
+      proxy: { status: "testing", details: "" }
+    });
+
+    try {
+      const start = Date.now();
+      const res = await fetch("https://hianime-api-v2.vercel.app/anime/search?q=naruto");
+      if (res.ok) {
+        setDiagnostics(prev => ({
+          ...prev,
+          zoro: { status: "success", details: `Resolved in ${Date.now() - start}ms` }
+        }));
+      } else {
+        setDiagnostics(prev => ({
+          ...prev,
+          zoro: { status: "failed", details: `HTTP Status: ${res.status}` }
+        }));
+      }
+    } catch (err) {
+      setDiagnostics(prev => ({
+        ...prev,
+        zoro: { status: "failed", details: err.message }
+      }));
+    }
+
+    try {
+      const start = Date.now();
+      const res = await fetch("https://api.aniskip.com/v2/skip-times/21/1?types[]=op&types[]=ed&episodeLength=1400");
+      if (res.ok) {
+        setDiagnostics(prev => ({
+          ...prev,
+          fallback: { status: "success", details: `Resolved in ${Date.now() - start}ms` }
+        }));
+      } else {
+        setDiagnostics(prev => ({
+          ...prev,
+          fallback: { status: "failed", details: `HTTP Status: ${res.status}` }
+        }));
+      }
+    } catch (err) {
+      setDiagnostics(prev => ({
+        ...prev,
+        fallback: { status: "failed", details: err.message }
+      }));
+    }
+
+    try {
+      const start = Date.now();
+      const res = await fetch("https://corsproxy.io/?https://google.com");
+      if (res.ok) {
+        setDiagnostics(prev => ({
+          ...prev,
+          proxy: { status: "success", details: `Resolved in ${Date.now() - start}ms` }
+        }));
+      } else {
+        setDiagnostics(prev => ({
+          ...prev,
+          proxy: { status: "failed", details: `HTTP Status: ${res.status}` }
+        }));
+      }
+    } catch (err) {
+      setDiagnostics(prev => ({
+        ...prev,
+        proxy: { status: "failed", details: err.message }
+      }));
+    }
+
+    setIsRunningDiagnostics(false);
+  };
+
   // Load settings on mount
   useEffect(() => {
     const qCap = localStorage.getItem("anistream_quality_cap") || "Auto";
     const autoPlayVal = localStorage.getItem("anistream_autoplay") !== "false";
     const aPref = localStorage.getItem("anistream_audio_preference") || "sub";
     const savedSpeed = parseFloat(localStorage.getItem("anistream_playback_speed")) || 1;
+    const sIntro = localStorage.getItem("anistream_skip_intro") !== "false";
+    const sOutro = localStorage.getItem("anistream_skip_outro") !== "false";
 
     // Legacy conversions
     const savedSize = localStorage.getItem("anistream_subtitle_size");
@@ -73,32 +261,46 @@ export default function MyAniStreamPage() {
     const savedStyle = parseInt(localStorage.getItem("anistream_subtitle_style"), 10) || 1;
     const savedPos = parseInt(localStorage.getItem("anistream_subtitle_position"), 10) || 10;
 
+    const zEnabled = localStorage.getItem("anistream_zoro_enabled") !== "false";
+    const gEnabled = localStorage.getItem("anistream_gogoanime_enabled") !== "false";
+    const prefProvider = localStorage.getItem("anistream_preferred_provider") || "zoro";
+
     setQualityCap(qCap);
     setAutoplay(autoPlayVal);
     setAudioPreference(aPref);
     setPlaybackSpeed(savedSpeed);
+    setSkipIntro(sIntro);
+    setSkipOutro(sOutro);
     setSubSize(initialSize);
     setSubStyle(savedStyle);
     setSubColorIndex(colorIdx);
     setSubPosition(savedPos);
     setSubOpacity(initialOpacity);
+    setZoroEnabled(zEnabled);
+    setGogoanimeEnabled(gEnabled);
+    setPreferredProvider(prefProvider);
   }, []);
 
   // Save settings helpers
-  const updateSetting = (key, value, setter) => {
+  const updateSetting = async (key, value, setter) => {
     localStorage.setItem(key, value);
     setter(value);
+    try {
+      await saveSettings();
+    } catch (err) {
+      console.warn("Failed to sync setting to Firestore:", err);
+    }
   };
 
   const applyRecommendedSettings = () => {
     setSubSize(22);
-    setSubStyle(4); // Outlined (highest legibility on video backgrounds)
-    setSubColorIndex(0); // White
-    setSubPosition(10); // 10% bottom offset
-    setSubOpacity(0); // 0% opacity (transparent background box, outline handles contrast)
+    setSubStyle(4);
+    setSubColorIndex(0);
+    setSubPosition(10);
+    setSubOpacity(0);
   };
 
-  const saveSubtitleSettings = () => {
+  const saveSubtitleSettings = async () => {
     localStorage.setItem("anistream_subtitle_size", String(subSize));
     localStorage.setItem("anistream_subtitle_style", String(subStyle));
     localStorage.setItem("anistream_subtitle_color", COLORS[subColorIndex]);
@@ -106,7 +308,12 @@ export default function MyAniStreamPage() {
     localStorage.setItem("anistream_subtitle_bg_opacity", String(subOpacity));
     localStorage.setItem("anistream_subtitle_bg", subOpacity === 0 ? "transparent" : subOpacity === 100 ? "opaque" : "semi-transparent");
     
-    // Dispatch event to live player if open
+    try {
+      await saveSettings();
+    } catch (err) {
+      console.warn("Failed to sync subtitle settings to Firestore:", err);
+    }
+
     window.dispatchEvent(new Event("anistream_subtitle_settings_changed"));
     setIsEditingSubtitles(false);
   };
@@ -357,8 +564,8 @@ export default function MyAniStreamPage() {
             {/* Profile Details Card */}
             <section className="settings-card profile-card-hero">
               <div className="profile-hero-info">
-                <div className={`profile-hero-avatar ${activeProfile.avatarUrl}`}>
-                  {activeProfile.name.charAt(0).toUpperCase()}
+                <div className="profile-hero-avatar">
+                  <img src={getAvatarUrl(activeProfile.avatarUrl)} alt="" className="profile-hero-avatar-img" />
                 </div>
                 <div>
                   <h3>{activeProfile.name}</h3>
@@ -383,6 +590,105 @@ export default function MyAniStreamPage() {
                 >
                   <History size={16} className="text-primary" /> Watch History
                 </Link>
+              </div>
+            </section>
+
+            {/* Account Security Card */}
+            <section className="settings-card">
+              <div className="card-header-with-icon">
+                <Shield size={20} className="text-primary" />
+                <h2>Account Credentials & Security</h2>
+              </div>
+              <div className="settings-options-list">
+                <div className="setting-item" style={{ borderBottom: "1px solid rgba(255,255,255,0.05)", paddingBottom: "15px" }}>
+                  <div className="setting-info">
+                    <h4>Signed In As</h4>
+                    <p className="text-white" style={{ fontWeight: 600, fontSize: "0.95rem", marginTop: "4px" }}>
+                      {currentUser?.email || "No email registered"}
+                    </p>
+                  </div>
+                  <div className="setting-action">
+                    {isGoogleUser ? (
+                      <span 
+                        className="badge" 
+                        style={{ 
+                          backgroundColor: "rgba(66, 133, 244, 0.15)", 
+                          color: "#4285f4", 
+                          border: "1px solid #4285f4",
+                          padding: "4px 8px",
+                          borderRadius: "6px",
+                          fontSize: "0.75rem",
+                          fontWeight: "bold"
+                        }}
+                      >
+                        Managed by Google
+                      </span>
+                    ) : (
+                      <span 
+                        className="badge" 
+                        style={{ 
+                          backgroundColor: "rgba(255, 165, 0, 0.15)", 
+                          color: "var(--primary)", 
+                          border: "1px solid var(--primary)",
+                          padding: "4px 8px",
+                          borderRadius: "6px",
+                          fontSize: "0.75rem",
+                          fontWeight: "bold"
+                        }}
+                      >
+                        Email & Password
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {!isGoogleUser && (
+                  <>
+                    <div className="setting-item" style={{ borderBottom: "1px solid rgba(255,255,255,0.05)", paddingBottom: "15px", paddingTop: "15px" }}>
+                      <div className="setting-info">
+                        <h4>Change Account Email</h4>
+                        <p className="text-muted">Requires password reauthentication for security</p>
+                      </div>
+                      <div className="setting-action">
+                        <button 
+                          onClick={() => {
+                            setEmailModalOpen(true);
+                            setModalError("");
+                            setModalSuccess("");
+                            setCurrentPassword("");
+                            setNewEmail("");
+                            setConfirmEmail("");
+                          }} 
+                          className="btn btn-secondary btn-sm"
+                        >
+                          Update Email
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="setting-item" style={{ paddingTop: "15px" }}>
+                      <div className="setting-info">
+                        <h4>Change Account Password</h4>
+                        <p className="text-muted">Requires verification of your old password</p>
+                      </div>
+                      <div className="setting-action">
+                        <button 
+                          onClick={() => {
+                            setPasswordModalOpen(true);
+                            setModalError("");
+                            setModalSuccess("");
+                            setCurrentPassword("");
+                            setNewPassword("");
+                            setConfirmPassword("");
+                          }} 
+                          className="btn btn-secondary btn-sm"
+                        >
+                          Update Password
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
             </section>
 
@@ -470,6 +776,122 @@ export default function MyAniStreamPage() {
                     </select>
                   </div>
                 </div>
+
+                <div className="setting-item">
+                  <div className="setting-info">
+                    <h4>Auto-Skip Intro</h4>
+                    <p className="text-muted">Automatically skip anime opening themes</p>
+                  </div>
+                  <div className="setting-action">
+                    <button 
+                      onClick={() => {
+                        const nextVal = !skipIntro;
+                        updateSetting("anistream_skip_intro", String(nextVal), setSkipIntro);
+                      }}
+                      className="toggle-switch-btn"
+                    >
+                      {skipIntro ? (
+                        <ToggleRight size={38} className="text-primary" />
+                      ) : (
+                        <ToggleLeft size={38} className="text-muted" />
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="setting-item">
+                  <div className="setting-info">
+                    <h4>Auto-Skip Outro</h4>
+                    <p className="text-muted">Automatically skip anime ending credits</p>
+                  </div>
+                  <div className="setting-action">
+                    <button 
+                      onClick={() => {
+                        const nextVal = !skipOutro;
+                        updateSetting("anistream_skip_outro", String(nextVal), setSkipOutro);
+                      }}
+                      className="toggle-switch-btn"
+                    >
+                      {skipOutro ? (
+                        <ToggleRight size={38} className="text-primary" />
+                      ) : (
+                        <ToggleLeft size={38} className="text-muted" />
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            {/* Streaming Providers & Priorities Settings Card */}
+            <section className="settings-card">
+              <div className="card-header-with-icon">
+                <Sliders size={20} className="text-primary" />
+                <h2>Streaming Providers & Priorities</h2>
+              </div>
+              <div className="settings-options-list">
+                <div className="setting-item">
+                  <div className="setting-info">
+                    <h4>Enable Zoro Stream Server</h4>
+                    <p className="text-muted">Attempts to stream direct video files from Zoro (Megaplay)</p>
+                  </div>
+                  <div className="setting-action">
+                    <button 
+                      onClick={() => {
+                        const nextVal = !zoroEnabled;
+                        updateSetting("anistream_zoro_enabled", String(nextVal), setZoroEnabled);
+                      }}
+                      className="toggle-switch-btn"
+                    >
+                      {zoroEnabled ? (
+                        <ToggleRight size={38} className="text-primary" />
+                      ) : (
+                        <ToggleLeft size={38} className="text-muted" />
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="setting-item">
+                  <div className="setting-info">
+                    <h4>Enable Gogoanime Stream Server</h4>
+                    <p className="text-muted">Attempts to stream direct video files from Gogoanime (AniNeko)</p>
+                  </div>
+                  <div className="setting-action">
+                    <button 
+                      onClick={() => {
+                        const nextVal = !gogoanimeEnabled;
+                        updateSetting("anistream_gogoanime_enabled", String(nextVal), setGogoanimeEnabled);
+                      }}
+                      className="toggle-switch-btn"
+                    >
+                      {gogoanimeEnabled ? (
+                        <ToggleRight size={38} className="text-primary" />
+                      ) : (
+                        <ToggleLeft size={38} className="text-muted" />
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="setting-item">
+                  <div className="setting-info">
+                    <h4>Preferred Streaming Server</h4>
+                    <p className="text-muted">Primary direct video source loaded by default</p>
+                  </div>
+                  <div className="setting-action">
+                    <select 
+                      value={preferredProvider}
+                      onChange={(e) => updateSetting("anistream_preferred_provider", e.target.value, setPreferredProvider)}
+                      className="settings-select"
+                      disabled={!zoroEnabled || !gogoanimeEnabled}
+                      style={{ opacity: (!zoroEnabled || !gogoanimeEnabled) ? 0.5 : 1 }}
+                    >
+                      <option value="zoro">Zoro (HiAnime) First</option>
+                      <option value="gogoanime">Gogoanime (AniNeko) First</option>
+                    </select>
+                  </div>
+                </div>
               </div>
             </section>
 
@@ -486,6 +908,80 @@ export default function MyAniStreamPage() {
                 <span className="text-primary" style={{ fontSize: "0.85rem", fontWeight: "600", display: "inline-flex", alignItems: "center", gap: "6px" }}>
                   Configure <Sliders size={16} />
                 </span>
+              </div>
+            </section>
+
+            {/* Server Status & Diagnostics Card */}
+            <section className="settings-card">
+              <div className="card-header-with-icon">
+                <Activity size={20} className="text-primary" />
+                <h2>Server Status & Diagnostics</h2>
+              </div>
+              <div className="settings-options-list">
+                <p className="text-muted" style={{ fontSize: "0.85rem", marginBottom: "10px" }}>
+                  Run a live connection test to verify that the AniStream streaming backends are online and functioning.
+                </p>
+
+                <div className="diagnostics-list" style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                  {/* Zoro */}
+                  <div className="diagnostic-item" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", background: "rgba(255,255,255,0.02)", borderRadius: "8px", border: "1px solid var(--border)" }}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                      <span style={{ fontSize: "0.9rem", fontWeight: "600", color: "white" }}>Zoro Primary API</span>
+                      <span className="text-muted" style={{ fontSize: "0.75rem" }}>aniplex-proxy.f1886391.workers.dev</span>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                      <span style={{ fontSize: "0.8rem", color: diagnostics.zoro.status === "success" ? "#4ADE80" : diagnostics.zoro.status === "error" ? "#F87171" : "var(--text-muted)", fontWeight: "600" }}>
+                        {diagnostics.zoro.status === "testing" ? "Testing..." : diagnostics.zoro.status === "success" ? diagnostics.zoro.details : diagnostics.zoro.status === "error" ? diagnostics.zoro.details : "Not Tested"}
+                      </span>
+                      <span className={`status-dot ${diagnostics.zoro.status}`} />
+                    </div>
+                  </div>
+
+                  {/* Fallback API */}
+                  <div className="diagnostic-item" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", background: "rgba(255,255,255,0.02)", borderRadius: "8px", border: "1px solid var(--border)" }}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                      <span style={{ fontSize: "0.9rem", fontWeight: "600", color: "white" }}>Fallback Scraper API</span>
+                      <span className="text-muted" style={{ fontSize: "0.75rem" }}>/.netlify/functions/fallback-stream</span>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                      <span style={{ fontSize: "0.8rem", color: diagnostics.fallback.status === "success" ? "#4ADE80" : diagnostics.fallback.status === "error" ? "#F87171" : "var(--text-muted)", fontWeight: "600" }}>
+                        {diagnostics.fallback.status === "testing" ? "Testing..." : diagnostics.fallback.status === "success" ? diagnostics.fallback.details : diagnostics.fallback.status === "error" ? diagnostics.fallback.details : "Not Tested"}
+                      </span>
+                      <span className={`status-dot ${diagnostics.fallback.status}`} />
+                    </div>
+                  </div>
+
+                  {/* Stream Proxy */}
+                  <div className="diagnostic-item" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", background: "rgba(255,255,255,0.02)", borderRadius: "8px", border: "1px solid var(--border)" }}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                      <span style={{ fontSize: "0.9rem", fontWeight: "600", color: "white" }}>HLS Stream Proxy</span>
+                      <span className="text-muted" style={{ fontSize: "0.75rem" }}>Cloudflare Workers Traffic Handler</span>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                      <span style={{ fontSize: "0.8rem", color: diagnostics.proxy.status === "success" ? "#4ADE80" : diagnostics.proxy.status === "error" ? "#F87171" : "var(--text-muted)", fontWeight: "600" }}>
+                        {diagnostics.proxy.status === "testing" ? "Testing..." : diagnostics.proxy.status === "success" ? diagnostics.proxy.details : diagnostics.proxy.status === "error" ? diagnostics.proxy.details : "Not Tested"}
+                      </span>
+                      <span className={`status-dot ${diagnostics.proxy.status}`} />
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ marginTop: "1rem", display: "flex", justifyContent: "flex-end" }}>
+                  <button 
+                    onClick={runDiagnostics} 
+                    disabled={isRunningDiagnostics} 
+                    className="btn btn-primary flex-center"
+                    style={{ gap: "8px" }}
+                  >
+                    {isRunningDiagnostics ? (
+                      <>
+                        <RefreshCw size={16} className="spin-icon" style={{ animation: "spin 0.8s linear infinite" }} /> Testing Servers...
+                      </>
+                    ) : (
+                      "Run Diagnostics Test"
+                    )}
+                  </button>
+                </div>
               </div>
             </section>
 
@@ -522,10 +1018,162 @@ export default function MyAniStreamPage() {
               </div>
             </section>
           </div>
+
+          {/* Email Modal Dialog */}
+          {emailModalOpen && (
+            <div className="settings-modal-overlay">
+              <div className="settings-modal-card">
+                <h3>Change Account Email</h3>
+                <p className="text-muted" style={{ fontSize: "0.85rem", marginBottom: "15px" }}>
+                  For security, confirm your old password and enter your new email address.
+                </p>
+                {modalError && <div className="modal-alert error">{modalError}</div>}
+                {modalSuccess && <div className="modal-alert success">{modalSuccess}</div>}
+                
+                <div className="modal-form-group">
+                  <label>Current Password</label>
+                  <input 
+                    type="password" 
+                    value={currentPassword} 
+                    onChange={(e) => setCurrentPassword(e.target.value)} 
+                    placeholder="Enter current password"
+                    className="modal-input"
+                  />
+                </div>
+                
+                <div className="modal-form-group">
+                  <label>New Email Address</label>
+                  <input 
+                    type="email" 
+                    value={newEmail} 
+                    onChange={(e) => setNewEmail(e.target.value)} 
+                    placeholder="Enter new email address"
+                    className="modal-input"
+                  />
+                </div>
+                
+                <div className="modal-form-group">
+                  <label>Confirm New Email</label>
+                  <input 
+                    type="email" 
+                    value={confirmEmail} 
+                    onChange={(e) => setConfirmEmail(e.target.value)} 
+                    placeholder="Confirm new email address"
+                    className="modal-input"
+                  />
+                </div>
+                
+                <div className="modal-actions">
+                  <button 
+                    onClick={() => setEmailModalOpen(false)} 
+                    className="btn btn-secondary"
+                    disabled={isSubmitting}
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    onClick={handleEmailSubmit} 
+                    className="btn btn-primary"
+                    disabled={isSubmitting}
+                  >
+                    {isSubmitting ? "Updating..." : "Update Email"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Password Modal Dialog */}
+          {passwordModalOpen && (
+            <div className="settings-modal-overlay">
+              <div className="settings-modal-card">
+                <h3>Change Account Password</h3>
+                <p className="text-muted" style={{ fontSize: "0.85rem", marginBottom: "15px" }}>
+                  For security, enter your current password and your new password.
+                </p>
+                {modalError && <div className="modal-alert error">{modalError}</div>}
+                {modalSuccess && <div className="modal-alert success">{modalSuccess}</div>}
+                
+                <div className="modal-form-group">
+                  <label>Current Password</label>
+                  <input 
+                    type="password" 
+                    value={currentPassword} 
+                    onChange={(e) => setCurrentPassword(e.target.value)} 
+                    placeholder="Enter current password"
+                    className="modal-input"
+                  />
+                </div>
+                
+                <div className="modal-form-group">
+                  <label>New Password</label>
+                  <input 
+                    type="password" 
+                    value={newPassword} 
+                    onChange={(e) => setNewPassword(e.target.value)} 
+                    placeholder="Enter new password (min. 6 chars)"
+                    className="modal-input"
+                  />
+                </div>
+                
+                <div className="modal-form-group">
+                  <label>Confirm New Password</label>
+                  <input 
+                    type="password" 
+                    value={confirmPassword} 
+                    onChange={(e) => setConfirmPassword(e.target.value)} 
+                    placeholder="Confirm new password"
+                    className="modal-input"
+                  />
+                </div>
+                
+                <div className="modal-actions">
+                  <button 
+                    onClick={() => setPasswordModalOpen(false)} 
+                    className="btn btn-secondary"
+                    disabled={isSubmitting}
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    onClick={handlePasswordSubmit} 
+                    className="btn btn-primary"
+                    disabled={isSubmitting}
+                  >
+                    {isSubmitting ? "Updating..." : "Update Password"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </>
       )}
 
       <style>{`
+        .status-dot {
+          width: 8px;
+          height: 8px;
+          border-radius: 50%;
+          display: inline-block;
+          background-color: var(--text-muted);
+        }
+        .status-dot.testing {
+          background-color: #3b82f6;
+          animation: pulseDiag 1s infinite alternate;
+        }
+        .status-dot.success {
+          background-color: #4ade80;
+          box-shadow: 0 0 8px rgba(74, 222, 128, 0.4);
+        }
+        .status-dot.error {
+          background-color: #f87171;
+          box-shadow: 0 0 8px rgba(248, 113, 113, 0.4);
+        }
+        @keyframes pulseDiag {
+          from { opacity: 0.4; transform: scale(0.9); }
+          to { opacity: 1; transform: scale(1.1); }
+        }
+
         .my-anistream-page {
           padding-top: calc(var(--header-height) + 20px);
           padding-bottom: 5rem;
@@ -586,12 +1234,14 @@ export default function MyAniStreamPage() {
           font-weight: 800;
           font-size: 1.8rem;
           color: white;
+          overflow: hidden;
         }
-        .profile-hero-avatar.avatar_orange { background: linear-gradient(135deg, #FF9900, #FF5E00); }
-        .profile-hero-avatar.avatar_blue { background: linear-gradient(135deg, #0070F3, #00C6FF); }
-        .profile-hero-avatar.avatar_green { background: linear-gradient(135deg, #00C851, #00E676); }
-        .profile-hero-avatar.avatar_pink { background: linear-gradient(135deg, #FF4081, #FF80AB); }
-        .profile-hero-avatar.avatar_purple { background: linear-gradient(135deg, #AA00FF, #E040FB); }
+        .profile-hero-avatar-img {
+          width: 100%;
+          height: 100%;
+          object-fit: cover;
+          border-radius: inherit;
+        }
         
         .card-header-with-icon {
           display: flex;
@@ -923,6 +1573,85 @@ export default function MyAniStreamPage() {
           .settings-select {
             width: 100%;
           }
+        }
+
+        /* Settings Modal Overlay & Card Styling */
+        .settings-modal-overlay {
+          position: fixed;
+          top: 0;
+          left: 0;
+          width: 100%;
+          height: 100%;
+          background: rgba(0, 0, 0, 0.85);
+          backdrop-filter: blur(8px);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          z-index: 10000;
+          padding: 20px;
+        }
+        .settings-modal-card {
+          background: #121212;
+          border: 1px solid #2a2a2a;
+          border-radius: 12px;
+          padding: 30px;
+          width: 100%;
+          max-width: 450px;
+          box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+        }
+        .settings-modal-card h3 {
+          font-size: 1.3rem;
+          font-weight: 700;
+          color: white;
+          margin-bottom: 8px;
+        }
+        .modal-form-group {
+          margin-bottom: 16px;
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+        }
+        .modal-form-group label {
+          font-size: 0.8rem;
+          font-weight: 600;
+          color: var(--text-secondary);
+        }
+        .modal-input {
+          background: #1a1a1a;
+          border: 1px solid #333;
+          border-radius: 6px;
+          padding: 10px 12px;
+          color: white;
+          font-size: 0.9rem;
+          width: 100%;
+          outline: none;
+          transition: border-color 0.2s;
+        }
+        .modal-input:focus {
+          border-color: var(--primary);
+        }
+        .modal-actions {
+          display: flex;
+          justify-content: flex-end;
+          gap: 12px;
+          margin-top: 24px;
+        }
+        .modal-alert {
+          border-radius: 6px;
+          padding: 10px 12px;
+          font-size: 0.85rem;
+          margin-bottom: 16px;
+          font-weight: 500;
+        }
+        .modal-alert.error {
+          background: rgba(239, 68, 68, 0.15);
+          color: #ef4444;
+          border: 1px solid #ef4444;
+        }
+        .modal-alert.success {
+          background: rgba(34, 197, 94, 0.15);
+          color: #22c55e;
+          border: 1px solid #22c55e;
         }
       `}</style>
     </div>

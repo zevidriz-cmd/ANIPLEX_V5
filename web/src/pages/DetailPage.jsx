@@ -489,143 +489,145 @@ export default function DetailPage() {
             setSeasonsLoading(false);
           } else {
             setSeasonsLoading(true);
-            getSeasons(malId)
-              .then(async (seasonData) => {
-                let list = seasonData?.seasons || [];
-                const currentMalId = parseInt(malId);
-                const hasCurrent = list.some(s => parseInt(s.malId) === currentMalId);
-                if (!hasCurrent && detailData?.anime?.info) {
-                  const currentSeason = {
-                    malId: currentMalId,
-                    title: detailData.anime.info.name,
-                    poster: detailData.anime.info.poster,
-                    seasonNumber: null
-                  };
-                  list = [currentSeason, ...list];
-                }
+          }
 
-                // Parallel seasons resolution
-                const resolvedList = await Promise.all(
-                  list.map(async (s) => {
-                    try {
-                      if (s.episodes === 0) {
-                        return { ...s, isResolvable: false };
-                      }
-
-                      let resolvedId = null;
-                      if (parseInt(s.malId) === currentMalId) {
-                        const currentEpsCount = epData?.episodes?.length || 0;
-                        if (currentEpsCount > 0) {
-                          return { ...s, resolvedId: animeId, isResolvable: true };
-                        }
-                        return { ...s, isResolvable: false };
-                      }
-
-                      const res = await resolveMAL(s.malId);
-                      if (res && res.anikotoId && res.anikotoId !== "") {
-                        resolvedId = res.anikotoId;
-                      } else {
-                        const searchRes = await search(s.title);
-                        if (searchRes && searchRes.animes && searchRes.animes.length > 0) {
-                          resolvedId = searchRes.animes[0].id;
-                        }
-                      }
-
-                      if (resolvedId) {
-                        const eps = await getEpisodes(resolvedId).catch(() => null);
-                        if (eps && eps.episodes && eps.episodes.length > 0) {
-                          return { ...s, resolvedId, isResolvable: true };
-                        }
-                      }
-                      return { ...s, isResolvable: false };
-                    } catch {
-                      return { ...s, isResolvable: false };
-                    }
-                  })
-                );
-
-                let filteredList = resolvedList.filter(s => s.isResolvable);
-                filteredList.sort((a, b) => {
-                  const aNum = a.seasonNumber ? parseInt(a.seasonNumber) : null;
-                  const bNum = b.seasonNumber ? parseInt(b.seasonNumber) : null;
-                  if (aNum !== null && bNum !== null) return aNum - bNum;
-                  if (aNum !== null) return -1;
-                  if (bNum !== null) return 1;
-                  return 0;
-                });
-
-                // Pre-assign sequential displaySeasonNumber and displayPartNumber to TV series in order
-                let tvIndex = 0;
-                const tvSeasonsWithNumbers = [];
-                
-                filteredList.forEach(s => {
-                  const type = getMediaType(s);
-                  if (type !== "TV") {
-                    tvSeasonsWithNumbers.push(s);
-                    return;
-                  }
-                  
-                  let parentSeason = null;
-                  for (let i = tvSeasonsWithNumbers.length - 1; i >= 0; i--) {
-                    const prev = tvSeasonsWithNumbers[i];
-                    if (getMediaType(prev) === "TV" && checkIsPart(prev.title, s.title)) {
-                      parentSeason = prev;
-                      break;
-                    }
-                  }
-                  
-                  if (parentSeason) {
-                    parentSeason.partCount = (parentSeason.partCount || 1) + 1;
-                    tvSeasonsWithNumbers.push({
-                      ...s,
-                      displaySeasonNumber: parentSeason.displaySeasonNumber,
-                      displayPartNumber: parentSeason.partCount
-                    });
-                  } else {
-                    tvIndex++;
-                    tvSeasonsWithNumbers.push({
-                      ...s,
-                      displaySeasonNumber: tvIndex,
-                      displayPartNumber: 1
-                    });
-                  }
-                });
-
-                setSeasons(tvSeasonsWithNumbers);
-                setSeasonsLoading(false);
-
-                let hasAlt = false;
-                if (filteredList.length > 0) {
-                  const baseTitle = detailData?.anime?.info?.name
-                    .replace(/\s*\(uncut\)/gi, "")
-                    .replace(/\s*\(uncensored\)/gi, "")
-                    .replace(/\s*\(censored\)/gi, "")
-                    .trim().toLowerCase();
-
-                  hasAlt = filteredList.some(s => {
-                    const sTitle = s.title.toLowerCase();
-                    const isSUncut = sTitle.includes("uncut") || sTitle.includes("uncensored");
-                    return sTitle.includes(baseTitle) && (isSUncut !== isUncut);
-                  });
-                  setHasAltVersion(hasAlt);
-                }
-
-                // Save to cache for all MAL IDs in this franchise
-                const cacheData = {
-                  seasons: tvSeasonsWithNumbers,
-                  hasAltVersion: hasAlt
+          getSeasons(malId)
+            .then(async (seasonData) => {
+              let list = seasonData?.seasons || [];
+              const currentMalId = parseInt(malId);
+              const hasCurrent = list.some(s => parseInt(s.malId) === currentMalId);
+              if (!hasCurrent && detailData?.anime?.info) {
+                const currentSeason = {
+                  malId: currentMalId,
+                  title: detailData.anime.info.name,
+                  poster: detailData.anime.info.poster,
+                  seasonNumber: null
                 };
+                list = [currentSeason, ...list];
+              }
+
+              // Parallel seasons resolution
+              const resolvedList = await Promise.all(
+                list.map(async (s) => {
+                  try {
+                    let resolvedId = null;
+                    if (parseInt(s.malId) === currentMalId) {
+                      const currentEpsCount = epData?.episodes?.length || 0;
+                      if (currentEpsCount > 0) {
+                        return { ...s, resolvedId: animeId, isResolvable: true };
+                      }
+                      return { ...s, isResolvable: false };
+                    }
+
+                    const res = await resolveMAL(s.malId);
+                    if (res && res.anikotoId && res.anikotoId !== "") {
+                      resolvedId = res.anikotoId;
+                    } else {
+                      const searchRes = await search(s.title);
+                      if (searchRes && searchRes.animes && searchRes.animes.length > 0) {
+                        resolvedId = searchRes.animes[0].id;
+                      }
+                    }
+
+                    if (resolvedId) {
+                      const eps = await getEpisodes(resolvedId).catch(() => null);
+                      if (eps && eps.episodes && eps.episodes.length > 0) {
+                        return { ...s, resolvedId, isResolvable: true };
+                      }
+                    }
+                    return { ...s, isResolvable: false };
+                  } catch {
+                    return { ...s, isResolvable: false };
+                  }
+                })
+              );
+
+              let filteredList = resolvedList.filter(s => s.isResolvable);
+              filteredList.sort((a, b) => {
+                const aNum = a.seasonNumber ? parseInt(a.seasonNumber) : null;
+                const bNum = b.seasonNumber ? parseInt(b.seasonNumber) : null;
+                if (aNum !== null && bNum !== null) return aNum - bNum;
+                if (aNum !== null) return -1;
+                if (bNum !== null) return 1;
+                return 0;
+              });
+
+              // Pre-assign sequential displaySeasonNumber and displayPartNumber to TV series in order
+              let tvIndex = 0;
+              const tvSeasonsWithNumbers = [];
+              
+              filteredList.forEach(s => {
+                const type = getMediaType(s);
+                if (type !== "TV") {
+                  tvSeasonsWithNumbers.push(s);
+                  return;
+                }
+                
+                let parentSeason = null;
+                for (let i = tvSeasonsWithNumbers.length - 1; i >= 0; i--) {
+                  const prev = tvSeasonsWithNumbers[i];
+                  if (getMediaType(prev) === "TV" && checkIsPart(prev.title, s.title)) {
+                    parentSeason = prev;
+                    break;
+                  }
+                }
+                
+                if (parentSeason) {
+                  parentSeason.partCount = (parentSeason.partCount || 1) + 1;
+                  tvSeasonsWithNumbers.push({
+                    ...s,
+                    displaySeasonNumber: parentSeason.displaySeasonNumber,
+                    displayPartNumber: parentSeason.partCount
+                  });
+                } else {
+                  tvIndex++;
+                  tvSeasonsWithNumbers.push({
+                    ...s,
+                    displaySeasonNumber: tvIndex,
+                    displayPartNumber: 1
+                  });
+                }
+              });
+
+              let hasAlt = false;
+              if (filteredList.length > 0) {
+                const baseTitle = detailData?.anime?.info?.name
+                  .replace(/\s*\(uncut\)/gi, "")
+                  .replace(/\s*\(uncensored\)/gi, "")
+                  .replace(/\s*\(censored\)/gi, "")
+                  .trim().toLowerCase();
+
+                hasAlt = filteredList.some(s => {
+                  const sTitle = s.title.toLowerCase();
+                  const isSUncut = sTitle.includes("uncut") || sTitle.includes("uncensored");
+                  return sTitle.includes(baseTitle) && (isSUncut !== isUncut);
+                });
+              }
+
+              // Update state and cache if different or if not cached yet
+              const freshData = {
+                seasons: tvSeasonsWithNumbers,
+                hasAltVersion: hasAlt
+              };
+              const isDifferent = !cached || JSON.stringify(cached.seasons) !== JSON.stringify(tvSeasonsWithNumbers) || cached.hasAltVersion !== hasAlt;
+
+              if (isDifferent) {
+                setSeasons(tvSeasonsWithNumbers);
+                setHasAltVersion(hasAlt);
+                
+                // Save to cache for all MAL IDs in this franchise
                 tvSeasonsWithNumbers.forEach(s => {
                   if (s.malId) {
-                    setCachedSeasons(s.malId, cacheData);
+                    setCachedSeasons(s.malId, freshData);
                   }
                 });
-              })
-              .catch(e => {
-                console.warn("Background seasons fetch error:", e);
-                setSeasonsLoading(false);
-              });
-          }
+              }
+              setSeasonsLoading(false);
+            })
+            .catch(e => {
+              console.warn("Background seasons fetch error:", e);
+              setSeasonsLoading(false);
+            });
         }
 
       } catch (err) {

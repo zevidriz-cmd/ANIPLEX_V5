@@ -228,3 +228,49 @@ data class ResolveMALDataDto(
     @SerializedName("anikotoId") val anikotoId: String,
     @SerializedName("title") val title: String?
 )
+
+// Fallback Stream DTOs (Netlify serverless function response)
+data class FallbackStreamResponse(
+    @SerializedName("success") val success: Boolean,
+    @SerializedName("sources") val sources: List<FallbackSourceDto>?,
+    @SerializedName("subtitles") val subtitles: List<FallbackSubtitleDto>?,
+    @SerializedName("intro") val intro: FallbackTimeRangeDto?,
+    @SerializedName("outro") val outro: FallbackTimeRangeDto?,
+    @SerializedName("provider") val provider: String?,
+    @SerializedName("error") val error: String?
+)
+
+data class FallbackSourceDto(
+    @SerializedName("url") val url: String,
+    @SerializedName("type") val type: String?,
+    @SerializedName("quality") val quality: String?
+)
+
+data class FallbackSubtitleDto(
+    @SerializedName("url") val url: String?,
+    @SerializedName("lang") val lang: String?
+)
+
+data class FallbackTimeRangeDto(
+    @SerializedName("start") val start: Double?,
+    @SerializedName("end") val end: Double?
+)
+
+// MegaPlay getSources / getSourcesNew response DTOs
+data class MegaplaySourcesResponse(
+    @SerializedName("sources") val sources: MegaplaySourceFileDto?,
+    @SerializedName("tracks") val tracks: List<MegaplayTrackDto>?,
+    @SerializedName("intro") val intro: FallbackTimeRangeDto?,
+    @SerializedName("outro") val outro: FallbackTimeRangeDto?
+)
+
+data class MegaplaySourceFileDto(
+    @SerializedName("file") val file: String?
+)
+
+data class MegaplayTrackDto(
+    @SerializedName("file") val file: String?,
+    @SerializedName("label") val label: String?,
+    @SerializedName("kind") val kind: String?,
+    @SerializedName("default") val default_: Boolean?
+)

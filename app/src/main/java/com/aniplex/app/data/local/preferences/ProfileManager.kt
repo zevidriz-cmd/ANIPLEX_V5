@@ -22,43 +22,145 @@ class ProfileManager @Inject constructor(
     private val _activeProfile = MutableStateFlow<UserProfile?>(null)
     val activeProfile: StateFlow<UserProfile?> = _activeProfile.asStateFlow()
 
+    private var activeProfileListener: com.google.firebase.firestore.ListenerRegistration? = null
+
     init {
         // Load active profile from preferences on startup if user is logged in
         val userId = auth.currentUser?.uid
         if (userId != null) {
             val savedId = preferenceManager.getSelectedProfileId(userId)
             if (savedId != null) {
-                // Fetch details of this profile from Firestore in the background
-                // We'll set a basic profile first, and fetch the real one
                 _activeProfile.value = UserProfile(id = savedId)
-                refreshActiveProfile(userId, savedId)
+                startActiveProfileListener(userId, savedId)
             }
         }
     }
 
-    private fun refreshActiveProfile(userId: String, profileId: String) {
-        firestore.collection("users").document(userId)
+    private fun startActiveProfileListener(userId: String, profileId: String) {
+        activeProfileListener?.remove()
+        activeProfileListener = firestore.collection("users").document(userId)
             .collection("profiles").document(profileId)
-            .get()
-            .addOnSuccessListener { doc ->
-                if (doc.exists()) {
+            .addSnapshotListener { doc, error ->
+                if (error != null) return@addSnapshotListener
+                if (doc != null && doc.exists()) {
                     val name = doc.getString("name") ?: ""
                     val avatarUrl = doc.getString("avatarUrl") ?: ""
                     val pin = doc.getString("pin")
                     val recoveryQuestion = doc.getString("recoveryQuestion")
                     val recoveryAnswer = doc.getString("recoveryAnswer")
                     _activeProfile.value = UserProfile(profileId, name, avatarUrl, pin, recoveryQuestion, recoveryAnswer)
+
+                    @Suppress("UNCHECKED_CAST")
+                    val settings = doc.get("settings") as? Map<String, Any>
+                    if (settings != null) {
+                        applySettingsFromFirestore(settings)
+                    }
                 }
             }
     }
 
+    private fun applySettingsFromFirestore(settings: Map<String, Any>) {
+        (settings["defaultAudio"] as? String)?.let {
+            preferenceManager.defaultAudioCategory = it
+        }
+        (settings["autoplayNextEpisode"] as? Boolean)?.let {
+            preferenceManager.autoplayNextEpisode = it
+        }
+        (settings["preferredQuality"] as? String)?.let {
+            preferenceManager.preferredQuality = it
+        }
+        (settings["skipIntro"] as? Boolean)?.let {
+            preferenceManager.skipIntro = it
+        }
+        (settings["skipOutro"] as? Boolean)?.let {
+            preferenceManager.skipOutro = it
+        }
+        (settings["playbackSpeed"] as? Number)?.let {
+            preferenceManager.playbackSpeed = it.toFloat()
+        }
+        (settings["preferredProvider"] as? String)?.let {
+            preferenceManager.preferredProvider = it
+        }
+        (settings["hevcDecoderEnabled"] as? Boolean)?.let {
+            preferenceManager.hevcDecoderEnabled = it
+        }
+        (settings["dolbyAtmosEnabled"] as? Boolean)?.let {
+            preferenceManager.dolbyAtmosEnabled = it
+        }
+        (settings["preferredAccentColor"] as? String)?.let {
+            preferenceManager.preferredAccentColor = it
+        }
+
+        @Suppress("UNCHECKED_CAST")
+        val subtitles = settings["subtitles"] as? Map<String, Any>
+        if (subtitles != null) {
+            (subtitles["enabled"] as? Boolean)?.let {
+                preferenceManager.subtitlesEnabled = it
+            }
+            (subtitles["sizeScale"] as? Number)?.let {
+                preferenceManager.subtitleSizeScale = it.toFloat()
+            }
+            (subtitles["color"] as? String)?.let {
+                preferenceManager.subtitleColor = it
+            }
+            (subtitles["bgOpacity"] as? Number)?.let {
+                preferenceManager.subtitleBgOpacity = it.toFloat()
+            }
+            (subtitles["style"] as? String)?.let {
+                preferenceManager.subtitleStyle = it
+            }
+            (subtitles["position"] as? Number)?.let {
+                preferenceManager.subtitlePosition = it.toFloat()
+            }
+        }
+    }
+
+    fun saveSettingsToFirestore() {
+        val userId = auth.currentUser?.uid ?: return
+        val profileId = _activeProfile.value?.id ?: return
+
+        val settingsMap = hashMapOf(
+            "defaultAudio" to preferenceManager.defaultAudioCategory,
+            "autoplayNextEpisode" to preferenceManager.autoplayNextEpisode,
+            "preferredQuality" to preferenceManager.preferredQuality,
+            "skipIntro" to preferenceManager.skipIntro,
+            "skipOutro" to preferenceManager.skipOutro,
+            "playbackSpeed" to preferenceManager.playbackSpeed,
+            "preferredProvider" to preferenceManager.preferredProvider,
+            "hevcDecoderEnabled" to preferenceManager.hevcDecoderEnabled,
+            "dolbyAtmosEnabled" to preferenceManager.dolbyAtmosEnabled,
+            "preferredAccentColor" to preferenceManager.preferredAccentColor,
+            "subtitles" to hashMapOf(
+                "enabled" to preferenceManager.subtitlesEnabled,
+                "sizeScale" to preferenceManager.subtitleSizeScale,
+                "color" to preferenceManager.subtitleColor,
+                "bgOpacity" to preferenceManager.subtitleBgOpacity,
+                "style" to preferenceManager.subtitleStyle,
+                "position" to preferenceManager.subtitlePosition
+            )
+        )
+
+        firestore.collection("users").document(userId)
+            .collection("profiles").document(profileId)
+            .set(mapOf("settings" to settingsMap), SetOptions.merge())
+    }
+
     fun selectProfile(profile: UserProfile?) {
+        activeProfileListener?.remove()
+        activeProfileListener = null
+
         _activeProfile.value = profile
         val userId = auth.currentUser?.uid ?: return
         preferenceManager.setSelectedProfileId(userId, profile?.id)
+
+        if (profile != null) {
+            startActiveProfileListener(userId, profile.id)
+        }
     }
 
     fun clearActiveProfile() {
+        activeProfileListener?.remove()
+        activeProfileListener = null
         _activeProfile.value = null
         val userId = auth.currentUser?.uid ?: return
         preferenceManager.setSelectedProfileId(userId, null)

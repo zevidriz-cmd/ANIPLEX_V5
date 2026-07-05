@@ -8,7 +8,8 @@ data class Anime(
     val duration: String = "",
     val subEpisodes: Int = 0,
     val dubEpisodes: Int = 0,
-    val rate: String = ""
+    val rate: String = "",
+    val isBackup: Boolean = false
 )
 
 data class SpotlightAnime(

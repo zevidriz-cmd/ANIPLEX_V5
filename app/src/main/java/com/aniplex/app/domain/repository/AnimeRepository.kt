@@ -15,6 +15,8 @@ interface AnimeRepository {
     fun getSchedules(date: String?): Flow<Result<List<ScheduleItem>>>
     fun getCharacters(id: String): Flow<Result<List<Character>>>
     fun getEpisodeStream(episodeId: String, server: String, category: String): Flow<Result<EpisodeStream>>
+    fun getFallbackStream(malId: String?, episodeNumber: Int, title: String?, provider: String): Flow<Result<EpisodeStream>>
+    fun getMegaplayDirectStream(malId: String, episodeNumber: Int, audioCategory: String = "sub"): Flow<Result<EpisodeStream>>
     fun filterAnime(
         type: String?,
         status: String?,
@@ -27,4 +29,5 @@ interface AnimeRepository {
     fun resolveMAL(malId: String): Flow<Result<String>>
     suspend fun getCachedAnimeDetail(id: String): AnimeDetail?
     fun getSkipTimes(animeId: Int, episodeNumber: Int, episodeLength: Double? = null): Flow<Result<SkipTimes>>
+    fun getTmdbStoryArcs(malId: String, title: String, episodes: List<Episode>): Flow<Result<List<StoryArc>>>
 }

@@ -49,3 +49,6 @@ data object Profile : NavKey
 
 @Serializable
 data object Downloads : NavKey
+
+@Serializable
+data object QrScanner : NavKey

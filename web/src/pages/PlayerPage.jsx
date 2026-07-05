@@ -4,7 +4,7 @@ import { doc, getDoc, setDoc } from "firebase/firestore";
 import { db } from "../config/firebase";
 import { useAuth } from "../context/AuthContext";
 import { useProfile } from "../context/ProfileContext";
-import { getAnimeDetail, getEpisodes, getStreamSources, getSkipTimes, getDirectStream, getBackupStream } from "../services/api";
+import { getAnimeDetail, getEpisodes, getStreamSources, getSkipTimes, getDirectStream, getBackupStream, getMegaplayDirectStream, getSingleBackupStream } from "../services/api";
 import { resolveTmdId, fetchTmdSeasons, buildArcsFromSeasons } from "../services/tmdb";
 import VideoPlayer from "../components/VideoPlayer";
 import { ArrowLeft, RefreshCw, AlertTriangle, ChevronDown, Check, CheckSquare } from "lucide-react";
@@ -74,7 +74,7 @@ const fetchJikanFillers = async (malId, totalEps) => {
 
 export default function PlayerPage() {
   const { animeId, episodeId } = useParams();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const audioCategory = searchParams.get("audio") || localStorage.getItem("anistream_audio_preference") || "sub"; // 'sub' or 'dub'
 
   const { currentUser } = useAuth();
@@ -97,6 +97,7 @@ export default function PlayerPage() {
 
   // Story Arcs & User History States
   const [tmdbSeasons, setTmdbSeasons] = useState(null);
+  const [tmdbId, setTmdbId] = useState(null);
   const [historyItem, setHistoryItem] = useState(null);
 
   // Batching & Arc logic using useMemo
@@ -157,20 +158,23 @@ export default function PlayerPage() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // Load TMDb story arcs
+  // Load TMDb ID and story arcs
   useEffect(() => {
     const malId = animeDetail?.anime?.info?.malId;
+    const title = animeDetail?.anime?.info?.name;
     if (!malId || malId === "0" || malId === "") {
       setTmdbSeasons(null);
+      setTmdbId(null);
       return;
     }
 
     let isMounted = true;
     async function getArcs() {
       try {
-        const tmdbId = await resolveTmdId(malId);
-        if (tmdbId && isMounted) {
-          const seasons = await fetchTmdSeasons(tmdbId);
+        const resolvedId = await resolveTmdId(malId, title);
+        if (resolvedId && isMounted) {
+          setTmdbId(resolvedId);
+          const seasons = await fetchTmdSeasons(resolvedId);
           if (seasons && seasons.length > 0 && isMounted) {
             setTmdbSeasons(seasons);
           }
@@ -208,11 +212,54 @@ export default function PlayerPage() {
   const [initialSavedProgress, setInitialSavedProgress] = useState(0);
   const [loadingStatus, setLoadingStatus] = useState("Scraping stream sources...");
   const [fallbackNotice, setFallbackNotice] = useState(null);
+  const [failedProviders, setFailedProviders] = useState([]);
+
+  const lastLoadedEpIdRef = useRef(null);
+  const lastLoadedServerRef = useRef(null);
+  const lastLoadedAudioRef = useRef(null);
+
+  const handlePlaybackError = (providerName) => {
+    console.warn(`[PlayerPage] Playback failed for provider: ${providerName}. Adding to failed list.`);
+    setFailedProviders(prev => {
+      if (prev.includes(providerName)) return prev;
+      return [...prev, providerName];
+    });
+  };
+
+  const availableAudioCategories = useMemo(() => {
+    const categories = ["sub"];
+    const hasDub = animeDetail?.anime?.info?.stats?.episodes?.dub && animeDetail.anime.info.stats.episodes.dub > 0;
+    if (hasDub) {
+      categories.push("dub");
+    }
+    return categories;
+  }, [animeDetail]);
+
+  const handleAudioCategoryChange = (newCategory) => {
+    console.log(`[PlayerPage] Switching audio category to: ${newCategory}`);
+    const params = new URLSearchParams(searchParams);
+    params.set("audio", newCategory);
+    setSearchParams(params);
+  };
 
   useEffect(() => {
     let isMounted = true;
     async function loadPlayer() {
       setError("");
+      // Reset failed providers if this is a fresh load of a different episode/server/audio
+      const isFreshLoad = lastLoadedEpIdRef.current !== episodeId || 
+                           lastLoadedServerRef.current !== selectedServer || 
+                           lastLoadedAudioRef.current !== audioCategory;
+
+      if (isFreshLoad) {
+        lastLoadedEpIdRef.current = episodeId;
+        lastLoadedServerRef.current = selectedServer;
+        lastLoadedAudioRef.current = audioCategory;
+        if (failedProviders.length > 0) {
+          setFailedProviders([]);
+          return;
+        }
+      }
       const showChanged = loadedAnimeId !== animeId;
       if (showChanged) {
         setInitialLoading(true);
@@ -301,54 +348,117 @@ export default function PlayerPage() {
         const animeTitle = currentDetail?.anime?.info?.name;
 
         // 3. Fetch stream sources
-        let stream = null;
-        let direct = null;
+        const isZoroSettingEnabled = localStorage.getItem("anistream_zoro_enabled") !== "false";
+        const isGogoSettingEnabled = localStorage.getItem("anistream_gogoanime_enabled") !== "false";
+        const preferredProviderSetting = localStorage.getItem("anistream_preferred_provider") || "zoro";
 
-        try {
-          stream = await getStreamSources(episodeId, selectedServer, audioCategory);
+        const isZoroEnabled = isZoroSettingEnabled && !failedProviders.includes("zoro");
+        const isGogoanimeEnabled = isGogoSettingEnabled && !failedProviders.includes("gogoanime");
+        const isAnimePaheEnabled = !failedProviders.includes("animepahe");
+        const isMegaDirectEnabled = !failedProviders.includes("megaplay-direct");
+
+        const tryZoro = async () => {
+          if (isMounted) setLoadingStatus("Connecting to primary server (Zoro)...");
+          const stream = await getStreamSources(episodeId, selectedServer, audioCategory);
           if (isMounted) setStreamData(stream);
+          if (isMounted) setLoadingStatus("Extracting high-quality direct stream...");
+          const res = await getDirectStream(episodeId, selectedServer, audioCategory, malId, ep.number, animeTitle);
+          return { ...res, provider: "zoro" };
+        };
 
+        const tryGogoanime = async () => {
+          if (isMounted) setLoadingStatus("Connecting to Gogoanime backup server...");
+          const res = await getSingleBackupStream(malId, ep.number, animeTitle, "gogoanime");
+          return res;
+        };
+
+        const tryAnimePahe = async () => {
+          if (isMounted) setLoadingStatus("Connecting to AnimePahe backup server...");
+          const res = await getSingleBackupStream(malId, ep.number, animeTitle, "animepahe");
+          return res;
+        };
+
+        // Build the prioritized sequence of providers to try
+        const providersSequence = [];
+
+        if (preferredProviderSetting === "zoro") {
+          if (isZoroEnabled) providersSequence.push("zoro");
+          if (isGogoanimeEnabled) providersSequence.push("gogoanime");
+        } else {
+          // preferredProviderSetting === "gogoanime"
+          if (isGogoanimeEnabled) providersSequence.push("gogoanime");
+          if (isZoroEnabled) providersSequence.push("zoro");
+        }
+        if (isAnimePaheEnabled) providersSequence.push("animepahe");
+
+        let success = false;
+
+        for (const provider of providersSequence) {
           try {
-            if (isMounted) setLoadingStatus("Extracting high-quality direct stream...");
-            direct = await getDirectStream(episodeId, selectedServer, audioCategory, malId, ep.number, animeTitle);
-            if (isMounted) {
-              setDirectStream(direct);
-              if (direct.provider) {
+            let stream = null;
+            if (provider === "zoro") {
+              stream = await tryZoro();
+            } else if (provider === "gogoanime") {
+              stream = await tryGogoanime();
+            } else if (provider === "animepahe") {
+              stream = await tryAnimePahe();
+            }
+
+            if (isMounted && stream) {
+              setDirectStream(stream);
+              // Show notification if it's a fallback provider
+              if (provider !== providersSequence[0]) {
+                const readableNames = {
+                  zoro: "Primary server (Zoro)",
+                  gogoanime: "Backup server (Gogoanime)",
+                  animepahe: "Backup server (AnimePahe)"
+                };
                 setFallbackNotice({
                   type: "info",
-                  message: `Switched to Backup Stream Server (${direct.provider === "gogoanime" ? "Gogoanime" : "AnimePahe"})`
+                  message: `Fallback: switched to ${readableNames[provider]}.`
                 });
+              } else if (provider === "gogoanime" && preferredProviderSetting === "gogoanime") {
+                setFallbackNotice({
+                  type: "info",
+                  message: "Streaming via Gogoanime preference."
+                });
+              } else {
+                setFallbackNotice(null);
               }
+              success = true;
+              break;
             }
-          } catch (directErr) {
-            console.warn("Direct stream extraction failed, attempting fallback...", directErr);
-            throw directErr; // Cascade to trigger backup flow
+          } catch (err) {
+            console.warn(`[Fallback Sequence] Provider "${provider}" failed:`, err);
           }
-        } catch (streamErr) {
-          console.warn("Zoro streaming failed. Executing fallback flow...", streamErr);
+        }
 
-          // Primary server is down. Attempt Gogoanime/AnimePahe backup direct HLS streams
+        // Final failover: try MegaPlay Direct before falling back to Iframe
+        if (!success && isMegaDirectEnabled && malId) {
           try {
-            const backupStream = await getBackupStream(malId, ep.number, animeTitle, (statusMsg) => {
-              if (isMounted) setLoadingStatus(statusMsg);
-            });
+            if (isMounted) setLoadingStatus("Extracting MegaPlay direct stream...");
+            console.log("[Final Failover] Attempting MegaPlay direct stream extraction...");
+            const megaStream = await getMegaplayDirectStream(malId, ep.number, audioCategory);
             if (isMounted) {
-              setDirectStream(backupStream);
+              setDirectStream(megaStream);
               setFallbackNotice({
                 type: "info",
-                message: `Switched to Backup Stream Server (${backupStream.provider === "gogoanime" ? "Gogoanime" : "AnimePahe"})`
+                message: "Switched to MegaPlay direct stream."
               });
+              success = true;
             }
-          } catch (backupErr) {
-            console.error("Backup stream resolution failed, preparing iframe fallback:", backupErr);
-            if (isMounted) {
-              setDirectStream(null);
-              setFallbackNotice({
-                type: "warning",
-                message: "Direct server under maintenance. Loaded Backup Player (Iframe)."
-              });
-            }
+          } catch (megaErr) {
+            console.warn("[Final Failover] MegaPlay direct extraction failed:", megaErr);
           }
+        }
+
+        // If even MegaPlay Direct failed, load Iframe as absolute last resort
+        if (!success && isMounted) {
+          setDirectStream(null);
+          setFallbackNotice({
+            type: "warning",
+            message: "Direct servers under maintenance. Loaded Backup Player (Iframe)."
+          });
         }
 
         // 4. Fetch AniSkip times if MAL ID is available
@@ -410,7 +520,7 @@ export default function PlayerPage() {
     return () => {
       isMounted = false;
     };
-  }, [animeId, episodeId, audioCategory, selectedServer, currentUser, activeProfile]);
+  }, [animeId, episodeId, audioCategory, selectedServer, currentUser, activeProfile, failedProviders]);
 
   const markAsCompleted = async () => {
     if (!currentUser || !activeProfile || !animeDetail) return;
@@ -553,9 +663,51 @@ export default function PlayerPage() {
     navigate(`/anime/${animeId}`);
   };
 
+  // Calculate relative season and episode for TMDB fallback
+  const tmdbEpisodeInfo = useMemo(() => {
+    const epNum = currentEpisode?.number || 1;
+    if (!tmdbSeasons || tmdbSeasons.length === 0) {
+      return { season: 1, episode: epNum };
+    }
+
+    // Filter out Season 0 (Specials) and sort chronologically by season number
+    const validSeasons = tmdbSeasons
+      .filter((s) => s.season_number > 0)
+      .sort((a, b) => a.season_number - b.season_number);
+
+    let accumulatedEpisodes = 0;
+    for (const season of validSeasons) {
+      if (epNum > accumulatedEpisodes && epNum <= accumulatedEpisodes + season.episode_count) {
+        return {
+          season: season.season_number,
+          episode: epNum - accumulatedEpisodes
+        };
+      }
+      accumulatedEpisodes += season.episode_count;
+    }
+
+    // Fallback: if not found in any season range, default to the last season
+    const lastSeason = validSeasons[validSeasons.length - 1];
+    return {
+      season: lastSeason ? lastSeason.season_number : 1,
+      episode: Math.max(1, epNum - (accumulatedEpisodes - (lastSeason ? lastSeason.episode_count : 0)))
+    };
+  }, [tmdbSeasons, currentEpisode]);
+
   // Extract M3U8 source link
   const hlsSource = directStream ? directStream.hlsUrl : streamData?.sources?.find(s => s.type === "hls" || s.url.includes(".m3u8"))?.url;
-  const embedFallback = streamData?.videoUrl || (streamData?.sources?.[0]?.url) || (animeDetail?.anime?.info?.malId ? `https://vidsrc.to/embed/anime/${animeDetail.anime.info.malId}/${currentEpisode?.number || 1}` : "");
+  
+  // Build fallback URL
+  let embedFallback = streamData?.videoUrl || (streamData?.sources?.[0]?.url);
+  if (!embedFallback) {
+    if (tmdbId) {
+      embedFallback = `https://vidsrc.to/embed/tv/${tmdbId}/${tmdbEpisodeInfo.season}/${tmdbEpisodeInfo.episode}`;
+    } else if (animeDetail?.anime?.info?.malId) {
+      embedFallback = `https://vidsrc.to/embed/anime/${animeDetail.anime.info.malId}/${currentEpisode?.number || 1}`;
+    } else {
+      embedFallback = "";
+    }
+  }
 
   // Setup skip ranges (prefer AniSkip, fallback to streamData intro/outro)
   const skipIntroRange = skipTimes?.intro || (directStream ? directStream.intro : streamData?.intro);
@@ -626,6 +778,14 @@ export default function PlayerPage() {
               }
             }}
             externalLoading={scraping}
+            malId={animeDetail?.anime?.info?.malId}
+            tmdbId={tmdbId}
+            tmdbEpisodeInfo={tmdbEpisodeInfo}
+            audioCategory={audioCategory}
+            onPlaybackError={handlePlaybackError}
+            provider={directStream ? directStream.provider || "zoro" : "zoro"}
+            availableAudioCategories={availableAudioCategories}
+            onAudioCategoryChange={handleAudioCategoryChange}
           />
         )}
       </div>
