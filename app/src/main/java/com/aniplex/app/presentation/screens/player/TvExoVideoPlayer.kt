@@ -265,6 +265,20 @@ fun TvExoVideoPlayer(
                 modifier = Modifier.fillMaxSize()
             )
 
+            // Centered Buffering/Loading Indicator overlay to bridge latency during timestamp skips
+            if (state.isBuffering) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(
+                        color = CrunchyrollOrange,
+                        strokeWidth = 4.dp,
+                        modifier = Modifier.size(48.dp)
+                    )
+                }
+            }
+
             val currentEpNum = state.currentEpisode?.number ?: 1
             val nextEp = state.episodes.find { it.number == currentEpNum + 1 }
             val timeRemainingMs = state.durationMs - state.currentPositionMs
@@ -307,43 +321,52 @@ fun TvExoVideoPlayer(
                         .align(Alignment.BottomEnd)
                         .padding(bottom = if (showUpNext) 170.dp else 96.dp, end = 24.dp)
                 ) {
-                    Button(
-                        onClick = {
-                            exoPlayer?.let {
-                                val targetPos = if (hasIntroNow) state.skipTimes.introEnd else state.skipTimes.outroEnd
-                                it.seekTo(targetPos)
-                                callbacks.onPositionChanged(targetPos)
-                            }
-                        },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = if (isSkipFocused) CrunchyrollOrange else SurfaceDark,
-                            contentColor = Color.White
-                        ),
-                        shape = RoundedCornerShape(8.dp),
+                    Box(
                         modifier = Modifier
                             .height(44.dp)
+                            .wrapContentWidth()
                             .focusRequester(skipFocusRequester)
                             .onFocusChanged { isSkipFocused = it.isFocused }
                             .focusable()
+                            .onPreviewKeyEvent { event ->
+                                if (event.key == Key.DirectionCenter || event.key == Key.Enter || event.key == Key.Spacebar) {
+                                    if (event.type == KeyEventType.KeyUp) {
+                                        exoPlayer?.let {
+                                            val targetPos = if (hasIntroNow) state.skipTimes.introEnd else state.skipTimes.outroEnd
+                                            it.seekTo(targetPos)
+                                            callbacks.onPositionChanged(targetPos)
+                                        }
+                                    }
+                                    true
+                                } else false
+                            }
+                            .background(
+                                color = if (isSkipFocused) CrunchyrollOrange else SurfaceDark,
+                                shape = RoundedCornerShape(8.dp)
+                            )
                             .border(
                                 width = 2.dp,
                                 color = if (isSkipFocused) Color.White else Color.Transparent,
                                 shape = RoundedCornerShape(8.dp)
                             )
+                            .padding(horizontal = 16.dp),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.FastForward,
-                            contentDescription = "Skip Scene",
-                            tint = Color.White,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = if (hasIntroNow) "Skip Intro" else "Skip Outro",
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.FastForward,
+                                contentDescription = "Skip Scene",
+                                tint = Color.White,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = if (hasIntroNow) "Skip Intro" else "Skip Outro",
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                        }
                     }
                 }
             }
