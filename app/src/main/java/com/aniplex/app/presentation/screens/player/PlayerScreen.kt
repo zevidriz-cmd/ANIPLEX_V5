@@ -3985,23 +3985,28 @@ fun SettingsButtonGroup(
                     .onFocusChanged { isFocused = it.isFocused }
                     .focusable()
                     .onPreviewKeyEvent { event ->
-                        if (event.type == KeyEventType.KeyDown) {
-                            when (event.key) {
-                                Key.DirectionUp -> {
-                                    if (onUpPressed != null) {
-                                        onUpPressed()
-                                        true
-                                    } else false
+                        when (event.key) {
+                            Key.DirectionCenter, Key.Enter -> {
+                                // Fire selection on KeyUp to avoid long-press requirement
+                                if (event.type == KeyEventType.KeyUp) {
+                                    onItemSelected(index)
                                 }
-                                Key.DirectionDown -> {
-                                    if (onDownPressed != null) {
-                                        onDownPressed()
-                                        true
-                                    } else false
-                                }
-                                else -> false
+                                true // Consume both KeyDown and KeyUp
                             }
-                        } else false
+                            Key.DirectionUp -> {
+                                if (event.type == KeyEventType.KeyDown && onUpPressed != null) {
+                                    onUpPressed()
+                                    true
+                                } else event.type == KeyEventType.KeyDown && onUpPressed != null
+                            }
+                            Key.DirectionDown -> {
+                                if (event.type == KeyEventType.KeyDown && onDownPressed != null) {
+                                    onDownPressed()
+                                    true
+                                } else event.type == KeyEventType.KeyDown && onDownPressed != null
+                            }
+                            else -> false
+                        }
                     }
                     .clickable { onItemSelected(index) },
                 contentAlignment = Alignment.Center

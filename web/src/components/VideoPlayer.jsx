@@ -1,20 +1,20 @@
 import React, { useEffect, useRef, useState } from "react";
 import Hls from "hls.js";
-import { 
-  Play, Pause, RotateCcw, RotateCw, Volume2, VolumeX, 
+import {
+  Play, Pause, RotateCcw, RotateCw, Volume2, VolumeX,
   Maximize, Minimize, Settings, Subtitles, SkipForward,
   Lock, LockOpen, ArrowLeft, Loader2, X, PictureInPicture2
 } from "lucide-react";
 import { useProfile } from "../context/ProfileContext";
 
-export default function VideoPlayer({ 
-  src, 
-  tracks = [], 
-  intro, 
-  outro, 
-  initialTime = 0, 
-  onProgress, 
-  onEnded, 
+export default function VideoPlayer({
+  src,
+  tracks = [],
+  intro,
+  outro,
+  initialTime = 0,
+  onProgress,
+  onEnded,
   embedUrl,
   fallbackNotice,
   loadingStatus,
@@ -72,7 +72,7 @@ export default function VideoPlayer({
   const [isLongPressSpeedUp, setIsLongPressSpeedUp] = useState(false);
   const longPressTimeoutRef = useRef(null);
   const wasLongPressActiveRef = useRef(false);
-  
+
   const [showSkipIntro, setShowSkipIntro] = useState(false);
   const [showSkipOutro, setShowSkipOutro] = useState(false);
   const [hlsQualities, setHlsQualities] = useState([]);
@@ -203,7 +203,7 @@ export default function VideoPlayer({
     if (tracks && tracks.length > 0) {
       const englishIndex = tracks.findIndex(t => t.label?.toLowerCase() === "english");
       const defaultIndex = tracks.findIndex(t => t.default || t.isDefault);
-      
+
       if (englishIndex !== -1) {
         setActiveTrackIndex(englishIndex);
       } else if (defaultIndex !== -1) {
@@ -228,7 +228,7 @@ export default function VideoPlayer({
       for (let i = 0; i < textTracks.length; i++) {
         const t = textTracks[i];
         const isMatch = selectedTrack && (t.label === selectedTrack.label || (textTracks.length === tracks.length && i === activeTrackIndex));
-        
+
         if (isMatch) {
           t.mode = "hidden";
         } else {
@@ -238,7 +238,7 @@ export default function VideoPlayer({
     };
 
     updateTrackModes();
-    
+
     const handleTrackAdded = () => {
       updateTrackModes();
     };
@@ -482,14 +482,14 @@ export default function VideoPlayer({
         // Tapped!
         // Check if the user tapped on a button/interactive control
         if (
-          e.target.closest(".control-btn") || 
-          e.target.closest(".player-back-btn") || 
-          e.target.closest(".progress-scrubber") || 
+          e.target.closest(".control-btn") ||
+          e.target.closest(".player-back-btn") ||
+          e.target.closest(".progress-scrubber") ||
           e.target.closest(".timeline-container") ||
           e.target.closest(".timeline-input") ||
           e.target.closest(".volume-slider") ||
-          e.target.closest(".settings-panel") || 
-          e.target.closest(".skip-time-overlay") || 
+          e.target.closest(".settings-panel") ||
+          e.target.closest(".skip-time-overlay") ||
           e.target.closest(".unlock-btn") ||
           e.target.closest(".up-next-overlay")
         ) {
@@ -514,14 +514,14 @@ export default function VideoPlayer({
   const handlePlayerMouseDown = (e) => {
     if (e.button !== 0) return; // only left click
     if (
-      e.target.closest(".control-btn") || 
-      e.target.closest(".player-back-btn") || 
-      e.target.closest(".progress-scrubber") || 
+      e.target.closest(".control-btn") ||
+      e.target.closest(".player-back-btn") ||
+      e.target.closest(".progress-scrubber") ||
       e.target.closest(".timeline-container") ||
       e.target.closest(".timeline-input") ||
       e.target.closest(".volume-slider") ||
-      e.target.closest(".settings-panel") || 
-      e.target.closest(".skip-time-overlay") || 
+      e.target.closest(".settings-panel") ||
+      e.target.closest(".skip-time-overlay") ||
       e.target.closest(".unlock-btn") ||
       e.target.closest(".up-next-overlay")
     ) {
@@ -565,14 +565,14 @@ export default function VideoPlayer({
     }
 
     if (
-      e.target.closest(".control-btn") || 
-      e.target.closest(".player-back-btn") || 
-      e.target.closest(".progress-scrubber") || 
+      e.target.closest(".control-btn") ||
+      e.target.closest(".player-back-btn") ||
+      e.target.closest(".progress-scrubber") ||
       e.target.closest(".timeline-container") ||
       e.target.closest(".timeline-input") ||
       e.target.closest(".volume-slider") ||
-      e.target.closest(".settings-panel") || 
-      e.target.closest(".skip-time-overlay") || 
+      e.target.closest(".settings-panel") ||
+      e.target.closest(".skip-time-overlay") ||
       e.target.closest(".unlock-btn") ||
       e.target.closest(".up-next-overlay")
     ) {
@@ -711,7 +711,7 @@ export default function VideoPlayer({
           bitrate: level.bitrate
         }));
         setHlsQualities(qualities);
-        
+
         // Quality cap settings integration
         const qualityCap = localStorage.getItem("anistream_quality_cap") || "Auto";
         if (qualityCap !== "Auto") {
@@ -731,12 +731,12 @@ export default function VideoPlayer({
             }
           }
         }
-        
+
         // Restore initial saved progress if provided
         if (initialTime > 0) {
           video.currentTime = initialTime / 1000; // convert ms to seconds
         }
-        
+
         // Auto play on manifest parse
         video.play().catch(e => console.log("Auto-play blocked by browser. Ready."));
       });
@@ -867,7 +867,7 @@ export default function VideoPlayer({
     if (onProgress && duration > 0) {
       const curMs = currentTime * 1000;
       const durMs = duration * 1000;
-      
+
       // Save every 10 seconds (10000ms)
       if (Math.abs(curMs - lastSavedTimeRef.current) >= 10000) {
         onProgress(Math.floor(curMs), Math.floor(durMs));
@@ -896,7 +896,7 @@ export default function VideoPlayer({
   // Autoplay countdown handler
   useEffect(() => {
     if (!nextEpisode || upNextDismissed || duration === 0) return;
-    
+
     const timeRemaining = duration - currentTime;
     if (timeRemaining <= 0.8 && timeRemaining > 0) {
       if (onNext) onNext();
@@ -920,11 +920,17 @@ export default function VideoPlayer({
   };
 
   const handleRewind = () => {
-    if (videoRef.current) videoRef.current.currentTime -= 10;
+    const video = videoRef.current;
+    if (video && !isNaN(video.duration) && video.duration > 0) {
+      video.currentTime = Math.max(0, video.currentTime - 10);
+    }
   };
 
   const handleForward = () => {
-    if (videoRef.current) videoRef.current.currentTime += 10;
+    const video = videoRef.current;
+    if (video && !isNaN(video.duration) && video.duration > 0) {
+      video.currentTime = Math.min(video.duration, video.currentTime + 10);
+    }
   };
 
   const handleVolumeChange = (e) => {
@@ -955,7 +961,7 @@ export default function VideoPlayer({
     const handleFsChange = () => {
       const isFs = !!document.fullscreenElement;
       setIsFullscreen(isFs);
-      
+
       if (!isFs) {
         setIsRotatedFallback(false);
         if (screen.orientation && screen.orientation.lock) {
@@ -966,7 +972,7 @@ export default function VideoPlayer({
         }
         return;
       }
-      
+
       // We are in fullscreen
       if (screen.orientation && screen.orientation.lock) {
         screen.orientation.lock("landscape")
@@ -986,7 +992,7 @@ export default function VideoPlayer({
         }
       }
     };
-    
+
     document.addEventListener("fullscreenchange", handleFsChange);
     return () => {
       document.removeEventListener("fullscreenchange", handleFsChange);
@@ -1155,14 +1161,18 @@ export default function VideoPlayer({
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [volume, isMuted, isLocked, isFullscreen, isPlaying, duration, currentTime, showSettings]);
+  }, [volume, isMuted, isLocked, isFullscreen, isPlaying, duration, currentTime, showSettings, showControls, onBack]);
 
   const handleProgressScrub = (e) => {
     const video = videoRef.current;
-    if (!video) return;
-    const seekTime = (parseFloat(e.target.value) / 100) * duration;
-    video.currentTime = seekTime;
-    setCurrentTime(seekTime);
+    if (!video || isNaN(duration) || duration <= 0) return;
+    const val = parseFloat(e.target.value);
+    if (isNaN(val)) return;
+    const seekTime = (val / 100) * duration;
+    if (!isNaN(seekTime)) {
+      video.currentTime = seekTime;
+      setCurrentTime(seekTime);
+    }
   };
 
   const changePlaybackSpeed = (speed) => {
@@ -1322,9 +1332,9 @@ export default function VideoPlayer({
             </div>
           )}
 
-          <iframe 
-            src={`${cleanedEmbedUrl}${separator}autoPlay=1`} 
-            title="Episode Stream Player" 
+          <iframe
+            src={`${cleanedEmbedUrl}${separator}autoPlay=1`}
+            title="Episode Stream Player"
             allowFullScreen
             allow="autoplay; fullscreen; picture-in-picture"
             className="iframe-player-frame"
@@ -1585,8 +1595,8 @@ export default function VideoPlayer({
   };
 
   return (
-    <div 
-      className={`player-container ${isFullscreen ? "fullscreen" : ""} ${isRotatedFallback ? "fullscreen-portrait-rotated" : ""}`} 
+    <div
+      className={`player-container ${isFullscreen ? "fullscreen" : ""} ${isRotatedFallback ? "fullscreen-portrait-rotated" : ""}`}
       ref={containerRef}
       onMouseMove={showControlsAndResetTimeout}
       onMouseDown={handlePlayerMouseDown}
@@ -1602,12 +1612,12 @@ export default function VideoPlayer({
       onClick={handleContainerClick}
       onDoubleClick={(e) => {
         if (
-          e.target.closest(".control-btn") || 
-          e.target.closest(".player-back-btn") || 
-          e.target.closest(".progress-scrubber") || 
+          e.target.closest(".control-btn") ||
+          e.target.closest(".player-back-btn") ||
+          e.target.closest(".progress-scrubber") ||
           e.target.closest(".volume-slider") ||
-          e.target.closest(".settings-panel") || 
-          e.target.closest(".skip-time-overlay") || 
+          e.target.closest(".settings-panel") ||
+          e.target.closest(".skip-time-overlay") ||
           e.target.closest(".locked-state-overlay")
         ) {
           return;
@@ -1627,9 +1637,9 @@ export default function VideoPlayer({
         </div>
       )}
       {/* Brightness Emulation Overlay */}
-      <div 
-        className="brightness-emulation-overlay" 
-        style={{ 
+      <div
+        className="brightness-emulation-overlay"
+        style={{
           opacity: 1 - brightness,
           backgroundColor: "black",
           position: "absolute",
@@ -1671,8 +1681,8 @@ export default function VideoPlayer({
 
       {/* Screen Lock Mobile Overlay */}
       {isLocked && (
-        <div 
-          className="locked-state-overlay" 
+        <div
+          className="locked-state-overlay"
           onClick={() => {
             setShowControls(prev => {
               const next = !prev;
@@ -1684,7 +1694,7 @@ export default function VideoPlayer({
           }}
         >
           {showControls && (
-            <button 
+            <button
               className="unlock-btn flex-center"
               onClick={(e) => {
                 e.stopPropagation();
@@ -1698,7 +1708,7 @@ export default function VideoPlayer({
         </div>
       )}
 
-      <video 
+      <video
         ref={videoRef}
         className="video-element"
         style={{
@@ -1762,7 +1772,7 @@ export default function VideoPlayer({
         crossOrigin="anonymous"
       >
         {tracks.map((track, i) => (
-          <track 
+          <track
             key={i}
             src={track.file}
             kind={track.kind || "subtitles"}
@@ -1775,7 +1785,7 @@ export default function VideoPlayer({
 
       {/* Custom DOM Subtitle Overlay */}
       {activeTrackIndex !== -1 && currentCuesText && (
-        <div 
+        <div
           className="custom-subtitle-overlay"
           style={subtitleOverlayStyles}
           dangerouslySetInnerHTML={{ __html: cleanWebVttText(currentCuesText).replace(/\n/g, "<br/>") }}
@@ -1784,8 +1794,8 @@ export default function VideoPlayer({
 
       {/* Tap/Click capturing overlay when controls are hidden */}
       {!showControls && (
-        <div 
-          className="player-click-overlay" 
+        <div
+          className="player-click-overlay"
           style={{
             position: "absolute",
             inset: 0,
@@ -1811,10 +1821,10 @@ export default function VideoPlayer({
       )}
 
       {/* Up Next Autoplay Overlay */}
-      {nextEpisode && !upNextDismissed && duration > 0 && (duration - currentTime <= 15) && (
+      {nextEpisode && !upNextDismissed && !isNaN(duration) && duration > 0 && !isNaN(currentTime) && (duration - currentTime <= 15) && (
         <div className="up-next-overlay" onClick={(e) => e.stopPropagation()}>
-          <button 
-            className="up-next-close-btn" 
+          <button
+            className="up-next-close-btn"
             onClick={(e) => {
               e.stopPropagation();
               setUpNextDismissed(true);
@@ -1824,13 +1834,13 @@ export default function VideoPlayer({
           >
             <X size={14} />
           </button>
-          
+
           <div className="up-next-content">
             <span className="up-next-label">Up Next</span>
             <div className="up-next-row">
               <div className="up-next-poster-wrapper">
                 <img src={nextEpisode.poster} alt={nextEpisode.title} className="up-next-poster" />
-                <button 
+                <button
                   className="up-next-play-icon-btn flex-center"
                   onClick={(e) => {
                     e.stopPropagation();
@@ -1853,7 +1863,7 @@ export default function VideoPlayer({
                 </div>
               </div>
             </div>
-            <button 
+            <button
               className="btn btn-primary up-next-btn-play"
               onClick={(e) => {
                 e.stopPropagation();
@@ -1868,7 +1878,7 @@ export default function VideoPlayer({
       )}
 
       {/* Custom Controls UI */}
-      <div 
+      <div
         className={`controls-wrapper ${showControls ? "visible" : "hidden"}`}
         onFocusCapture={() => {
           setShowControls(true);
@@ -1894,9 +1904,9 @@ export default function VideoPlayer({
             <button className="control-btn center-btn" onClick={handleRewind}>
               <RotateCcw size={28} />
             </button>
-            <button 
+            <button
               ref={playPauseBtnRef}
-              className="control-btn center-btn play-pause-btn" 
+              className="control-btn center-btn play-pause-btn"
               onClick={handlePlayPause}
             >
               {isPlaying ? <Pause size={38} fill="white" /> : <Play size={38} fill="white" />}
@@ -1913,19 +1923,19 @@ export default function VideoPlayer({
           <div className="scrubber-wrapper">
             <div className="timeline-container">
               <div className="timeline-track">
-                <div 
-                  className="timeline-buffered" 
+                <div
+                  className="timeline-buffered"
                   style={{ width: `${duration ? (bufferedEnd / duration) * 100 : 0}%` }}
                 />
-                <div 
-                  className="timeline-played" 
+                <div
+                  className="timeline-played"
                   style={{ width: `${duration ? (currentTime / duration) * 100 : 0}%` }}
                 />
               </div>
-              <input 
-                type="range" 
-                min="0" 
-                max="100" 
+              <input
+                type="range"
+                min="0"
+                max="100"
                 step="0.1"
                 value={duration ? (currentTime / duration) * 100 : 0}
                 onChange={handleProgressScrub}
@@ -1945,10 +1955,10 @@ export default function VideoPlayer({
               <button className="control-btn" onClick={handleMuteToggle}>
                 {isMuted ? <VolumeX size={20} /> : <Volume2 size={20} />}
               </button>
-              <input 
-                type="range" 
-                min="0" 
-                max="1" 
+              <input
+                type="range"
+                min="0"
+                max="1"
                 step="0.05"
                 value={isMuted ? 0 : volume}
                 onChange={handleVolumeChange}
@@ -1958,8 +1968,8 @@ export default function VideoPlayer({
 
             <div className="right-controls">
               {/* Screen Fit Quick Toggle */}
-              <button 
-                className="control-btn" 
+              <button
+                className="control-btn"
                 onClick={(e) => {
                   e.stopPropagation();
                   const nextMode = aspectRatio === "fit" ? "stretch" : aspectRatio === "stretch" ? "zoom" : "fit";
@@ -1981,7 +1991,7 @@ export default function VideoPlayer({
 
               {/* Settings Trigger */}
               <div className="settings-menu-wrapper">
-                <button 
+                <button
                   ref={settingsBtnRef}
                   className={`control-btn ${showSettings ? "active" : ""}`}
                   onClick={(e) => {
@@ -2003,8 +2013,8 @@ export default function VideoPlayer({
                       <h4>Playback Speed</h4>
                       <div className="settings-options">
                         {[0.5, 1, 1.25, 1.5, 2].map(speed => (
-                          <button 
-                            key={speed} 
+                          <button
+                            key={speed}
                             onClick={() => changePlaybackSpeed(speed)}
                             className={playbackSpeed === speed ? "active" : ""}
                           >
@@ -2021,8 +2031,8 @@ export default function VideoPlayer({
                           { id: "stretch", label: "Stretch" },
                           { id: "zoom", label: "Zoom" }
                         ].map(mode => (
-                          <button 
-                            key={mode.id} 
+                          <button
+                            key={mode.id}
                             onClick={() => {
                               setAspectRatio(mode.id);
                               const labels = { fit: "Fit", stretch: "Stretch", zoom: "Zoom" };
@@ -2073,7 +2083,7 @@ export default function VideoPlayer({
                       <div className="settings-section">
                         <h4>Subtitles</h4>
                         <div className="settings-options scrollable">
-                          <button 
+                          <button
                             onClick={() => {
                               setActiveTrackIndex(-1);
                               localStorage.setItem("anistream_subtitles_enabled", "false");
@@ -2085,8 +2095,8 @@ export default function VideoPlayer({
                             Off
                           </button>
                           {safeTracks.map((track, idx) => (
-                            <button 
-                              key={idx} 
+                            <button
+                              key={idx}
                               onClick={() => {
                                 setActiveTrackIndex(idx);
                                 localStorage.setItem("anistream_subtitles_enabled", "true");
@@ -2105,15 +2115,15 @@ export default function VideoPlayer({
                       <div className="settings-section">
                         <h4>Quality</h4>
                         <div className="settings-options scrollable">
-                          <button 
-                             onClick={() => changeQuality(-1)}
-                             className={currentQuality === -1 ? "active" : ""}
-                           >
-                             {currentQuality === -1 && activeQualityHeight ? `Auto (${activeQualityHeight}p)` : "Auto"}
-                           </button>
+                          <button
+                            onClick={() => changeQuality(-1)}
+                            className={currentQuality === -1 ? "active" : ""}
+                          >
+                            {currentQuality === -1 && activeQualityHeight ? `Auto (${activeQualityHeight}p)` : "Auto"}
+                          </button>
                           {safeQualities.map(q => (
-                            <button 
-                              key={q.index} 
+                            <button
+                              key={q.index}
                               onClick={() => changeQuality(q.index)}
                               className={currentQuality === q.index ? "active" : ""}
                             >
@@ -2129,8 +2139,8 @@ export default function VideoPlayer({
 
               {/* Lock Controls Button */}
               {!isLocked && (
-                <button 
-                  className="control-btn" 
+                <button
+                  className="control-btn"
                   onClick={(e) => {
                     e.stopPropagation();
                     setIsLocked(true);
@@ -2141,10 +2151,10 @@ export default function VideoPlayer({
                   <Lock size={20} />
                 </button>
               )}
- 
+
               {/* Picture-in-Picture */}
               {document.pictureInPictureEnabled && (
-                <button 
+                <button
                   className={`control-btn ${isPiP ? "active" : ""}`}
                   onClick={(e) => { e.stopPropagation(); togglePiP(); }}
                   title="Picture-in-Picture (P)"
@@ -2532,11 +2542,10 @@ export default function VideoPlayer({
 
         /* Subtitle styles custom overrides using cue selector */
         video::cue {
-          background-color: ${
-            subOpacity === 0
-              ? "transparent"
-              : `rgba(0, 0, 0, ${subOpacity / 100})`
-          } !important;
+          background-color: ${subOpacity === 0
+          ? "transparent"
+          : `rgba(0, 0, 0, ${subOpacity / 100})`
+        } !important;
           color: ${subColor} !important;
           text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9) !important;
           font-family: var(--font-family) !important;

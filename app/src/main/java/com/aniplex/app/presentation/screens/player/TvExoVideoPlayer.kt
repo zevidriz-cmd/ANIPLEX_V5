@@ -62,6 +62,7 @@ fun TvExoVideoPlayer(
     val playFocusRequester = remember { FocusRequester() }
     val rootFocusRequester = remember { FocusRequester() }
     val skipFocusRequester = remember { FocusRequester() }
+    val timelineFocusRequester = remember { FocusRequester() }
 
     // Auto-hide controls after 5 seconds of inactivity
     LaunchedEffect(isControlsVisible, controlsTimeoutKey) {
@@ -83,15 +84,11 @@ fun TvExoVideoPlayer(
                 } else {
                     playFocusRequester.requestFocus()
                 }
-            } catch (e: Exception) {
-                // Ignore focus request errors
-            }
+            } catch (_: Exception) {}
         } else {
             try {
                 rootFocusRequester.requestFocus()
-            } catch (e: Exception) {
-                // Ignore focus request errors
-            }
+            } catch (_: Exception) {}
         }
     }
 
@@ -105,13 +102,27 @@ fun TvExoVideoPlayer(
             .onFocusChanged { isRootFocused = it.isFocused }
             .focusable()
             .onPreviewKeyEvent { event ->
-                if (state.showSettings) return@onPreviewKeyEvent false
-                if (event.key == Key.Back) {
-                    if (event.type == KeyEventType.KeyDown) {
-                        callbacks.onBackClick()
+                // === CHANGE 1: Context-Aware Back/Exit Key Hierarchy ===
+                if (event.key == Key.Back && event.type == KeyEventType.KeyDown) {
+                    when {
+                        state.showSettings -> {
+                            // Tier A: Settings open → close settings only
+                            callbacks.onSettingsBackClick()
+                        }
+                        isControlsVisible -> {
+                            // Tier B: Controls visible → hide controls only
+                            isControlsVisible = false
+                        }
+                        else -> {
+                            // Tier C: Nothing visible → exit player
+                            callbacks.onBackClick()
+                        }
                     }
-                    return@onPreviewKeyEvent true
+                    return@onPreviewKeyEvent true // Always consume Back
                 }
+                // Let settings panel handle its own key events
+                if (state.showSettings) return@onPreviewKeyEvent false
+
                 if (event.type == KeyEventType.KeyDown) {
                     controlsTimeoutKey++
                     val wasHidden = !isControlsVisible
@@ -129,9 +140,12 @@ fun TvExoVideoPlayer(
                                 }
                                 Key.DirectionRight -> {
                                     exoPlayer?.let {
-                                        val newPos = (it.currentPosition + 10000).coerceAtMost(it.duration)
-                                        it.seekTo(newPos)
-                                        callbacks.onPositionChanged(newPos)
+                                        val duration = it.duration
+                                        if (duration > 0L) {
+                                            val newPos = (it.currentPosition + 10000).coerceAtMost(duration)
+                                            it.seekTo(newPos)
+                                            callbacks.onPositionChanged(newPos)
+                                        }
                                     }
                                 }
                                 Key.DirectionCenter, Key.Spacebar, Key.Enter -> {
@@ -142,11 +156,7 @@ fun TvExoVideoPlayer(
                                             callbacks.onPositionChanged(targetPos)
                                         }
                                     } else {
-                                        if (state.isPlaying) {
-                                            exoPlayer?.pause()
-                                        } else {
-                                            exoPlayer?.play()
-                                        }
+                                        if (state.isPlaying) exoPlayer?.pause() else exoPlayer?.play()
                                     }
                                 }
                             }
@@ -336,18 +346,28 @@ fun TvExoVideoPlayer(
                             .align(Alignment.TopStart),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        // === CHANGE 2: Back Button — Box replaces IconButton ===
                         var isBackFocused by remember { mutableStateOf(false) }
-                        IconButton(
-                            onClick = { callbacks.onBackClick() },
+                        Box(
                             modifier = Modifier
+                                .size(48.dp)
                                 .onFocusChanged { isBackFocused = it.isFocused }
                                 .focusable()
+                                .onPreviewKeyEvent { event ->
+                                    if (event.key == Key.DirectionCenter || event.key == Key.Enter) {
+                                        if (event.type == KeyEventType.KeyUp) {
+                                            callbacks.onBackClick()
+                                        }
+                                        true // Consume both KeyDown and KeyUp
+                                    } else false
+                                }
                                 .background(if (isBackFocused) CrunchyrollOrange else Color.Transparent, CircleShape)
                                 .border(
                                     width = 2.dp,
                                     color = if (isBackFocused) Color.White else Color.Transparent,
                                     shape = CircleShape
-                                )
+                                ),
+                            contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 imageVector = Icons.Default.ArrowBack,
@@ -370,52 +390,79 @@ fun TvExoVideoPlayer(
                         horizontalArrangement = Arrangement.spacedBy(24.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        // Rewind
+                        // === Rewind Button — Box replaces IconButton ===
                         var isRewindFocused by remember { mutableStateOf(false) }
-                        IconButton(
-                            onClick = {
-                                exoPlayer?.let {
-                                    val newPos = (it.currentPosition - 10000).coerceAtLeast(0)
-                                    it.seekTo(newPos)
-                                }
-                            },
+                        Box(
                             modifier = Modifier
                                 .size(56.dp)
                                 .onFocusChanged { isRewindFocused = it.isFocused }
                                 .focusable()
+                                .onPreviewKeyEvent { event ->
+                                    when (event.key) {
+                                        Key.DirectionCenter, Key.Enter -> {
+                                            if (event.type == KeyEventType.KeyUp) {
+                                                exoPlayer?.let {
+                                                    val newPos = (it.currentPosition - 10000).coerceAtLeast(0)
+                                                    it.seekTo(newPos)
+                                                    callbacks.onPositionChanged(newPos)
+                                                }
+                                            }
+                                            true
+                                        }
+                                        Key.DirectionDown -> {
+                                            if (event.type == KeyEventType.KeyDown) {
+                                                try { timelineFocusRequester.requestFocus() } catch (_: Exception) {}
+                                            }
+                                            true
+                                        }
+                                        else -> false
+                                    }
+                                }
                                 .background(if (isRewindFocused) CrunchyrollOrange else SurfaceDark, CircleShape)
                                 .border(
                                     width = 2.dp,
                                     color = if (isRewindFocused) Color.White else Color.Transparent,
                                     shape = CircleShape
-                                )
+                                ),
+                            contentAlignment = Alignment.Center
                         ) {
                             Icon(Icons.Default.FastRewind, contentDescription = "Rewind 10s", tint = Color.White)
                         }
 
-                        // Play/Pause
+                        // === Play/Pause Button — Box replaces IconButton ===
                         var isPlayFocused by remember { mutableStateOf(false) }
                         val playScale by animateFloatAsState(if (isPlayFocused) 1.1f else 1.0f)
-                        IconButton(
-                            onClick = {
-                                if (state.isPlaying) {
-                                    exoPlayer?.pause()
-                                } else {
-                                    exoPlayer?.play()
-                                }
-                            },
+                        Box(
                             modifier = Modifier
                                 .size(72.dp)
                                 .scale(playScale)
                                 .onFocusChanged { isPlayFocused = it.isFocused }
                                 .focusRequester(playFocusRequester)
                                 .focusable()
+                                .onPreviewKeyEvent { event ->
+                                    when (event.key) {
+                                        Key.DirectionCenter, Key.Enter, Key.Spacebar -> {
+                                            if (event.type == KeyEventType.KeyUp) {
+                                                if (state.isPlaying) exoPlayer?.pause() else exoPlayer?.play()
+                                            }
+                                            true
+                                        }
+                                        Key.DirectionDown -> {
+                                            if (event.type == KeyEventType.KeyDown) {
+                                                try { timelineFocusRequester.requestFocus() } catch (_: Exception) {}
+                                            }
+                                            true
+                                        }
+                                        else -> false
+                                    }
+                                }
                                 .background(if (isPlayFocused) CrunchyrollOrange else SurfaceDark, CircleShape)
                                 .border(
                                     width = 3.dp,
                                     color = if (isPlayFocused) Color.White else Color.Transparent,
                                     shape = CircleShape
-                                )
+                                ),
+                            contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 imageVector = if (state.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
@@ -425,25 +472,44 @@ fun TvExoVideoPlayer(
                             )
                         }
 
-                        // Fast Forward
+                        // === Fast Forward Button — Box replaces IconButton ===
                         var isForwardFocused by remember { mutableStateOf(false) }
-                        IconButton(
-                            onClick = {
-                                exoPlayer?.let {
-                                    val newPos = (it.currentPosition + 10000).coerceAtMost(it.duration)
-                                    it.seekTo(newPos)
-                                }
-                            },
+                        Box(
                             modifier = Modifier
                                 .size(56.dp)
                                 .onFocusChanged { isForwardFocused = it.isFocused }
                                 .focusable()
+                                .onPreviewKeyEvent { event ->
+                                    when (event.key) {
+                                        Key.DirectionCenter, Key.Enter -> {
+                                            if (event.type == KeyEventType.KeyUp) {
+                                                exoPlayer?.let {
+                                                    val dur = it.duration
+                                                    if (dur > 0L) {
+                                                        val newPos = (it.currentPosition + 10000).coerceAtMost(dur)
+                                                        it.seekTo(newPos)
+                                                        callbacks.onPositionChanged(newPos)
+                                                    }
+                                                }
+                                            }
+                                            true
+                                        }
+                                        Key.DirectionDown -> {
+                                            if (event.type == KeyEventType.KeyDown) {
+                                                try { timelineFocusRequester.requestFocus() } catch (_: Exception) {}
+                                            }
+                                            true
+                                        }
+                                        else -> false
+                                    }
+                                }
                                 .background(if (isForwardFocused) CrunchyrollOrange else SurfaceDark, CircleShape)
                                 .border(
                                     width = 2.dp,
                                     color = if (isForwardFocused) Color.White else Color.Transparent,
                                     shape = CircleShape
-                                )
+                                ),
+                            contentAlignment = Alignment.Center
                         ) {
                             Icon(Icons.Default.FastForward, contentDescription = "Forward 10s", tint = Color.White)
                         }
@@ -460,19 +526,60 @@ fun TvExoVideoPlayer(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            // Progress bar container with Segment Ticks
+                            // === CHANGE 3: Focusable Timeline Scrubber ===
                             val progress = if (state.durationMs > 0) state.currentPositionMs.toFloat() / state.durationMs else 0f
+                            var isTimelineFocused by remember { mutableStateOf(false) }
                             Box(
                                 modifier = Modifier
                                     .weight(1f)
-                                    .height(14.dp),
+                                    .height(if (isTimelineFocused) 20.dp else 14.dp)
+                                    .focusRequester(timelineFocusRequester)
+                                    .onFocusChanged { isTimelineFocused = it.isFocused }
+                                    .focusable()
+                                    .onPreviewKeyEvent { event ->
+                                        if (event.type == KeyEventType.KeyDown) {
+                                            when (event.key) {
+                                                Key.DirectionLeft -> {
+                                                    exoPlayer?.let {
+                                                        val newPos = (it.currentPosition - 10000).coerceAtLeast(0)
+                                                        it.seekTo(newPos)
+                                                        callbacks.onPositionChanged(newPos)
+                                                        controlsTimeoutKey++
+                                                    }
+                                                    true
+                                                }
+                                                Key.DirectionRight -> {
+                                                    exoPlayer?.let {
+                                                        val dur = it.duration
+                                                        if (dur > 0L) {
+                                                            val newPos = (it.currentPosition + 10000).coerceAtMost(dur)
+                                                            it.seekTo(newPos)
+                                                            callbacks.onPositionChanged(newPos)
+                                                            controlsTimeoutKey++
+                                                        }
+                                                    }
+                                                    true
+                                                }
+                                                Key.DirectionUp -> {
+                                                    try { playFocusRequester.requestFocus() } catch (_: Exception) {}
+                                                    true
+                                                }
+                                                else -> false
+                                            }
+                                        } else false
+                                    }
+                                    .border(
+                                        width = if (isTimelineFocused) 2.dp else 0.dp,
+                                        color = if (isTimelineFocused) Color.White else Color.Transparent,
+                                        shape = RoundedCornerShape(6.dp)
+                                    ),
                                 contentAlignment = Alignment.CenterStart
                             ) {
                                 LinearProgressIndicator(
                                     progress = { progress },
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .height(8.dp)
+                                        .height(if (isTimelineFocused) 10.dp else 8.dp)
                                         .clip(RoundedCornerShape(4.dp)),
                                     color = CrunchyrollOrange,
                                     trackColor = Color.Gray
@@ -526,19 +633,28 @@ fun TvExoVideoPlayer(
                             }
                             Spacer(modifier = Modifier.width(16.dp))
 
-                            // Settings Button
+                            // === Settings Button — Box replaces IconButton ===
                             var isSettingsFocused by remember { mutableStateOf(false) }
-                            IconButton(
-                                onClick = { callbacks.onSettingsClick() },
+                            Box(
                                 modifier = Modifier
+                                    .size(48.dp)
                                     .onFocusChanged { isSettingsFocused = it.isFocused }
                                     .focusable()
+                                    .onPreviewKeyEvent { event ->
+                                        if (event.key == Key.DirectionCenter || event.key == Key.Enter) {
+                                            if (event.type == KeyEventType.KeyUp) {
+                                                callbacks.onSettingsClick()
+                                            }
+                                            true
+                                        } else false
+                                    }
                                     .background(if (isSettingsFocused) CrunchyrollOrange else Color.Transparent, CircleShape)
                                     .border(
                                         width = 2.5.dp,
                                         color = if (isSettingsFocused) Color.White else Color.Transparent,
                                         shape = CircleShape
-                                    )
+                                    ),
+                                contentAlignment = Alignment.Center
                             ) {
                                 Icon(Icons.Default.Settings, contentDescription = "Settings", tint = Color.White)
                             }
