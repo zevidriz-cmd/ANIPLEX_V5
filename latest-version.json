@@ -1,6 +1,6 @@
 {
-  "versionCode": 5,
-  "versionName": "1.2.2",
+  "versionCode": 6,
+  "versionName": "1.2.3",
   "downloadUrl": "https://raw.githubusercontent.com/zevidriz-cmd/aniplex-releases/main/app-debug.apk",
   "changelog": "• Fixed D-Pad vertical focus traps on the TV Detail Screen\n• Intercepted hardware Back/Exit keys inside the media player\n• Resolved settings menu OK/Select key execution issues\n• Fixed double-click wakeup bugs on playback controller overlays"
 }
