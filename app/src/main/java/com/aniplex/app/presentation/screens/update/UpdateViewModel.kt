@@ -87,7 +87,7 @@ class UpdateViewModel @Inject constructor(
 
                     val body = response.body ?: throw Exception("Empty response body")
                     val contentLength = body.contentLength()
-                    val cacheDir = context.cacheDir
+                    val cacheDir = context.externalCacheDir ?: context.cacheDir
                     val apkFile = File(cacheDir, "update.apk")
                     if (apkFile.exists()) apkFile.delete()
 

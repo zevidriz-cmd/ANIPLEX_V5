@@ -463,16 +463,20 @@ export default function PlayerPage() {
 
         // 4. Fetch AniSkip times if MAL ID is available
         if (malId && malId !== "0" && ep) {
-          const skip = await getSkipTimes(malId, ep.number);
-          if (isMounted && skip) {
-            // Map AniSkip response to intro/outro format
-            const opSegment = skip.find(s => s.result_type === "op");
-            const edSegment = skip.find(s => s.result_type === "ed");
+          try {
+            const skip = await getSkipTimes(malId, ep.number);
+            if (isMounted && skip) {
+              // Map AniSkip response to intro/outro format
+              const opSegment = skip.find(s => s.result_type === "op");
+              const edSegment = skip.find(s => s.result_type === "ed");
 
-            setSkipTimes({
-              intro: opSegment ? { start: opSegment.interval.start, end: opSegment.interval.end } : null,
-              outro: edSegment ? { start: edSegment.interval.start, end: edSegment.interval.end } : null
-            });
+              setSkipTimes({
+                intro: opSegment ? { start: opSegment.interval.start, end: opSegment.interval.end } : null,
+                outro: edSegment ? { start: edSegment.interval.start, end: edSegment.interval.end } : null
+              });
+            }
+          } catch (skipErr) {
+            console.warn("[AniSkip] Failed to fetch skip times:", skipErr);
           }
         }
 

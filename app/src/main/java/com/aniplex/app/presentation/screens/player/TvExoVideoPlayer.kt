@@ -106,6 +106,12 @@ fun TvExoVideoPlayer(
             .focusable()
             .onPreviewKeyEvent { event ->
                 if (state.showSettings) return@onPreviewKeyEvent false
+                if (event.key == Key.Back) {
+                    if (event.type == KeyEventType.KeyDown) {
+                        callbacks.onBackClick()
+                    }
+                    return@onPreviewKeyEvent true
+                }
                 if (event.type == KeyEventType.KeyDown) {
                     controlsTimeoutKey++
                     val wasHidden = !isControlsVisible
@@ -154,13 +160,7 @@ fun TvExoVideoPlayer(
                             }
                         }
                     } else {
-                        when (event.key) {
-                            Key.Back -> {
-                                isControlsVisible = false
-                                true
-                            }
-                            else -> false
-                        }
+                        false
                     }
                 } else {
                     false

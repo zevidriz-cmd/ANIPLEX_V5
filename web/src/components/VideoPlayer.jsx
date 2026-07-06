@@ -81,6 +81,12 @@ export default function VideoPlayer({
   const [audioTracks, setAudioTracks] = useState([]);
   const [currentAudioTrack, setCurrentAudioTrack] = useState(-1);
 
+  // Safe arrays to prevent settings crash on null/undefined bindings
+  const safeTracks = Array.isArray(tracks) ? tracks : [];
+  const safeQualities = Array.isArray(hlsQualities) ? hlsQualities : [];
+  const safeAudioTracks = Array.isArray(audioTracks) ? audioTracks : [];
+  const safeAudioCategories = Array.isArray(availableAudioCategories) ? availableAudioCategories : [];
+
   // Touch Swipe & Double Tap Gestures
   const touchRef = useRef({
     startX: 0,
@@ -94,7 +100,9 @@ export default function VideoPlayer({
 
   const [brightness, setBrightness] = useState(1.0);
   const [gestureHUD, setGestureHUD] = useState(null); // { type, value }
-  const [hudTimeout, setHudTimeout] = useState(null);
+  const hudTimeoutRef = useRef(null);
+  const playPauseBtnRef = useRef(null);
+  const settingsBtnRef = useRef(null);
   const [isLocked, setIsLocked] = useState(false);
 
   // Subtitle custom states
@@ -299,9 +307,8 @@ export default function VideoPlayer({
 
   const showHUD = (type, value) => {
     setGestureHUD({ type, value });
-    if (hudTimeout) clearTimeout(hudTimeout);
-    const t = setTimeout(() => setGestureHUD(null), 1000);
-    setHudTimeout(t);
+    if (hudTimeoutRef.current) clearTimeout(hudTimeoutRef.current);
+    hudTimeoutRef.current = setTimeout(() => setGestureHUD(null), 1000);
   };
 
   const handlePlayerTouchStart = (e) => {
@@ -557,21 +564,21 @@ export default function VideoPlayer({
       return;
     }
 
-    if (showControls) {
-      if (
-        e.target.closest(".control-btn") || 
-        e.target.closest(".player-back-btn") || 
-        e.target.closest(".progress-scrubber") || 
-        e.target.closest(".timeline-container") ||
-        e.target.closest(".timeline-input") ||
-        e.target.closest(".volume-slider") ||
-        e.target.closest(".settings-panel") || 
-        e.target.closest(".skip-time-overlay") || 
-        e.target.closest(".unlock-btn") ||
-        e.target.closest(".up-next-overlay")
-      ) {
-        return;
-      }
+    if (
+      e.target.closest(".control-btn") || 
+      e.target.closest(".player-back-btn") || 
+      e.target.closest(".progress-scrubber") || 
+      e.target.closest(".timeline-container") ||
+      e.target.closest(".timeline-input") ||
+      e.target.closest(".volume-slider") ||
+      e.target.closest(".settings-panel") || 
+      e.target.closest(".skip-time-overlay") || 
+      e.target.closest(".unlock-btn") ||
+      e.target.closest(".up-next-overlay")
+    ) {
+      setShowControls(true);
+      postponeControlsHide();
+      return;
     }
     if (isLocked) return;
 
@@ -609,6 +616,16 @@ export default function VideoPlayer({
       if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
     };
   }, [isPlaying]);
+
+  useEffect(() => {
+    if (showControls) {
+      const activeEl = document.activeElement;
+      const isInside = containerRef.current && containerRef.current.contains(activeEl);
+      if (!isInside && playPauseBtnRef.current) {
+        playPauseBtnRef.current.focus();
+      }
+    }
+  }, [showControls]);
 
   const startLoadingWatchdog = () => {
     if (loadingTimeoutRef.current) clearTimeout(loadingTimeoutRef.current);
@@ -859,6 +876,23 @@ export default function VideoPlayer({
     }
   }, [currentTime, duration, intro, outro]);
 
+  // Save progress on unmount to prevent losing progress
+  const progressRefs = useRef({ currentTime: 0, duration: 0, onProgress: null });
+  useEffect(() => {
+    progressRefs.current = { currentTime, duration, onProgress };
+  }, [currentTime, duration, onProgress]);
+
+  useEffect(() => {
+    return () => {
+      const { currentTime: cT, duration: d, onProgress: oP } = progressRefs.current;
+      if (oP && d > 0 && cT > 0) {
+        oP(Math.floor(cT * 1000), Math.floor(d * 1000));
+      }
+      if (hudTimeoutRef.current) clearTimeout(hudTimeoutRef.current);
+      if (longPressTimeoutRef.current) clearTimeout(longPressTimeoutRef.current);
+    };
+  }, []);
+
   // Autoplay countdown handler
   useEffect(() => {
     if (!nextEpisode || upNextDismissed || duration === 0) return;
@@ -977,8 +1011,82 @@ export default function VideoPlayer({
         return;
       }
 
+      // 1. Hardware Back/Exit Key Mapping
+      if (
+        e.key === "Escape" ||
+        e.key === "Backspace" ||
+        e.key === "BrowserBack" ||
+        e.key === "GoBack" ||
+        e.keyCode === 27 ||
+        e.keyCode === 8 ||
+        e.keyCode === 461 ||
+        e.keyCode === 10009
+      ) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (onBack) onBack();
+        return;
+      }
+
       if (isLocked) return;
 
+      // 2. Focused Button Select/Enter Key Interception (whether settings are open or not)
+      const activeEl = document.activeElement;
+      const isButton = activeEl && (activeEl.tagName === "BUTTON" || activeEl.getAttribute("role") === "button");
+      const isInsideControls = containerRef.current && containerRef.current.contains(activeEl);
+
+      if (isInsideControls && isButton) {
+        if (
+          e.key === "Enter" ||
+          e.key === "Select" ||
+          e.key === "Ok" ||
+          e.key === " " ||
+          e.key === "Spacebar" ||
+          e.keyCode === 13 ||
+          e.keyCode === 32
+        ) {
+          e.preventDefault();
+          e.stopPropagation();
+          if (!showControls) {
+            setShowControls(true);
+            postponeControlsHide();
+          }
+          activeEl.click();
+          return;
+        }
+      }
+
+      // 3. Settings Menu Key Interception (Prevent player shortcuts from interfering)
+      if (showSettings) {
+        if (
+          e.key === "Enter" ||
+          e.key === "Select" ||
+          e.key === "Ok" ||
+          e.key === " " ||
+          e.key === "Spacebar" ||
+          e.keyCode === 13 ||
+          e.keyCode === 32
+        ) {
+          const activeEl = document.activeElement;
+          if (activeEl && (activeEl.tagName === "BUTTON" || activeEl.getAttribute("role") === "button")) {
+            e.preventDefault();
+            activeEl.click();
+            return;
+          }
+        }
+        // Let Arrow keys move focus inside the settings panel naturally
+        if (
+          e.key === "ArrowUp" ||
+          e.key === "ArrowDown" ||
+          e.key === "ArrowLeft" ||
+          e.key === "ArrowRight"
+        ) {
+          showControlsAndResetTimeout(); // Keep controls visible during navigation
+          return;
+        }
+      }
+
+      // 3. Main Player Keyboard Shortcuts
       switch (e.key) {
         case " ":
         case "k":
@@ -1047,7 +1155,7 @@ export default function VideoPlayer({
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [volume, isMuted, isLocked, isFullscreen, isPlaying, duration, currentTime]);
+  }, [volume, isMuted, isLocked, isFullscreen, isPlaying, duration, currentTime, showSettings]);
 
   const handleProgressScrub = (e) => {
     const video = videoRef.current;
@@ -1760,7 +1868,13 @@ export default function VideoPlayer({
       )}
 
       {/* Custom Controls UI */}
-      <div className={`controls-wrapper ${showControls ? "visible" : "hidden"}`}>
+      <div 
+        className={`controls-wrapper ${showControls ? "visible" : "hidden"}`}
+        onFocusCapture={() => {
+          setShowControls(true);
+          postponeControlsHide();
+        }}
+      >
         {/* Top title bar */}
         <div className="player-top-bar">
           {onBack && (
@@ -1780,7 +1894,11 @@ export default function VideoPlayer({
             <button className="control-btn center-btn" onClick={handleRewind}>
               <RotateCcw size={28} />
             </button>
-            <button className="control-btn center-btn play-pause-btn" onClick={handlePlayPause}>
+            <button 
+              ref={playPauseBtnRef}
+              className="control-btn center-btn play-pause-btn" 
+              onClick={handlePlayPause}
+            >
               {isPlaying ? <Pause size={38} fill="white" /> : <Play size={38} fill="white" />}
             </button>
             <button className="control-btn center-btn" onClick={handleForward}>
@@ -1864,8 +1982,17 @@ export default function VideoPlayer({
               {/* Settings Trigger */}
               <div className="settings-menu-wrapper">
                 <button 
+                  ref={settingsBtnRef}
                   className={`control-btn ${showSettings ? "active" : ""}`}
-                  onClick={() => setShowSettings(!showSettings)}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const next = !showSettings;
+                    setShowSettings(next);
+                    if (next) {
+                      setShowControls(true);
+                      postponeControlsHide();
+                    }
+                  }}
                 >
                   <Settings size={20} />
                 </button>
@@ -1909,12 +2036,12 @@ export default function VideoPlayer({
                         ))}
                       </div>
                     </div>
-                    {(audioTracks.length > 0 || (availableAudioCategories && availableAudioCategories.length > 1)) && (
+                    {(safeAudioTracks.length > 0 || (safeAudioCategories && safeAudioCategories.length > 1)) && (
                       <div className="settings-section">
                         <h4>Audio</h4>
                         <div className="settings-options scrollable full-width">
-                          {audioTracks.length > 0 ? (
-                            audioTracks.map((track) => (
+                          {safeAudioTracks.length > 0 ? (
+                            safeAudioTracks.map((track) => (
                               <button
                                 key={track.id}
                                 onClick={() => changeAudioTrack(track.id)}
@@ -1924,7 +2051,7 @@ export default function VideoPlayer({
                               </button>
                             ))
                           ) : (
-                            availableAudioCategories.map((cat) => (
+                            safeAudioCategories.map((cat) => (
                               <button
                                 key={cat}
                                 onClick={() => {
@@ -1942,7 +2069,7 @@ export default function VideoPlayer({
                         </div>
                       </div>
                     )}
-                    {tracks.length > 0 && (
+                    {safeTracks.length > 0 && (
                       <div className="settings-section">
                         <h4>Subtitles</h4>
                         <div className="settings-options scrollable">
@@ -1957,7 +2084,7 @@ export default function VideoPlayer({
                           >
                             Off
                           </button>
-                          {tracks.map((track, idx) => (
+                          {safeTracks.map((track, idx) => (
                             <button 
                               key={idx} 
                               onClick={() => {
@@ -1974,7 +2101,7 @@ export default function VideoPlayer({
                         </div>
                       </div>
                     )}
-                    {hlsQualities.length > 0 && (
+                    {safeQualities.length > 0 && (
                       <div className="settings-section">
                         <h4>Quality</h4>
                         <div className="settings-options scrollable">
@@ -1984,7 +2111,7 @@ export default function VideoPlayer({
                            >
                              {currentQuality === -1 && activeQualityHeight ? `Auto (${activeQualityHeight}p)` : "Auto"}
                            </button>
-                          {hlsQualities.map(q => (
+                          {safeQualities.map(q => (
                             <button 
                               key={q.index} 
                               onClick={() => changeQuality(q.index)}

@@ -2,6 +2,8 @@ package com.aniplex.app.presentation.screens.detail
 
 import androidx.compose.animation.*
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -28,6 +30,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -87,6 +96,7 @@ fun TvDetailScreen(
 
     val context = LocalContext.current
     val resolutionError by viewModel.resolutionError.collectAsStateWithLifecycle()
+    val heroFocusRequester = remember { FocusRequester() }
 
     LaunchedEffect(resolvedAnikotoId) {
         resolvedAnikotoId?.let { id ->
@@ -141,13 +151,20 @@ fun TvDetailScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
+                        .animateContentSize(animationSpec = tween(durationMillis = 500, easing = FastOutSlowInEasing))
                         .padding(horizontal = 48.dp, vertical = 24.dp)
                 ) {
                     // 1. Collapsible Hero Header
                     AnimatedVisibility(
                         visible = !isHeaderCollapsed,
-                        enter = fadeIn() + slideInVertically(initialOffsetY = { -it }),
-                        exit = fadeOut() + slideOutVertically(targetOffsetY = { -it })
+                        enter = fadeIn(animationSpec = tween(500)) + slideInVertically(
+                            initialOffsetY = { -it },
+                            animationSpec = tween(500, easing = FastOutSlowInEasing)
+                        ),
+                        exit = fadeOut(animationSpec = tween(500)) + slideOutVertically(
+                            targetOffsetY = { -it },
+                            animationSpec = tween(500, easing = FastOutSlowInEasing)
+                        )
                     ) {
                         Row(
                             modifier = Modifier
@@ -213,6 +230,7 @@ fun TvDetailScreen(
                                     Card(
                                         modifier = Modifier
                                             .fillMaxWidth(0.9f)
+                                            .focusRequester(heroFocusRequester)
                                             .onFocusChanged { isHistoryFocused = it.isFocused }
                                             .clickable {
                                                 onPlayClick(
@@ -282,6 +300,7 @@ fun TvDetailScreen(
                                             shape = RoundedCornerShape(8.dp),
                                             modifier = Modifier
                                                 .fillMaxWidth(0.9f)
+                                                .focusRequester(heroFocusRequester)
                                                 .onFocusChanged { isPlayFirstFocused = it.isFocused }
                                         ) {
                                             Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
@@ -423,6 +442,21 @@ fun TvDetailScreen(
                                     onClick = { selectedTab = index },
                                     modifier = Modifier
                                         .onFocusChanged { isTabFocused = it.isFocused }
+                                        .onPreviewKeyEvent { event ->
+                                            if (event.key == Key.DirectionUp && event.type == KeyEventType.KeyDown) {
+                                                if (isHeaderCollapsed) {
+                                                    isHeaderCollapsed = false
+                                                    try {
+                                                        heroFocusRequester.requestFocus()
+                                                    } catch (e: Exception) {}
+                                                    true
+                                                } else {
+                                                    false
+                                                }
+                                            } else {
+                                                false
+                                            }
+                                        }
                                         .padding(vertical = 6.dp),
                                     text = {
                                         Text(
