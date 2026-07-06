@@ -3801,6 +3801,13 @@ fun PlaybackSettingsOverlay(
         modifier = modifier
             .fillMaxSize()
             .background(Color.Black.copy(alpha = 0.4f))
+            .onPreviewKeyEvent { event ->
+                // Intercept Back key BEFORE it reaches any child (prevents gray-state trap)
+                if (event.key == Key.Back && event.type == KeyEventType.KeyDown) {
+                    callbacks.onSettingsBackClick()
+                    true
+                } else false
+            }
             .clickable { callbacks.onSettingsBackClick() }
     ) {
         // Sidebar Content

@@ -120,6 +120,27 @@ fun TvExoVideoPlayer(
                     }
                     return@onPreviewKeyEvent true // Always consume Back
                 }
+
+                // === Media hardware keys: always seek regardless of UI state ===
+                if (event.type == KeyEventType.KeyDown && (
+                    event.key == Key(android.view.KeyEvent.KEYCODE_MEDIA_FAST_FORWARD) ||
+                    event.key == Key(android.view.KeyEvent.KEYCODE_MEDIA_REWIND)
+                )) {
+                    exoPlayer?.let {
+                        val newPos = if (event.key == Key(android.view.KeyEvent.KEYCODE_MEDIA_FAST_FORWARD)) {
+                            val dur = it.duration
+                            if (dur > 0L) (it.currentPosition + 10000).coerceAtMost(dur) else it.currentPosition
+                        } else {
+                            (it.currentPosition - 10000).coerceAtLeast(0)
+                        }
+                        it.seekTo(newPos)
+                        callbacks.onPositionChanged(newPos)
+                        controlsTimeoutKey++
+                        if (!isControlsVisible) isControlsVisible = true
+                    }
+                    return@onPreviewKeyEvent true
+                }
+
                 // Let settings panel handle its own key events
                 if (state.showSettings) return@onPreviewKeyEvent false
 
