@@ -3,6 +3,9 @@ package com.aniplex.app.presentation.screens.home
 import android.widget.Toast
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.gestures.BringIntoViewSpec
+import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
@@ -66,6 +69,7 @@ enum class TvTab(val title: String, val icon: ImageVector) {
     SETTINGS("Settings", Icons.Default.Settings)
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun TvDashboardShell(
     onAnimeClick: (String) -> Unit,
@@ -77,6 +81,21 @@ fun TvDashboardShell(
     var selectedTab by remember { mutableStateOf(TvTab.DISCOVER) }
     var isSidebarFocused by remember { mutableStateOf(false) }
     val sidebarWidth by animateDpAsState(if (isSidebarFocused) 220.dp else 72.dp)
+
+    val tvBringIntoViewSpec = remember {
+        object : BringIntoViewSpec {
+            override fun calculateScrollDistance(
+                offset: Float,
+                size: Float,
+                containerSize: Float
+            ): Float {
+                val parentFraction = 0.3f
+                val childFraction = 0f
+                val leadingEdge = parentFraction * containerSize - (childFraction * size)
+                return offset - leadingEdge
+            }
+        }
+    }
 
     Row(
         modifier = modifier
@@ -167,33 +186,35 @@ fun TvDashboardShell(
                 .weight(1f)
                 .fillMaxHeight()
         ) {
-            when (selectedTab) {
-                TvTab.DISCOVER -> {
-                    TvHomeScreen(
-                        onAnimeClick = onAnimeClick,
-                        onEpisodeClick = onEpisodeClick,
-                        modifier = Modifier.fillMaxSize()
-                    )
-                }
-                TvTab.SEARCH -> {
-                    TvSearchContent(
-                        onAnimeClick = onAnimeClick,
-                        modifier = Modifier.fillMaxSize()
-                    )
-                }
-                TvTab.LIBRARY -> {
-                    TvLibraryContent(
-                        onAnimeClick = onAnimeClick,
-                        onEpisodeClick = onEpisodeClick,
-                        modifier = Modifier.fillMaxSize()
-                    )
-                }
-                TvTab.SETTINGS -> {
-                    TvSettingsContent(
-                        onSwitchProfile = onSwitchProfile,
-                        onSignOut = onSignOut,
-                        modifier = Modifier.fillMaxSize()
-                    )
+            CompositionLocalProvider(LocalBringIntoViewSpec provides tvBringIntoViewSpec) {
+                when (selectedTab) {
+                    TvTab.DISCOVER -> {
+                        TvHomeScreen(
+                            onAnimeClick = onAnimeClick,
+                            onEpisodeClick = onEpisodeClick,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+                    TvTab.SEARCH -> {
+                        TvSearchContent(
+                            onAnimeClick = onAnimeClick,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+                    TvTab.LIBRARY -> {
+                        TvLibraryContent(
+                            onAnimeClick = onAnimeClick,
+                            onEpisodeClick = onEpisodeClick,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+                    TvTab.SETTINGS -> {
+                        TvSettingsContent(
+                            onSwitchProfile = onSwitchProfile,
+                            onSignOut = onSignOut,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
                 }
             }
         }

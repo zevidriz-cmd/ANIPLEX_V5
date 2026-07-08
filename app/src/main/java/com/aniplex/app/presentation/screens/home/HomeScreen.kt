@@ -9,15 +9,14 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.Info
@@ -102,15 +101,13 @@ fun HomeScreen(
         ) {
             when (val state = uiState) {
                 is HomeUiState.Loading -> {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .verticalScroll(rememberScrollState())
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize()
                     ) {
-                        SpotlightBannerShimmer()
-                        Spacer(modifier = Modifier.height(16.dp))
-                        AnimeRowShimmer()
-                        AnimeRowShimmer()
+                        item { SpotlightBannerShimmer() }
+                        item { Spacer(modifier = Modifier.height(16.dp)) }
+                        item { AnimeRowShimmer() }
+                        item { AnimeRowShimmer() }
                     }
                 }
                 is HomeUiState.Success -> {
@@ -158,107 +155,123 @@ fun HomeContent(
     onAddToWatchlist: ((String, String, String) -> Unit)? = null,
     onMarkAsWatched: ((String, String, String) -> Unit)? = null
 ) {
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
+    LazyColumn(
+        modifier = modifier.fillMaxSize()
     ) {
-        Spacer(modifier = Modifier.height(12.dp))
+        item {
+            Spacer(modifier = Modifier.height(12.dp))
+        }
 
         // 1. Spotlight Banner Carousel (Premium Floating Card Pager)
         if (homeData.spotlightAnimes.isNotEmpty()) {
-            SpotlightCarousel(
-                spotlightList = homeData.spotlightAnimes,
-                onAnimeClick = onAnimeClick,
-                onColorExtracted = onColorExtracted,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp)
-                    .height(390.dp)
-            )
+            item {
+                SpotlightCarousel(
+                    spotlightList = homeData.spotlightAnimes,
+                    onAnimeClick = onAnimeClick,
+                    onColorExtracted = onColorExtracted,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                        .height(390.dp)
+                )
+            }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        item {
+            Spacer(modifier = Modifier.height(16.dp))
+        }
 
         // 1.5. Premium Continue Watching Row (Direct resume access!)
         if (continueWatchingList.isNotEmpty()) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 8.dp)
-            ) {
-                Text(
-                    text = "Continue Watching",
-                    fontSize = 19.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = Color.White,
-                    letterSpacing = 0.5.sp,
-                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp)
-                )
-                LazyRow(
-                    contentPadding = PaddingValues(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(14.dp),
-                    modifier = Modifier.fillMaxWidth()
+            item {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp)
                 ) {
-                    items(continueWatchingList, key = { it.animeId }) { item ->
-                        ContinueWatchingCard(
-                            item = item,
-                            onClick = {
-                                onEpisodeClick(
-                                    item.episodeId,
-                                    item.animeId,
-                                    item.animeTitle,
-                                    item.episodeNumber,
-                                    "sub",
-                                    item.progressPosition
-                                )
-                            },
-                            onRemoveFromHistory = onRemoveFromHistory,
-                            onMarkAsFinished = onMarkAsFinished
-                        )
+                    Text(
+                        text = "Continue Watching",
+                        fontSize = 19.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Color.White,
+                        letterSpacing = 0.5.sp,
+                        modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp)
+                    )
+                    LazyRow(
+                        contentPadding = PaddingValues(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(14.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        items(continueWatchingList, key = { it.animeId }) { item ->
+                            ContinueWatchingCard(
+                                item = item,
+                                onClick = {
+                                    onEpisodeClick(
+                                        item.episodeId,
+                                        item.animeId,
+                                        item.animeTitle,
+                                        item.episodeNumber,
+                                        "sub",
+                                        item.progressPosition
+                                    )
+                                },
+                                onRemoveFromHistory = onRemoveFromHistory,
+                                onMarkAsFinished = onMarkAsFinished
+                            )
+                        }
                     }
+                    Spacer(modifier = Modifier.height(20.dp))
                 }
-                Spacer(modifier = Modifier.height(20.dp))
             }
         }
 
         // 2. Genres list
         if (homeData.genres.isNotEmpty()) {
-            GenreChipsRow(
-                genres = homeData.genres,
-                onGenreClick = { /* Can pass genre to search in future, for now just open search */ onSearchClick() },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 16.dp)
-            )
+            item {
+                GenreChipsRow(
+                    genres = homeData.genres,
+                    onGenreClick = { /* Can pass genre to search in future, for now just open search */ onSearchClick() },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 16.dp)
+                )
+            }
         }
 
         // 3. Trending Now Section (Landscape styled video-tiles like in the screenshot!)
         if (homeData.trendingAnimes.isNotEmpty()) {
-            AnimeSectionRow(
-                title = "Trending Now",
-                animeList = homeData.trendingAnimes,
-                onAnimeClick = onAnimeClick,
-                isLandscape = true,
-                onSeeAllClick = { onNavigateToDiscover(0) },
-                onAddToWatchlist = onAddToWatchlist,
-                onMarkAsWatched = onMarkAsWatched
-            )
-            Spacer(modifier = Modifier.height(24.dp))
+            item {
+                AnimeSectionRow(
+                    title = "Trending Now",
+                    animeList = homeData.trendingAnimes,
+                    onAnimeClick = onAnimeClick,
+                    isLandscape = true,
+                    onSeeAllClick = { onNavigateToDiscover(0) },
+                    onAddToWatchlist = onAddToWatchlist,
+                    onMarkAsWatched = onMarkAsWatched
+                )
+            }
+            item {
+                Spacer(modifier = Modifier.height(24.dp))
+            }
         }
 
         // 4. Top Airing Section (Portrait)
         if (homeData.topAiringAnimes.isNotEmpty()) {
-            AnimeSectionRow(
-                title = "Top Airing",
-                animeList = homeData.topAiringAnimes,
-                onAnimeClick = onAnimeClick,
-                isLandscape = false,
-                onSeeAllClick = { onNavigateToDiscover(0) },
-                onAddToWatchlist = onAddToWatchlist,
-                onMarkAsWatched = onMarkAsWatched
-            )
-            Spacer(modifier = Modifier.height(24.dp))
+            item {
+                AnimeSectionRow(
+                    title = "Top Airing",
+                    animeList = homeData.topAiringAnimes,
+                    onAnimeClick = onAnimeClick,
+                    isLandscape = false,
+                    onSeeAllClick = { onNavigateToDiscover(0) },
+                    onAddToWatchlist = onAddToWatchlist,
+                    onMarkAsWatched = onMarkAsWatched
+                )
+            }
+            item {
+                Spacer(modifier = Modifier.height(24.dp))
+            }
         }
 
         // 5. Recently Added Section (Landscape)
@@ -269,43 +282,55 @@ fun HomeContent(
         }
 
         if (finalRecentlyAdded.isNotEmpty()) {
-            RecentlyAddedSectionRow(
-                title = "Recently Added",
-                recentlyAddedItems = finalRecentlyAdded,
-                onAnimeClick = onAnimeClick,
-                onSeeAllClick = { onNavigateToDiscover(1) },
-                onAddToWatchlist = onAddToWatchlist,
-                onMarkAsWatched = onMarkAsWatched
-            )
-            Spacer(modifier = Modifier.height(24.dp))
+            item {
+                RecentlyAddedSectionRow(
+                    title = "Recently Added",
+                    recentlyAddedItems = finalRecentlyAdded,
+                    onAnimeClick = onAnimeClick,
+                    onSeeAllClick = { onNavigateToDiscover(1) },
+                    onAddToWatchlist = onAddToWatchlist,
+                    onMarkAsWatched = onMarkAsWatched
+                )
+            }
+            item {
+                Spacer(modifier = Modifier.height(24.dp))
+            }
         }
 
         // 6. Most Popular Section (Portrait)
         if (homeData.mostPopularAnimes.isNotEmpty()) {
-            AnimeSectionRow(
-                title = "Most Popular",
-                animeList = homeData.mostPopularAnimes,
-                onAnimeClick = onAnimeClick,
-                isLandscape = false,
-                onSeeAllClick = { onNavigateToDiscover(0) },
-                onAddToWatchlist = onAddToWatchlist,
-                onMarkAsWatched = onMarkAsWatched
-            )
-            Spacer(modifier = Modifier.height(24.dp))
+            item {
+                AnimeSectionRow(
+                    title = "Most Popular",
+                    animeList = homeData.mostPopularAnimes,
+                    onAnimeClick = onAnimeClick,
+                    isLandscape = false,
+                    onSeeAllClick = { onNavigateToDiscover(0) },
+                    onAddToWatchlist = onAddToWatchlist,
+                    onMarkAsWatched = onMarkAsWatched
+                )
+            }
+            item {
+                Spacer(modifier = Modifier.height(24.dp))
+            }
         }
 
         // 7. Top Upcoming Section (Portrait)
         if (homeData.topUpcomingAnimes.isNotEmpty()) {
-            AnimeSectionRow(
-                title = "Top Upcoming",
-                animeList = homeData.topUpcomingAnimes,
-                onAnimeClick = onAnimeClick,
-                isLandscape = false,
-                onSeeAllClick = { onNavigateToDiscover(0) },
-                onAddToWatchlist = onAddToWatchlist,
-                onMarkAsWatched = onMarkAsWatched
-            )
-            Spacer(modifier = Modifier.height(32.dp))
+            item {
+                AnimeSectionRow(
+                    title = "Top Upcoming",
+                    animeList = homeData.topUpcomingAnimes,
+                    onAnimeClick = onAnimeClick,
+                    isLandscape = false,
+                    onSeeAllClick = { onNavigateToDiscover(0) },
+                    onAddToWatchlist = onAddToWatchlist,
+                    onMarkAsWatched = onMarkAsWatched
+                )
+            }
+            item {
+                Spacer(modifier = Modifier.height(32.dp))
+            }
         }
     }
 }

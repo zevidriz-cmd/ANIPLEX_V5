@@ -50,7 +50,10 @@ import com.aniplex.app.presentation.screens.watchlist.WatchlistViewModel
 import com.aniplex.app.domain.model.AnimeDetail
 import android.widget.Toast
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.foundation.gestures.BringIntoViewSpec
+import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun TvHomeScreen(
     onAnimeClick: (String) -> Unit,
@@ -58,6 +61,20 @@ fun TvHomeScreen(
     modifier: Modifier = Modifier,
     viewModel: HomeViewModel = hiltViewModel()
 ) {
+    val tvBringIntoViewSpec = remember {
+        object : BringIntoViewSpec {
+            override fun calculateScrollDistance(
+                offset: Float,
+                size: Float,
+                containerSize: Float
+            ): Float {
+                val parentFraction = 0.3f
+                val childFraction = 0f
+                val leadingEdge = parentFraction * containerSize - (childFraction * size)
+                return offset - leadingEdge
+            }
+        }
+    }
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val continueWatchingList by viewModel.continueWatchingList.collectAsStateWithLifecycle()
     val watchlistViewModel: WatchlistViewModel = hiltViewModel()
@@ -69,11 +86,12 @@ fun TvHomeScreen(
 
     val context = LocalContext.current
 
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .background(BackgroundVoid)
-    ) {
+    CompositionLocalProvider(LocalBringIntoViewSpec provides tvBringIntoViewSpec) {
+        Box(
+            modifier = modifier
+                .fillMaxSize()
+                .background(BackgroundVoid)
+        ) {
         // 1. Dynamic background backdrop with blur/dark overlay
         activeBackdropUrl?.let { url ->
             AsyncImage(
@@ -349,6 +367,7 @@ fun TvHomeScreen(
             }
         }
     }
+}
 }
 
 @Composable
