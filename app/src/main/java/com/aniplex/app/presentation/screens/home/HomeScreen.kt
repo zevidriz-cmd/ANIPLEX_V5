@@ -32,6 +32,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -61,7 +62,9 @@ import com.aniplex.app.theme.SurfaceDark
 import com.aniplex.app.theme.SurfaceDarkVariant
 import com.aniplex.app.theme.TextMuted
 import com.aniplex.app.theme.TextSecondary
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -84,15 +87,17 @@ fun HomeScreen(
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(
-                brush = Brush.verticalGradient(
-                    colors = listOf(
-                        animatedColor.copy(alpha = 0.35f),
-                        BackgroundVoid.copy(alpha = 0.95f),
-                        BackgroundVoid
+            .drawBehind {
+                drawRect(
+                    brush = Brush.verticalGradient(
+                        colors = listOf(
+                            animatedColor.copy(alpha = 0.35f),
+                            BackgroundVoid.copy(alpha = 0.95f),
+                            BackgroundVoid
+                        )
                     )
                 )
-            )
+            }
     ) {
         PullToRefreshBox(
             isRefreshing = isRefreshing,
@@ -354,19 +359,28 @@ fun SpotlightCarousel(
                     .data(currentPoster)
                     .allowHardware(false)
                     .build()
-                val result = context.imageLoader.execute(request)
-                if (result is SuccessResult) {
-                    val bitmap = (result.drawable as? android.graphics.drawable.BitmapDrawable)?.bitmap
-                    if (bitmap != null) {
-                        androidx.palette.graphics.Palette.from(bitmap).generate { palette ->
-                            val color = palette?.darkMutedSwatch?.rgb ?: palette?.dominantSwatch?.rgb
-                            if (color != null) {
-                                onColorExtracted(Color(color))
-                            } else {
-                                onColorExtracted(BackgroundVoid)
+                
+                var extractedColor: Color? = null
+                withContext(Dispatchers.IO) {
+                    try {
+                        val result = context.imageLoader.execute(request)
+                        if (result is SuccessResult) {
+                            val bitmap = (result.drawable as? android.graphics.drawable.BitmapDrawable)?.bitmap
+                            if (bitmap != null) {
+                                val palette = androidx.palette.graphics.Palette.from(bitmap).generate()
+                                val rgb = palette.darkMutedSwatch?.rgb ?: palette.dominantSwatch?.rgb
+                                if (rgb != null) {
+                                    extractedColor = Color(rgb)
+                                }
                             }
                         }
+                    } catch (e: Exception) {
+                        // Squelch
                     }
+                }
+                
+                withContext(Dispatchers.Main) {
+                    onColorExtracted(extractedColor ?: BackgroundVoid)
                 }
             }
         }
@@ -875,11 +889,8 @@ fun RecentlyAddedSectionRow(
         }
 
         // Subtitle containing the day of currently scrolled-to items (Today, Yesterday, etc.)
-        Text(
-            text = currentDayLabel.value,
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Medium,
-            color = Color(0xFF8C8C8C),
+        ScrollDayHeader(
+            dayLabelProvider = { currentDayLabel.value },
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)
         )
 
@@ -899,6 +910,20 @@ fun RecentlyAddedSectionRow(
             }
         }
     }
+}
+
+@Composable
+fun ScrollDayHeader(
+    dayLabelProvider: () -> String,
+    modifier: Modifier = Modifier
+) {
+    Text(
+        text = dayLabelProvider(),
+        fontSize = 14.sp,
+        fontWeight = FontWeight.Medium,
+        color = Color(0xFF8C8C8C),
+        modifier = modifier
+    )
 }
 
 @Composable

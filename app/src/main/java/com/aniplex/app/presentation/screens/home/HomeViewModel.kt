@@ -17,11 +17,13 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 sealed interface HomeUiState {
@@ -131,7 +133,7 @@ class HomeViewModel @Inject constructor(
     }
 
     fun loadRecentlyAddedEpisodes() {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             val sdfStr = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
             
             val calendar = java.util.Calendar.getInstance()
@@ -203,7 +205,9 @@ class HomeViewModel @Inject constructor(
 
             // Sort descending chronologically
             val sortedList = itemsList.distinctBy { it.anime.id }.sortedByDescending { it.timestamp }
-            _recentlyAddedEpisodes.value = sortedList
+            withContext(Dispatchers.Main) {
+                _recentlyAddedEpisodes.value = sortedList
+            }
         }
     }
 
