@@ -22,6 +22,8 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import com.aniplex.app.data.download.DownloadManager
+import com.valentinilk.shimmer.shimmer
+import com.aniplex.app.presentation.components.ErrorPlaceholder
 import com.aniplex.app.data.download.DownloadStatus
 import com.aniplex.app.data.download.DownloadTask
 import com.aniplex.app.theme.BackgroundVoid
@@ -108,6 +110,8 @@ fun DownloadItemRow(
     task: DownloadTask,
     onPlayClick: (episodeId: String, animeId: String, animeTitle: String, episodeNumber: Int, category: String) -> Unit
 ) {
+    var isImageLoading by remember { mutableStateOf(true) }
+    var isImageError by remember { mutableStateOf(false) }
     val context = androidx.compose.ui.platform.LocalContext.current
     val status by task.status.collectAsStateWithLifecycle()
     val progress by task.progress.collectAsStateWithLifecycle()
@@ -132,8 +136,16 @@ fun DownloadItemRow(
                 model = task.posterUrl,
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize()
+                onLoading = { isImageLoading = true; isImageError = false },
+                onSuccess = { isImageLoading = false; isImageError = false },
+                onError = { isImageLoading = false; isImageError = true },
+                modifier = Modifier
+                    .fillMaxSize()
+                    .then(if (isImageLoading) Modifier.shimmer() else Modifier)
             )
+            if (isImageError) {
+                ErrorPlaceholder(modifier = Modifier.fillMaxSize())
+            }
             if (status == DownloadStatus.COMPLETED) {
                 Box(
                     modifier = Modifier

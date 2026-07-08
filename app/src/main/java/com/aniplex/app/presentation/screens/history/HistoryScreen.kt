@@ -27,6 +27,8 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import com.aniplex.app.domain.model.HistoryItem
+import com.valentinilk.shimmer.shimmer
+import com.aniplex.app.presentation.components.ErrorPlaceholder
 import com.aniplex.app.presentation.components.ScheduleItemShimmer
 import com.aniplex.app.theme.*
 
@@ -171,6 +173,8 @@ fun HistoryRowCard(
     onPlayClick: () -> Unit,
     onDetailsClick: () -> Unit
 ) {
+    var isImageLoading by remember { mutableStateOf(true) }
+    var isImageError by remember { mutableStateOf(false) }
     val progress = if (item.totalDuration > 0) {
         item.progressPosition.toFloat() / item.totalDuration.toFloat()
     } else {
@@ -189,16 +193,27 @@ fun HistoryRowCard(
             modifier = Modifier.padding(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Poster
-            AsyncImage(
-                model = item.poster,
-                contentDescription = item.animeTitle,
-                contentScale = ContentScale.Crop,
+            Box(
                 modifier = Modifier
                     .size(width = 54.dp, height = 76.dp)
                     .clip(RoundedCornerShape(8.dp))
                     .background(Color.DarkGray)
-            )
+            ) {
+                AsyncImage(
+                    model = item.poster,
+                    contentDescription = item.animeTitle,
+                    contentScale = ContentScale.Crop,
+                    onLoading = { isImageLoading = true; isImageError = false },
+                    onSuccess = { isImageLoading = false; isImageError = false },
+                    onError = { isImageLoading = false; isImageError = true },
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .then(if (isImageLoading) Modifier.shimmer() else Modifier)
+                )
+                if (isImageError) {
+                    ErrorPlaceholder(modifier = Modifier.fillMaxSize())
+                }
+            }
 
             Spacer(modifier = Modifier.width(16.dp))
 

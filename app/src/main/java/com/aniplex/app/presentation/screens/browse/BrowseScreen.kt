@@ -268,7 +268,7 @@ fun AllAnimeContent(
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(bottom = 24.dp)
                     ) {
-                        items(uiState.results) { anime ->
+                        items(uiState.results, key = { it.id }) { anime ->
                             AnimeCard(anime = anime, onClick = onAnimeClick)
                         }
                         if (uiState.hasNextPage) {
@@ -308,7 +308,7 @@ fun GenresTabContent(
         verticalArrangement = Arrangement.spacedBy(16.dp),
         modifier = Modifier.fillMaxSize()
     ) {
-        items(genres) { genre ->
+        items(genres.distinctBy { it.key }, key = { it.key }) { genre ->
             Card(
                 modifier = Modifier
                     .fillMaxWidth()

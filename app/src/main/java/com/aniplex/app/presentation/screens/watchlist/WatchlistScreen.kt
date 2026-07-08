@@ -51,6 +51,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
 import coil.compose.AsyncImage
+import com.valentinilk.shimmer.shimmer
+import com.aniplex.app.presentation.components.ErrorPlaceholder
 import com.aniplex.app.data.download.DownloadManager
 import com.aniplex.app.data.download.DownloadStatus
 import com.aniplex.app.data.download.DownloadTask
@@ -419,6 +421,8 @@ fun WatchlistRowCard(
     onToggleFavorite: () -> Unit,
     onDetailsClick: () -> Unit
 ) {
+    var isImageLoading by remember { mutableStateOf(true) }
+    var isImageError by remember { mutableStateOf(false) }
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -431,15 +435,27 @@ fun WatchlistRowCard(
             modifier = Modifier.padding(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            AsyncImage(
-                model = item.poster,
-                contentDescription = item.title,
-                contentScale = ContentScale.Crop,
+            Box(
                 modifier = Modifier
                     .size(width = 54.dp, height = 76.dp)
                     .clip(RoundedCornerShape(8.dp))
                     .background(Color.DarkGray)
-            )
+            ) {
+                AsyncImage(
+                    model = item.poster,
+                    contentDescription = item.title,
+                    contentScale = ContentScale.Crop,
+                    onLoading = { isImageLoading = true; isImageError = false },
+                    onSuccess = { isImageLoading = false; isImageError = false },
+                    onError = { isImageLoading = false; isImageError = true },
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .then(if (isImageLoading) Modifier.shimmer() else Modifier)
+                )
+                if (isImageError) {
+                    ErrorPlaceholder(modifier = Modifier.fillMaxSize())
+                }
+            }
 
             Spacer(modifier = Modifier.width(16.dp))
 
@@ -572,6 +588,8 @@ fun HistoryGridCard(
     onDetailsClick: () -> Unit,
     onRemove: () -> Unit
 ) {
+    var isImageLoading by remember { mutableStateOf(true) }
+    var isImageError by remember { mutableStateOf(false) }
     val progress = if (item.totalDuration > 0) {
         item.progressPosition.toFloat() / item.totalDuration.toFloat()
     } else {
@@ -600,8 +618,16 @@ fun HistoryGridCard(
                     model = item.poster,
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
+                    onLoading = { isImageLoading = true; isImageError = false },
+                    onSuccess = { isImageLoading = false; isImageError = false },
+                    onError = { isImageLoading = false; isImageError = true },
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .then(if (isImageLoading) Modifier.shimmer() else Modifier)
                 )
+                if (isImageError) {
+                    ErrorPlaceholder(modifier = Modifier.fillMaxSize())
+                }
 
                 // Translucent dark overlay
                 Box(
@@ -773,6 +799,8 @@ fun DownloadsTabContent(
             items(downloads, key = { it.episodeId }) { task ->
                 val status by task.status.collectAsStateWithLifecycle()
                 val progress by task.progress.collectAsStateWithLifecycle()
+                var isImageLoading by remember(task.episodeId) { mutableStateOf(true) }
+                var isImageError by remember(task.episodeId) { mutableStateOf(false) }
 
                 Row(
                     modifier = Modifier
@@ -795,8 +823,16 @@ fun DownloadsTabContent(
                             model = task.posterUrl,
                             contentDescription = null,
                             contentScale = ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize()
+                            onLoading = { isImageLoading = true; isImageError = false },
+                            onSuccess = { isImageLoading = false; isImageError = false },
+                            onError = { isImageLoading = false; isImageError = true },
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .then(if (isImageLoading) Modifier.shimmer() else Modifier)
                         )
+                        if (isImageError) {
+                            ErrorPlaceholder(modifier = Modifier.fillMaxSize())
+                        }
                         if (status == DownloadStatus.COMPLETED) {
                             Box(
                                 modifier = Modifier

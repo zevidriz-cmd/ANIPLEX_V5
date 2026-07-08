@@ -64,6 +64,10 @@ import com.aniplex.app.data.download.DownloadManager
 import com.aniplex.app.data.download.DownloadStatus
 import com.aniplex.app.data.local.preferences.PreferenceManager
 import coil.compose.AsyncImage
+import coil.compose.SubcomposeAsyncImage
+import com.valentinilk.shimmer.shimmer
+import com.aniplex.app.presentation.components.ShimmerBox
+import com.aniplex.app.presentation.components.ErrorPlaceholder
 import com.aniplex.app.domain.model.AnimeDetail
 import com.aniplex.app.domain.model.Character
 import com.aniplex.app.domain.model.Episode
@@ -349,10 +353,12 @@ fun DetailContent(
                             alpha = 1f - (scrollState.value.toFloat() / 1200f).coerceIn(0f, 1f)
                         }
                 ) {
-                    AsyncImage(
+                    SubcomposeAsyncImage(
                         model = animeDetail.poster,
                         contentDescription = null,
                         contentScale = ContentScale.Crop,
+                        loading = { ShimmerBox(modifier = Modifier.fillMaxSize()) },
+                        error = { ErrorPlaceholder(modifier = Modifier.fillMaxSize()) },
                         modifier = Modifier.fillMaxSize()
                     )
 
@@ -1755,6 +1761,8 @@ fun EpisodesTabContent(
                                     .clickable { onPlayClick(episode.id, animeTitle, episode.number, selectedAudioType.lowercase()) },
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
+                                var isThumbLoading by remember(episode.id) { mutableStateOf(true) }
+                                var isThumbError by remember(episode.id) { mutableStateOf(false) }
                                 // Thumbnail Placeholder
                                 Box(
                                     modifier = Modifier
@@ -1767,8 +1775,17 @@ fun EpisodesTabContent(
                                         model = poster,
                                         contentDescription = "Episode Thumbnail",
                                         contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-                                        modifier = Modifier.fillMaxSize().alpha(0.6f)
+                                        onLoading = { isThumbLoading = true; isThumbError = false },
+                                        onSuccess = { isThumbLoading = false; isThumbError = false },
+                                        onError = { isThumbLoading = false; isThumbError = true },
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .alpha(0.6f)
+                                            .then(if (isThumbLoading) Modifier.shimmer() else Modifier)
                                     )
+                                    if (isThumbError) {
+                                        ErrorPlaceholder(modifier = Modifier.fillMaxSize())
+                                    }
                                     Box(
                                         modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.3f))
                                     )
@@ -1919,7 +1936,7 @@ fun CharactersTabContent(charactersState: DetailState<List<Character>>) {
                     contentPadding = PaddingValues(horizontal = 16.dp),
                     horizontalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    items(characters) { character ->
+                    items(characters, key = { it.id }) { character ->
                         Column(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             modifier = Modifier.width(80.dp)
@@ -1986,7 +2003,7 @@ fun RecommendationsTabContent(
             contentPadding = PaddingValues(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            items(recommendations) { anime ->
+            items(recommendations, key = { it.id }) { anime ->
                 AnimeCard(
                     anime = anime,
                     onClick = onAnimeClick

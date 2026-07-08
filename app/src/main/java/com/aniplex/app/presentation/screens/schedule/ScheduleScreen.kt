@@ -31,6 +31,8 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import com.aniplex.app.presentation.components.ScheduleItemShimmer
+import com.aniplex.app.presentation.components.ErrorPlaceholder
+import com.valentinilk.shimmer.shimmer
 import com.aniplex.app.domain.model.ScheduleItem
 import com.aniplex.app.theme.*
 import com.valentinilk.shimmer.shimmer
@@ -134,7 +136,7 @@ fun ScheduleScreen(
                         contentPadding = PaddingValues(top = 12.dp, bottom = 24.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        items(state.schedules) { item ->
+                        items(state.schedules, key = { it.id }) { item ->
                             ScheduleItemCard(
                                 item = item,
                                 selectedDate = selectedDate,
@@ -156,6 +158,8 @@ fun ScheduleItemCard(
     currentMillis: Long,
     onClick: () -> Unit
 ) {
+    var isImageLoading by remember { mutableStateOf(true) }
+    var isImageError by remember { mutableStateOf(false) }
     val targetMillis = remember(item.time, selectedDate) {
         parseAiringTime(selectedDate, item.time)
     }
@@ -265,15 +269,27 @@ fun ScheduleItemCard(
         ) {
             // Poster Image Column (if poster is present)
             if (!item.poster.isNullOrBlank()) {
-                AsyncImage(
-                    model = item.poster,
-                    contentDescription = item.title,
-                    contentScale = ContentScale.Crop,
+                Box(
                     modifier = Modifier
                         .size(width = 46.dp, height = 64.dp)
                         .clip(RoundedCornerShape(8.dp))
                         .background(Color.DarkGray)
-                )
+                ) {
+                    AsyncImage(
+                        model = item.poster,
+                        contentDescription = item.title,
+                        contentScale = ContentScale.Crop,
+                        onLoading = { isImageLoading = true; isImageError = false },
+                        onSuccess = { isImageLoading = false; isImageError = false },
+                        onError = { isImageLoading = false; isImageError = true },
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .then(if (isImageLoading) Modifier.shimmer() else Modifier)
+                    )
+                    if (isImageError) {
+                        ErrorPlaceholder(modifier = Modifier.fillMaxSize())
+                    }
+                }
                 Spacer(modifier = Modifier.width(12.dp))
             }
 

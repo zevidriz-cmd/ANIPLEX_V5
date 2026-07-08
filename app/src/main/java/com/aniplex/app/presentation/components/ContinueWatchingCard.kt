@@ -29,6 +29,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.aniplex.app.domain.model.HistoryItem
+import com.valentinilk.shimmer.shimmer
 import com.aniplex.app.theme.CrunchyrollOrange
 import com.aniplex.app.theme.SurfaceDark
 import com.aniplex.app.theme.TextSecondary
@@ -42,6 +43,8 @@ fun ContinueWatchingCard(
     onMarkAsFinished: ((String, String, String) -> Unit)? = null
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
+    var isImageLoading by remember { mutableStateOf(true) }
+    var isImageError by remember { mutableStateOf(false) }
 
     Card(
         modifier = modifier
@@ -69,8 +72,16 @@ fun ContinueWatchingCard(
                     model = item.poster,
                     contentDescription = item.animeTitle,
                     contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
+                    onLoading = { isImageLoading = true; isImageError = false },
+                    onSuccess = { isImageLoading = false; isImageError = false },
+                    onError = { isImageLoading = false; isImageError = true },
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .then(if (isImageLoading) Modifier.shimmer() else Modifier)
                 )
+                if (isImageError) {
+                    ErrorPlaceholder(modifier = Modifier.fillMaxSize())
+                }
 
                 // Dark gradient overlay
                 Box(

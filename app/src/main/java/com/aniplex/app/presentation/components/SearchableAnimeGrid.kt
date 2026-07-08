@@ -9,6 +9,7 @@ import androidx.compose.animation.core.*
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -240,8 +241,7 @@ fun SearchableAnimeGrid(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        items(recentSearches.size) { index ->
-                            val query = recentSearches[index]
+                        items(recentSearches.distinct(), key = { it }) { query ->
                             Box(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(8.dp))
@@ -340,8 +340,7 @@ fun SearchableAnimeGrid(
                                     .fillMaxSize()
                                     .testTag("search_results_grid")
                             ) {
-                                items(state.results.size) { index ->
-                                    val anime = state.results[index]
+                                items(state.results, key = { it.id }) { anime ->
                                     AnimeCard(
                                         anime = anime,
                                         onClick = { animeId ->
@@ -413,8 +412,7 @@ fun SearchableAnimeGrid(
                             verticalArrangement = Arrangement.spacedBy(4.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            items(suggestions.size) { idx ->
-                                val item = suggestions[idx]
+                            items(suggestions, key = { it.id }) { item ->
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()

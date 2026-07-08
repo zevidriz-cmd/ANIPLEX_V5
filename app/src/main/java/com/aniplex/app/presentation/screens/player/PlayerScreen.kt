@@ -1653,7 +1653,7 @@ fun PlayerScreen(
                         modifier = Modifier.padding(bottom = 12.dp)
                     )
                 }
-                items(options) { (key, label) ->
+                items(options, key = { it.first }) { (key, label) ->
                     val isCurrentActive = selectedServer == key
                     Box(
                         modifier = Modifier
@@ -3563,7 +3563,7 @@ fun ExoVideoPlayer(
                                 verticalArrangement = Arrangement.spacedBy(8.dp),
                                 modifier = Modifier.weight(1f)
                             ) {
-                                items(chapters) { chap ->
+                                items(chapters, key = { "${it.title}_${it.startMs}" }) { chap ->
                                     val isActive = exoPlayer?.currentPosition?.let { currentPos ->
                                         val index = chapters.indexOf(chap)
                                         val nextStart = if (index < chapters.size - 1) chapters[index + 1].startMs else state.durationMs
@@ -4208,7 +4208,7 @@ fun InPlayerEpisodeSelectorOverlay(
                         contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        items(state.episodes) { ep ->
+                        items(state.episodes, key = { it.id }) { ep ->
                             val isCurrent = state.currentEpisode?.id == ep.id
                             Surface(
                                 color = if (isCurrent) Color(0xFF2E1A0C) else Color(0xFF1D1D1D),

@@ -26,6 +26,9 @@ import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import java.util.concurrent.TimeUnit
 import javax.inject.Singleton
+import coil.ImageLoader
+import coil.disk.DiskCache
+import coil.memory.MemoryCache
 
 @Module
 @InstallIn(SingletonComponent::class)
@@ -154,5 +157,29 @@ object AppModule {
         firestore: FirebaseFirestore
     ): AuthRepository {
         return AuthRepositoryImpl(firebaseAuth, firestore)
+    }
+
+    @Provides
+    @Singleton
+    fun provideImageLoader(
+        @ApplicationContext context: Context,
+        okHttpClient: OkHttpClient
+    ): ImageLoader {
+        return ImageLoader.Builder(context)
+            .okHttpClient(okHttpClient)
+            .crossfade(300)
+            .respectCacheHeaders(false)
+            .memoryCache {
+                MemoryCache.Builder(context)
+                    .maxSizePercent(0.25)
+                    .build()
+            }
+            .diskCache {
+                DiskCache.Builder()
+                    .directory(context.cacheDir.resolve("image_cache"))
+                    .maxSizePercent(0.03)
+                    .build()
+            }
+            .build()
     }
 }

@@ -200,7 +200,7 @@ fun HomeContent(
                     horizontalArrangement = Arrangement.spacedBy(14.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    items(continueWatchingList) { item ->
+                    items(continueWatchingList, key = { it.animeId }) { item ->
                         ContinueWatchingCard(
                             item = item,
                             onClick = {
@@ -555,7 +555,7 @@ fun GenreChipsRow(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         modifier = modifier
     ) {
-        items(genres) { genre ->
+        items(genres.distinct(), key = { it }) { genre ->
             Box(
                 modifier = Modifier
                     .clip(RoundedCornerShape(16.dp))
@@ -631,7 +631,7 @@ fun AnimeSectionRow(
             horizontalArrangement = Arrangement.spacedBy(14.dp),
             modifier = Modifier.padding(top = 4.dp)
         ) {
-            items(animeList) { anime ->
+            items(animeList, key = { it.id }) { anime ->
                 AnimeCard(
                     anime = anime,
                     onClick = onAnimeClick,
@@ -864,7 +864,7 @@ fun RecentlyAddedSectionRow(
             horizontalArrangement = Arrangement.spacedBy(14.dp),
             modifier = Modifier.padding(top = 8.dp)
         ) {
-            items(recentlyAddedItems) { item ->
+            items(recentlyAddedItems, key = { it.anime.id }) { item ->
                 RecentlyAddedAnimeCard(
                     item = item,
                     onClick = onAnimeClick,

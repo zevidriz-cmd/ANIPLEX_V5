@@ -489,6 +489,26 @@ fun TvMainNavigation() {
     NavDisplay(
         backStack = backStack,
         onBack = { backStack.removeLastOrNull() },
+        transitionSpec = {
+            slideInHorizontally(
+                initialOffsetX = { it },
+                animationSpec = tween(400, easing = EaseOutCubic)
+            ) + fadeIn(animationSpec = tween(400, easing = EaseOutCubic)) togetherWith
+            slideOutHorizontally(
+                targetOffsetX = { -it / 4 },
+                animationSpec = tween(400, easing = EaseOutCubic)
+            ) + fadeOut(animationSpec = tween(260, easing = EaseOutCubic))
+        },
+        popTransitionSpec = {
+            slideInHorizontally(
+                initialOffsetX = { -it / 4 },
+                animationSpec = tween(400, easing = EaseOutCubic)
+            ) + fadeIn(animationSpec = tween(400, easing = EaseOutCubic)) togetherWith
+            slideOutHorizontally(
+                targetOffsetX = { it },
+                animationSpec = tween(400, easing = EaseOutCubic)
+            ) + fadeOut(animationSpec = tween(260, easing = EaseOutCubic))
+        },
         entryProvider = entryProvider {
             entry<Splash> {
                 SplashScreen(

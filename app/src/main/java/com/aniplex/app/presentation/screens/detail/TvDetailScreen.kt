@@ -15,6 +15,10 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import coil.compose.SubcomposeAsyncImage
+import com.valentinilk.shimmer.shimmer
+import com.aniplex.app.presentation.components.ShimmerBox
+import com.aniplex.app.presentation.components.ErrorPlaceholder
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -401,10 +405,12 @@ fun TvDetailScreen(
                                     .fillMaxHeight(),
                                 contentAlignment = Alignment.CenterEnd
                             ) {
-                                AsyncImage(
+                                SubcomposeAsyncImage(
                                     model = detail.poster,
                                     contentDescription = detail.name,
                                     contentScale = ContentScale.Crop,
+                                    loading = { ShimmerBox(modifier = Modifier.fillMaxSize()) },
+                                    error = { ErrorPlaceholder(modifier = Modifier.fillMaxSize()) },
                                     modifier = Modifier
                                         .fillMaxHeight()
                                         .aspectRatio(1f / 1.4f)
@@ -571,7 +577,7 @@ fun TvDetailScreen(
                                                                 }
                                                             }
                                                         } else {
-                                                            items(seasonsList) { season ->
+                                                             items(seasonsList, key = { "${it.malId}_${it.seasonNumber}" }) { season ->
                                                                 val isCurrentSeason = season.malId == detail.malId
                                                                 var isSeasonFocused by remember { mutableStateOf(false) }
                                                                 val scale by animateFloatAsState(if (isSeasonFocused) 1.02f else 1.0f)
@@ -685,7 +691,7 @@ fun TvDetailScreen(
                                                             modifier = Modifier.fillMaxSize(),
                                                             verticalArrangement = Arrangement.spacedBy(12.dp)
                                                         ) {
-                                                            items(displayEpisodes) { episode: Episode ->
+                                                             items(displayEpisodes, key = { it.id }) { episode: Episode ->
                                                                 TvEpisodeCard(
                                                                     episode = episode,
                                                                     posterUrl = detail.poster,
@@ -745,6 +751,8 @@ fun TvEpisodeCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    var isThumbLoading by remember(episode.id) { mutableStateOf(true) }
+    var isThumbError by remember(episode.id) { mutableStateOf(false) }
     var isFocused by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(if (isFocused) 1.02f else 1.0f)
     val cardColor = if (isFocused) SurfaceDark else Color(0xFF14141A)
@@ -780,8 +788,16 @@ fun TvEpisodeCard(
                     model = posterUrl,
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
+                    onLoading = { isThumbLoading = true; isThumbError = false },
+                    onSuccess = { isThumbLoading = false; isThumbError = false },
+                    onError = { isThumbLoading = false; isThumbError = true },
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .then(if (isThumbLoading) Modifier.shimmer() else Modifier)
                 )
+                if (isThumbError) {
+                    ErrorPlaceholder(modifier = Modifier.fillMaxSize())
+                }
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -918,7 +934,7 @@ fun TvCharactersTabContent(
                     horizontalArrangement = Arrangement.spacedBy(16.dp),
                     modifier = modifier.fillMaxSize()
                 ) {
-                    items(characters) { character ->
+                    items(characters, key = { it.id }) { character ->
                         var isFocused by remember { mutableStateOf(false) }
                         val scale by animateFloatAsState(if (isFocused) 1.05f else 1.0f)
                         
@@ -993,7 +1009,7 @@ fun TvRecommendationsTabContent(
             horizontalArrangement = Arrangement.spacedBy(16.dp),
             modifier = modifier.fillMaxSize()
         ) {
-            items(recommendations) { anime ->
+            items(recommendations, key = { it.id }) { anime ->
                 TvAnimeCard(
                     anime = anime,
                     onFocus = {},

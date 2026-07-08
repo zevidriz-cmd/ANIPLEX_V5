@@ -31,6 +31,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.aniplex.app.domain.model.Anime
+import com.valentinilk.shimmer.shimmer
 import com.aniplex.app.theme.GoldStar
 import com.aniplex.app.theme.SurfaceDark
 import com.aniplex.app.theme.TextSecondary
@@ -47,6 +48,8 @@ fun AnimeCard(
     val cardWidth = if (isLandscape) 200.dp else 145.dp
     val imageHeight = if (isLandscape) 115.dp else 195.dp
     var menuExpanded by remember { mutableStateOf(false) }
+    var isImageLoading by remember { mutableStateOf(true) }
+    var isImageError by remember { mutableStateOf(false) }
     
     Card(
         modifier = modifier
@@ -76,8 +79,16 @@ fun AnimeCard(
                     model = anime.poster,
                     contentDescription = anime.title,
                     contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
+                    onLoading = { isImageLoading = true; isImageError = false },
+                    onSuccess = { isImageLoading = false; isImageError = false },
+                    onError = { isImageLoading = false; isImageError = true },
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .then(if (isImageLoading) Modifier.shimmer() else Modifier)
                 )
+                if (isImageError) {
+                    ErrorPlaceholder(modifier = Modifier.fillMaxSize())
+                }
 
                 // Shadow overlay at the bottom for readability
                 Box(

@@ -295,7 +295,7 @@ fun TvSearchContent(
                         horizontalArrangement = Arrangement.spacedBy(16.dp),
                         modifier = Modifier.fillMaxSize()
                     ) {
-                        items(state.results) { anime ->
+                        items(state.results, key = { it.id }) { anime ->
                             TvAnimeCard(
                                 anime = anime,
                                 onFocus = {},
@@ -585,7 +585,7 @@ fun TvLibraryContent(
                                 horizontalArrangement = Arrangement.spacedBy(16.dp),
                                 modifier = Modifier.fillMaxSize()
                             ) {
-                                items(list) { item ->
+                                items(list, key = { it.id }) { item ->
                                     val anime = Anime(
                                         id = item.id,
                                         title = item.title,
@@ -653,7 +653,7 @@ fun TvHistoryGrid(
                     horizontalArrangement = Arrangement.spacedBy(16.dp),
                     modifier = Modifier.fillMaxSize()
                 ) {
-                    items(list) { item ->
+                    items(list, key = { it.animeId }) { item ->
                         var isFocused by remember { mutableStateOf(false) }
                         Card(
                             colors = CardDefaults.cardColors(containerColor = if (isFocused) CrunchyrollOrange else SurfaceDark),

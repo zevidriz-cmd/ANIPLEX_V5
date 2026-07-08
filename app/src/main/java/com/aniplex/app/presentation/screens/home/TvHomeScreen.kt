@@ -10,6 +10,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
@@ -159,8 +160,7 @@ fun TvHomeScreen(
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                         modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp)
                     ) {
-                        items(genresList.size) { idx ->
-                            val genre = genresList[idx]
+                        items(genresList.distinct(), key = { it }) { genre ->
                             var isChipFocused by remember { mutableStateOf(false) }
                             Box(
                                 modifier = Modifier
@@ -205,8 +205,7 @@ fun TvHomeScreen(
                                 horizontalArrangement = Arrangement.spacedBy(16.dp),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
-                                items(continueWatchingList.size) { index ->
-                                    val item = continueWatchingList[index]
+                                items(continueWatchingList, key = { it.animeId }) { item ->
                                     TvContinueWatchingCard(
                                         item = item,
                                         onClick = {
@@ -376,7 +375,7 @@ fun TvSectionRow(
             horizontalArrangement = Arrangement.spacedBy(16.dp),
             modifier = Modifier.fillMaxWidth()
         ) {
-            itemsIndexed(items) { index, item ->
+            itemsIndexed(items, key = { _, item -> item.id }) { index, item ->
                 TvAnimeCard(
                     anime = item,
                     onFocus = { onAnimeFocus(item) },

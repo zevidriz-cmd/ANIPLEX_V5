@@ -12,6 +12,34 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.aniplex.app.theme.SurfaceDark
 import com.valentinilk.shimmer.shimmer
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.Icon
+
+@Composable
+fun ShimmerBox(modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .shimmer()
+            .background(Color.DarkGray)
+    )
+}
+
+@Composable
+fun ErrorPlaceholder(modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .background(Color(0xFF1E1E28)),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            imageVector = Icons.Default.Warning,
+            contentDescription = "Failed to load image",
+            tint = Color.Gray,
+            modifier = Modifier.size(24.dp)
+        )
+    }
+}
 
 @Composable
 fun SpotlightBannerShimmer() {
