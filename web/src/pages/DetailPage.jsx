@@ -410,11 +410,7 @@ export default function DetailPage() {
 
         setDetail(detailData);
         const rawEpisodes = epData?.episodes || [];
-        const sortedEpisodes = [...rawEpisodes].map(ep => ({
-          ...ep,
-          number: typeof ep.number === 'number' ? ep.number : (parseFloat(ep.number) || 0)
-        })).sort((a, b) => a.number - b.number);
-        setEpisodes(sortedEpisodes);
+        setEpisodes(rawEpisodes);
         setCharacters(charData?.characters || []);
 
         // Respect locked audio preference from settings

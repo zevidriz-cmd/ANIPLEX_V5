@@ -41,6 +41,7 @@ export default function VideoPlayer({
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [isTransitioning, setIsTransitioning] = useState(false);
   const [hasPlaybackError, setHasPlaybackError] = useState(false);
 
   const triggerPlaybackError = () => {
@@ -662,6 +663,7 @@ export default function VideoPlayer({
     // Reset state
     setIsPlaying(false);
     setIsLoading(true);
+    setIsTransitioning(false);
     setUpNextDismissed(false);
     setCurrentTime(0);
     setDuration(0);
@@ -1242,8 +1244,19 @@ export default function VideoPlayer({
 
   const handleSkipOutro = () => {
     if (videoRef.current && outro) {
-      videoRef.current.currentTime = outro.end;
-      setShowSkipOutro(false);
+      const autoplaySetting = localStorage.getItem("anistream_autoplay") !== "false";
+      if (autoplaySetting && nextEpisode && onNext) {
+        try {
+          videoRef.current.pause();
+        } catch (e) {
+          console.warn("Failed to pause video on skip outro:", e);
+        }
+        setIsTransitioning(true);
+        onNext();
+      } else {
+        videoRef.current.currentTime = outro.end;
+        setShowSkipOutro(false);
+      }
     }
   };
 
@@ -1650,7 +1663,7 @@ export default function VideoPlayer({
       />
 
       {/* Loading Spinner */}
-      {(isLoading || externalLoading) && (
+      {(isLoading || externalLoading || isTransitioning) && (
         <div className="player-loading-overlay flex-center">
           <Loader2 className="spin-icon" size={48} />
         </div>
@@ -1754,15 +1767,18 @@ export default function VideoPlayer({
         }}
         onPlaying={() => {
           setIsLoading(false);
+          setIsTransitioning(false);
           clearLoadingWatchdog();
         }}
         onCanPlay={() => {
           setIsLoading(false);
+          setIsTransitioning(false);
           clearLoadingWatchdog();
         }}
         onLoadStart={() => setIsLoading(true)}
         onLoadedData={() => {
           setIsLoading(false);
+          setIsTransitioning(false);
           clearLoadingWatchdog();
         }}
         onError={(e) => {
@@ -1814,7 +1830,7 @@ export default function VideoPlayer({
       )}
 
       {/* Outro Skip Overlay */}
-      {showSkipOutro && (
+      {showSkipOutro && !isTransitioning && (
         <button className="skip-time-overlay outro" onClick={handleSkipOutro}>
           <SkipForward size={16} /> Skip Outro
         </button>

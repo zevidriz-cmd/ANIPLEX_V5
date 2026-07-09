@@ -288,6 +288,7 @@ fun PlayerScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val animeDetail by viewModel.animeDetail.collectAsStateWithLifecycle()
     val currentEpisode by viewModel.currentEpisode.collectAsStateWithLifecycle()
+    var activeEpisodeId by remember(episodeId) { mutableStateOf(episodeId) }
     val currentEpNum = currentEpisode?.number ?: episodeNumber
     val skipTimes by viewModel.skipTimes.collectAsStateWithLifecycle()
     
@@ -304,7 +305,7 @@ fun PlayerScreen(
     var qualityOption by remember { mutableStateOf(viewModel.preferredQuality) }
     var subtitleSizeSp by remember { mutableStateOf(18f) } // Default to 18sp
     var screenFitMode by remember { mutableStateOf("Fit") }
-    var isUpNextDismissed by remember(episodeId) { mutableStateOf(false) }
+    var isUpNextDismissed by remember(activeEpisodeId) { mutableStateOf(false) }
 
 
 
@@ -401,7 +402,7 @@ fun PlayerScreen(
     val metadataScrollState = rememberScrollState()
     val settingsScrollState = rememberScrollState()
 
-    val webView = remember(episodeId, activeCategory, selectedServer) {
+    val webView = remember(activeEpisodeId, activeCategory, selectedServer) {
         CookieSaver.restoreCookies(context)
         WebView(context).apply {
             layoutParams = ViewGroup.LayoutParams(1, 1)
@@ -555,7 +556,7 @@ fun PlayerScreen(
                         
                         if (capturedStreamUrl == null) {
                             DebugLogManager.log("ANIPLEX_PLAYER", "Registering capturedStreamUrl source: $url")
-                            DownloadManager.setStreamUrl(episodeId, url)
+                            DownloadManager.setStreamUrl(activeEpisodeId, url)
 
                             // 1. Synchronously grab cookies from CookieManager for the specific domains before any page wiping
                             val cookieManager = android.webkit.CookieManager.getInstance()
@@ -706,7 +707,7 @@ fun PlayerScreen(
             android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
             DebugLogManager.log("ANIPLEX_PLAYER", msg)
             
-            val nextUrl = getEmbedUrl(nextServer, episodeId, activeCategory)
+            val nextUrl = getEmbedUrl(nextServer, activeEpisodeId, activeCategory)
             resetPlayerState(nextUrl, isNewEpisode = false)
         } else {
             // All Zoro servers exhausted - run the full fallback chain
@@ -806,18 +807,18 @@ fun PlayerScreen(
         }
     }
 
-    LaunchedEffect(episodeId, activeCategory) {
+    LaunchedEffect(activeEpisodeId, activeCategory) {
         val defaultServer = availableServers.firstOrNull() ?: "s-1"
         if (selectedServer != defaultServer) {
             selectedServer = defaultServer
         }
     }
 
-    LaunchedEffect(episodeId, activeCategory, selectedServer) {
-        val initialEmbedUrl = getEmbedUrl(selectedServer, episodeId, activeCategory)
+    LaunchedEffect(activeEpisodeId, activeCategory, selectedServer) {
+        val initialEmbedUrl = getEmbedUrl(selectedServer, activeEpisodeId, activeCategory)
         localResumePlayback = resumePlayback
         
-        val isNewEpisode = (episodeId != lastEpisodeId)
+        val isNewEpisode = (activeEpisodeId != lastEpisodeId)
         
         // Caching current position of ExoPlayer if it's a server or category switch
         if (!isNewEpisode && (selectedServer != lastServer || activeCategory != lastCategory)) {
@@ -831,7 +832,7 @@ fun PlayerScreen(
             }
         }
         
-        lastEpisodeId = episodeId
+        lastEpisodeId = activeEpisodeId
         lastCategory = activeCategory
         lastServer = selectedServer
         
@@ -843,7 +844,7 @@ fun PlayerScreen(
             else -> "hd-1"
         }
         val flowStartProgress = if (isNewEpisode) initialProgressParam else 0L
-        viewModel.initialize(animeId, episodeId, activeCategory, apiServer, flowStartProgress)
+        viewModel.initialize(animeId, activeEpisodeId, activeCategory, apiServer, flowStartProgress)
     }
 
     // Timeout sniffer LaunchedEffect
@@ -855,7 +856,7 @@ fun PlayerScreen(
                 if (retryCount < 2) {
                     retryCount++
                     timeoutKey++
-                    val retryUrl = getEmbedUrl(selectedServer, episodeId, activeCategory)
+                    val retryUrl = getEmbedUrl(selectedServer, activeEpisodeId, activeCategory)
                     webView.loadUrl(retryUrl)
                 } else {
                     fallbackToNextServer()
@@ -869,7 +870,7 @@ fun PlayerScreen(
         if (stream != null) {
             if (autoStartDownloadAfterExtraction) {
                 autoStartDownloadAfterExtraction = false
-                val epId = currentEpisode?.id ?: episodeId
+                val epId = currentEpisode?.id ?: activeEpisodeId
                 val epTitle = currentEpisode?.title ?: "Episode $currentEpNum"
                 val poster = animeDetail?.poster ?: ""
                 DownloadManager.startDownload(
@@ -914,13 +915,13 @@ fun PlayerScreen(
     }
 
     // WebView url auto load check
-    LaunchedEffect(uiState, webView, selectedServer) {
+    LaunchedEffect(uiState, webView, selectedServer, activeEpisodeId) {
         val curUiState = uiState
         if (curUiState is PlayerUiState.WebViewFallback) {
             val embedUrl = if (curUiState.embedUrl.isNotEmpty()) {
                 curUiState.embedUrl
             } else {
-                getEmbedUrl(selectedServer, episodeId, activeCategory)
+                getEmbedUrl(selectedServer, activeEpisodeId, activeCategory)
             }
             if (webView.url != embedUrl) {
                 webView.loadUrl(embedUrl)
@@ -929,7 +930,7 @@ fun PlayerScreen(
     }
 
     val downloads by DownloadManager.downloads.collectAsStateWithLifecycle()
-    val downloadTask = downloads.find { it.episodeId == (currentEpisode?.id ?: episodeId) }
+    val downloadTask = downloads.find { it.episodeId == (currentEpisode?.id ?: activeEpisodeId) }
     val taskStatus = downloadTask?.status?.collectAsStateWithLifecycle()?.value
     val taskProgress = downloadTask?.progress?.collectAsStateWithLifecycle()?.value ?: 0f
     
@@ -982,21 +983,13 @@ fun PlayerScreen(
     LaunchedEffect(exoPlayer) {
         exoPlayerRef = exoPlayer
     }
-    var hasSeekedToInitialProgress by remember(episodeId) { mutableStateOf(false) }
+    var hasSeekedToInitialProgress by remember(activeEpisodeId) { mutableStateOf(false) }
 
     val onPlaybackEndedAction by rememberUpdatedState {
         val nextEp = episodes.find { it.number == currentEpNum + 1 }
         if (viewModel.autoplayNextEpisode && nextEp != null && !isUpNextDismissed) {
-            val nextUrl = getEmbedUrl(selectedServer, nextEp.id, activeCategory)
             localResumePlayback = false
-            resetPlayerState(nextUrl)
-            val apiServer = when (selectedServer) {
-                "s-1" -> "hd-1"
-                "s-2" -> "rapidcloud"
-                "s-3" -> "megastream"
-                else -> "hd-1"
-            }
-            viewModel.initialize(animeId, nextEp.id, activeCategory, apiServer)
+            activeEpisodeId = nextEp.id
         }
     }
 
@@ -1009,7 +1002,7 @@ fun PlayerScreen(
             capturedSubtitles.clear()
             extractionState = ExtractionState.EXTRACTING
             timeoutKey++
-            val retryUrl = getEmbedUrl(selectedServer, episodeId, activeCategory)
+            val retryUrl = getEmbedUrl(selectedServer, activeEpisodeId, activeCategory)
             webView.loadUrl(retryUrl)
         } else {
             fallbackToNextServer()
@@ -1075,11 +1068,11 @@ fun PlayerScreen(
             val pos = exoPlayer.currentPosition
             val dur = exoPlayer.duration
             if (pos > 0 && dur > 0) {
-                val ep = currentEpisode ?: episodes.find { it.id == episodeId }
+                val ep = currentEpisode ?: episodes.find { it.id == activeEpisodeId }
                 viewModel.saveProgress(
                     animeId = animeId,
                     animeTitle = animeTitle,
-                    episodeId = ep?.id ?: episodeId,
+                    episodeId = ep?.id ?: activeEpisodeId,
                     episodeNumber = ep?.number ?: episodeNumber,
                     episodeTitle = ep?.title ?: "Episode ${ep?.number ?: episodeNumber}",
                     progress = pos,
@@ -1247,11 +1240,11 @@ fun PlayerScreen(
             val now = System.currentTimeMillis()
             if (now - lastSavedProgressTime >= 30000L && player.isPlaying) {
                 lastSavedProgressTime = now
-                val ep = currentEpisode ?: episodes.find { it.id == episodeId }
+                val ep = currentEpisode ?: episodes.find { it.id == activeEpisodeId }
                 viewModel.saveProgress(
                     animeId = animeId,
                     animeTitle = animeTitle,
-                    episodeId = ep?.id ?: episodeId,
+                    episodeId = ep?.id ?: activeEpisodeId,
                     episodeNumber = ep?.number ?: episodeNumber,
                     episodeTitle = ep?.title ?: "Episode ${ep?.number ?: episodeNumber}",
                     progress = player.currentPosition,
@@ -1291,8 +1284,8 @@ fun PlayerScreen(
         }
     }
 
-    val localFile = remember(currentEpisode?.id ?: episodeId) { 
-        DownloadManager.getDownloadedFile(context, currentEpisode?.id ?: episodeId) 
+    val localFile = remember(currentEpisode?.id ?: activeEpisodeId) { 
+        DownloadManager.getDownloadedFile(context, currentEpisode?.id ?: activeEpisodeId) 
     }
     val effectiveUiState = remember(uiState, localFile) {
         if (localFile != null && localFile.exists()) {
@@ -1310,16 +1303,8 @@ fun PlayerScreen(
     val nextEp = episodes.find { it.number == currentEpNum + 1 }
     val onNextEpisodeClick = nextEp?.let { ep ->
         {
-            val nextUrl = getEmbedUrl(selectedServer, ep.id, activeCategory)
             localResumePlayback = false
-            resetPlayerState(nextUrl)
-            val apiServer = when (selectedServer) {
-                "s-1" -> "hd-1"
-                "s-2" -> "rapidcloud"
-                "s-3" -> "megastream"
-                else -> "hd-1"
-            }
-            viewModel.initialize(animeId, ep.id, activeCategory, apiServer)
+            activeEpisodeId = ep.id
         }
     }
 
@@ -1416,7 +1401,7 @@ fun PlayerScreen(
             if (taskStatus == null || taskStatus == DownloadStatus.FAILED) {
                 showDownloadServerDialog = true
             } else {
-                val epId = currentEpisode?.id ?: episodeId
+                val epId = currentEpisode?.id ?: activeEpisodeId
                 when (taskStatus) {
                     DownloadStatus.DOWNLOADING, DownloadStatus.QUEUED -> {
                         DebugLogManager.log("USER_ACTION", "Pausing Active Download for episode ID: $epId")
@@ -1474,7 +1459,7 @@ fun PlayerScreen(
             subtitleSizeSp = it
         },
         onRetryClick = {
-            val retryUrl = getEmbedUrl(selectedServer, currentEpisode?.id ?: episodeId, activeCategory)
+            val retryUrl = getEmbedUrl(selectedServer, currentEpisode?.id ?: activeEpisodeId, activeCategory)
             DebugLogManager.log("USER_ACTION", "Clicked Retry playback overlay button. Reloading extractor with: $retryUrl")
             resetPlayerState(retryUrl, isNewEpisode = false)
         },
@@ -1509,11 +1494,11 @@ fun PlayerScreen(
         onTimeoutKeyChanged = { timeoutKey = it },
         onPlaybackPositionChanged = { playbackPosition = it },
         onSaveProgress = { pos, dur ->
-            val ep = currentEpisode ?: episodes.find { it.id == episodeId }
+            val ep = currentEpisode ?: episodes.find { it.id == activeEpisodeId }
             viewModel.saveProgress(
                 animeId = animeId,
                 animeTitle = animeTitle,
-                episodeId = ep?.id ?: episodeId,
+                episodeId = ep?.id ?: activeEpisodeId,
                 episodeNumber = ep?.number ?: episodeNumber,
                 episodeTitle = ep?.title ?: "Episode ${ep?.number ?: episodeNumber}",
                 progress = pos,
@@ -1594,17 +1579,9 @@ fun PlayerScreen(
             showEpisodesSelector = it
         },
         onEpisodeSelect = { clickedEp ->
-            val nextUrl = getEmbedUrl(selectedServer, clickedEp.id, activeCategory)
-            DebugLogManager.log("USER_ACTION", "Selected item from Episode selection list: Episode ${clickedEp.number} (ID: ${clickedEp.id}). Loading next: $nextUrl")
+            DebugLogManager.log("USER_ACTION", "Selected item from Episode selection list: Episode ${clickedEp.number} (ID: ${clickedEp.id}).")
             localResumePlayback = false
-            resetPlayerState(nextUrl)
-            val apiServer = when (selectedServer) {
-                "s-1" -> "hd-1"
-                "s-2" -> "rapidcloud"
-                "s-3" -> "megastream"
-                else -> "hd-1"
-            }
-            viewModel.initialize(animeId, clickedEp.id, activeCategory, apiServer)
+            activeEpisodeId = clickedEp.id
         },
         onServerSelected = { server ->
             DebugLogManager.log("USER_ACTION", "Switched current provider API/Server source to: $server")
@@ -2720,36 +2697,46 @@ fun ExoVideoPlayer(
 
                         subtitleView?.visibility = android.view.View.VISIBLE
                         subtitleView?.apply {
-                            val parsedForegroundColor = when (state.subtitleColor.lowercase()) {
-                                "yellow" -> AndroidColor.YELLOW
-                                "cyan" -> AndroidColor.CYAN
-                                "red" -> AndroidColor.RED
-                                else -> AndroidColor.WHITE
-                            }
-                            val parsedBackgroundColor = AndroidColor.argb(
-                                (state.subtitleBgOpacity * 255).toInt().coerceIn(0, 255),
-                                0, 0, 0
-                            )
-                            val parsedEdgeType = when (state.subtitleStyle) {
-                                "classic_outline", "cyan" -> androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_OUTLINE
-                                "default", "yellow" -> androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_DROP_SHADOW
-                                else -> androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_NONE
-                            }
-                            val parsedEdgeColor = if (parsedEdgeType != androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_NONE) {
-                                AndroidColor.BLACK
-                            } else {
-                                AndroidColor.TRANSPARENT
-                            }
-                            val styleCompat = androidx.media3.ui.CaptionStyleCompat(
-                                parsedForegroundColor,
-                                parsedBackgroundColor,
-                                AndroidColor.TRANSPARENT,
-                                parsedEdgeType,
-                                parsedEdgeColor,
-                                null
-                            )
-                            setStyle(styleCompat)
-                            setFixedTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, state.subtitleSizeSp * state.subtitleSizeScale)
+                             val parsedForegroundColor = when (state.subtitleColor.lowercase()) {
+                                 "yellow" -> AndroidColor.YELLOW
+                                 "green" -> AndroidColor.GREEN
+                                 "cyan" -> AndroidColor.CYAN
+                                 "blue" -> AndroidColor.BLUE
+                                 "pink" -> AndroidColor.parseColor("#F472B6")
+                                 "red" -> AndroidColor.RED
+                                 "black" -> AndroidColor.parseColor("#1F2937")
+                                 else -> AndroidColor.WHITE
+                             }
+                             val parsedBackgroundColor = AndroidColor.argb(
+                                 (state.subtitleBgOpacity * 255).toInt().coerceIn(0, 255),
+                                 0, 0, 0
+                             )
+                             val parsedEdgeType = when (state.subtitleStyle) {
+                                 "classic_outline" -> androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_OUTLINE
+                                 "default" -> androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_DROP_SHADOW
+                                 else -> androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_NONE
+                             }
+                             val parsedEdgeColor = if (parsedEdgeType != androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_NONE) {
+                                 AndroidColor.BLACK
+                             } else {
+                                 AndroidColor.TRANSPARENT
+                             }
+                             val parsedTypeface = when (state.subtitleStyle) {
+                                 "serif" -> android.graphics.Typeface.SERIF
+                                 "monospace" -> android.graphics.Typeface.MONOSPACE
+                                 "bold" -> android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
+                                 else -> null
+                             }
+                             val styleCompat = androidx.media3.ui.CaptionStyleCompat(
+                                 parsedForegroundColor,
+                                 parsedBackgroundColor,
+                                 AndroidColor.TRANSPARENT,
+                                 parsedEdgeType,
+                                 parsedEdgeColor,
+                                 parsedTypeface
+                             )
+                             setStyle(styleCompat)
+                             setFixedTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, state.subtitleSizeSp * state.subtitleSizeScale)
                             post {
                                 val lp = layoutParams as? android.widget.FrameLayout.LayoutParams
                                 if (lp != null) {
@@ -2769,8 +2756,12 @@ fun ExoVideoPlayer(
                     }
                     val parsedForegroundColor = when (state.subtitleColor.lowercase()) {
                         "yellow" -> AndroidColor.YELLOW
+                        "green" -> AndroidColor.GREEN
                         "cyan" -> AndroidColor.CYAN
+                        "blue" -> AndroidColor.BLUE
+                        "pink" -> AndroidColor.parseColor("#F472B6")
                         "red" -> AndroidColor.RED
+                        "black" -> AndroidColor.parseColor("#1F2937")
                         else -> AndroidColor.WHITE
                     }
                     val parsedBackgroundColor = AndroidColor.argb(
@@ -2778,8 +2769,8 @@ fun ExoVideoPlayer(
                         0, 0, 0
                     )
                     val parsedEdgeType = when (state.subtitleStyle) {
-                        "classic_outline", "cyan" -> androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_OUTLINE
-                        "default", "yellow" -> androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_DROP_SHADOW
+                        "classic_outline" -> androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_OUTLINE
+                        "default" -> androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_DROP_SHADOW
                         else -> androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_NONE
                     }
                     val parsedEdgeColor = if (parsedEdgeType != androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_NONE) {
@@ -2787,13 +2778,19 @@ fun ExoVideoPlayer(
                     } else {
                         AndroidColor.TRANSPARENT
                     }
+                    val parsedTypeface = when (state.subtitleStyle) {
+                        "serif" -> android.graphics.Typeface.SERIF
+                        "monospace" -> android.graphics.Typeface.MONOSPACE
+                        "bold" -> android.graphics.Typeface.create(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD)
+                        else -> null
+                    }
                     val styleCompat = androidx.media3.ui.CaptionStyleCompat(
                         parsedForegroundColor,
                         parsedBackgroundColor,
                         AndroidColor.TRANSPARENT,
                         parsedEdgeType,
                         parsedEdgeColor,
-                        null
+                        parsedTypeface
                     )
                     view.subtitleView?.setStyle(styleCompat)
                     view.subtitleView?.setFixedTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, state.subtitleSizeSp * state.subtitleSizeScale)

@@ -1247,8 +1247,12 @@ fun SubtitleCustomizerOverlay(
                             ) {
                                 val fontColor = when (tempColor.lowercase()) {
                                     "yellow" -> Color.Yellow
+                                    "green" -> Color(0xFF4ADE80)
                                     "cyan" -> Color.Cyan
+                                    "blue" -> Color(0xFF60A5FA)
+                                    "pink" -> Color(0xFFF472B6)
                                     "red" -> NetflixRed
+                                    "black" -> Color(0xFF1F2937)
                                     else -> Color.White
                                 }
                                 val fontSize = (14 * tempSizeScale).sp
@@ -1280,11 +1284,19 @@ fun SubtitleCustomizerOverlay(
                                         )
                                     }
 
+                                    val isBold = tempStyle == "bold"
+                                    val fontFamily = when (tempStyle) {
+                                        "serif" -> androidx.compose.ui.text.font.FontFamily.Serif
+                                        "monospace" -> androidx.compose.ui.text.font.FontFamily.Monospace
+                                        else -> androidx.compose.ui.text.font.FontFamily.Default
+                                    }
+
                                     Text(
                                         text = "Lorem Ipsum is simply dummy text.",
                                         color = fontColor,
                                         fontSize = fontSize,
-                                        fontWeight = FontWeight.Bold,
+                                        fontWeight = if (isBold) FontWeight.Bold else FontWeight.Normal,
+                                        fontFamily = fontFamily,
                                         textAlign = TextAlign.Center
                                     )
                                 }
@@ -1366,26 +1378,51 @@ fun SubtitleCustomizerOverlay(
                 // Font Style Selectors
                 Text("Font Style", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                 Spacer(modifier = Modifier.height(8.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    listOf(
-                        "None" to "none",
-                        "Outlined" to "classic_outline",
-                        "Drop Shadow" to "default"
-                    ).forEach { (label, key) ->
-                        val isSelected = tempStyle == key
-                        Button(
-                            onClick = { tempStyle = key },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(8.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (isSelected) NetflixRed else SurfaceDark,
-                                contentColor = if (isSelected) Color.White else Color.LightGray
-                            )
-                        ) {
-                            Text(label, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        listOf(
+                            "None" to "none",
+                            "Outlined" to "classic_outline",
+                            "Drop Shadow" to "default"
+                        ).forEach { (label, key) ->
+                            val isSelected = tempStyle == key
+                            Button(
+                                onClick = { tempStyle = key },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (isSelected) NetflixRed else SurfaceDark,
+                                    contentColor = if (isSelected) Color.White else Color.LightGray
+                                )
+                            ) {
+                                Text(label, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        listOf(
+                            "Serif" to "serif",
+                            "Monospace" to "monospace",
+                            "Bold" to "bold"
+                        ).forEach { (label, key) ->
+                            val isSelected = tempStyle == key
+                            Button(
+                                onClick = { tempStyle = key },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (isSelected) NetflixRed else SurfaceDark,
+                                    contentColor = if (isSelected) Color.White else Color.LightGray
+                                )
+                            ) {
+                                Text(label, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
                 }
@@ -1395,22 +1432,43 @@ fun SubtitleCustomizerOverlay(
                 // Font Color Selectors
                 Text("Font Color", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                 Spacer(modifier = Modifier.height(8.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    listOf("White", "Yellow", "Cyan", "Red").forEach { c ->
-                        val isSelected = tempColor.equals(c, ignoreCase = true)
-                        Button(
-                            onClick = { tempColor = c },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(8.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (isSelected) NetflixRed else SurfaceDark,
-                                contentColor = if (isSelected) Color.White else Color.LightGray
-                            )
-                        ) {
-                            Text(c, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        listOf("White", "Yellow", "Green", "Cyan").forEach { c ->
+                            val isSelected = tempColor.equals(c, ignoreCase = true)
+                            Button(
+                                onClick = { tempColor = c },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (isSelected) NetflixRed else SurfaceDark,
+                                    contentColor = if (isSelected) Color.White else Color.LightGray
+                                )
+                            ) {
+                                Text(c, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        listOf("Blue", "Pink", "Red", "Black").forEach { c ->
+                            val isSelected = tempColor.equals(c, ignoreCase = true)
+                            Button(
+                                onClick = { tempColor = c },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(8.dp),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (isSelected) NetflixRed else SurfaceDark,
+                                    contentColor = if (isSelected) Color.White else Color.LightGray
+                                )
+                            ) {
+                                Text(c, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
                 }

@@ -280,10 +280,7 @@ export default function PlayerPage() {
 
           if (!isMounted) return;
           currentDetail = detailData;
-          currentEps = (epData?.episodes || []).map(ep => ({
-            ...ep,
-            number: typeof ep.number === 'number' ? ep.number : (parseFloat(ep.number) || 0)
-          })).sort((a, b) => a.number - b.number);
+          currentEps = epData?.episodes || [];
 
           setAnimeDetail(detailData);
           setEpisodes(currentEps);
@@ -601,7 +598,8 @@ export default function PlayerPage() {
     }
   };
 
-  const handleProgressSave = async (progressMs, durationMs) => {
+  const handleProgressSave = async (progressMs, durationMs, progressEpId) => {
+    if (!progressEpId || progressEpId !== episodeId) return;
     if (!currentUser || !activeProfile || !animeDetail || !currentEpisode) return;
 
     try {
@@ -652,8 +650,11 @@ export default function PlayerPage() {
     }
   };
 
-  const handleEpisodeEnded = () => {
-    if (!currentEpisode || currentEpisode.episodeId !== episodeId) return;
+  const handleEpisodeEnded = (endedEpId) => {
+    if (!endedEpId || endedEpId !== episodeId) {
+      console.log(`[PlayerPage] Guarded handleEpisodeEnded: endedEpId (${endedEpId}) !== route episodeId (${episodeId})`);
+      return;
+    }
 
     const currentIndex = episodes.findIndex(e => e.episodeId === episodeId);
     const isLastEpisode = currentIndex !== -1 && currentIndex === episodes.length - 1;
@@ -767,8 +768,8 @@ export default function PlayerPage() {
             intro={skipIntroRange}
             outro={skipOutroRange}
             initialTime={initialSavedProgress}
-            onProgress={handleProgressSave}
-            onEnded={handleEpisodeEnded}
+            onProgress={(progress, duration) => handleProgressSave(progress, duration, currentEpisode?.episodeId)}
+            onEnded={() => handleEpisodeEnded(currentEpisode?.episodeId)}
             embedUrl={embedFallback}
             fallbackNotice={fallbackNotice}
             loadingStatus={loadingStatus}

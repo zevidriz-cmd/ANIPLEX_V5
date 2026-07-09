@@ -54,6 +54,9 @@ export function ProfileProvider({ children }) {
         const found = profiles.find(p => p.id === savedProfileId);
         if (found) {
           setActiveProfile(found);
+          if (found.settings) {
+            applySettingsToLocalStorage(found.settings);
+          }
         }
       }
     }
@@ -80,6 +83,9 @@ export function ProfileProvider({ children }) {
         const found = list.find(p => p.id === savedProfileId);
         if (found) {
           setActiveProfile(found);
+          if (found.settings) {
+            applySettingsToLocalStorage(found.settings);
+          }
         }
       }
     } catch (e) {
@@ -163,9 +169,11 @@ export function ProfileProvider({ children }) {
       if (subs.color) {
         const COLORS = ["#FFFFFF", "#FFE600", "#4ADE80", "#22D3EE", "#60A5FA", "#F472B6", "#F87171", "#1F2937"];
         const COLOR_NAMES = ["White", "Yellow", "Green", "Cyan", "Blue", "Pink", "Red", "Black"];
-        const colorIdx = COLOR_NAMES.indexOf(subs.color);
+        const colorIdx = COLOR_NAMES.findIndex(name => name.toLowerCase() === subs.color.toLowerCase());
         if (colorIdx !== -1) {
           localStorage.setItem("anistream_subtitle_color", COLORS[colorIdx]);
+        } else if (COLORS.includes(subs.color.toUpperCase())) {
+          localStorage.setItem("anistream_subtitle_color", subs.color.toUpperCase());
         }
       }
       if (subs.bgOpacity !== undefined) {
