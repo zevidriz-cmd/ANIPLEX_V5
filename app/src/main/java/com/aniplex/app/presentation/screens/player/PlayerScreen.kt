@@ -402,7 +402,7 @@ fun PlayerScreen(
     val metadataScrollState = rememberScrollState()
     val settingsScrollState = rememberScrollState()
 
-    val webView = remember(activeEpisodeId, activeCategory, selectedServer) {
+    val webView = remember {
         CookieSaver.restoreCookies(context)
         WebView(context).apply {
             layoutParams = ViewGroup.LayoutParams(1, 1)
@@ -417,13 +417,19 @@ fun PlayerScreen(
                     super.onReceivedTitle(view, title)
                     val titleLower = title?.lowercase() ?: ""
                     DebugLogManager.log("ANIPLEX_PLAYER", "WebView title updated: $title")
-                    if (titleLower.contains("404") || 
-                        titleLower.contains("not found") || 
-                        titleLower.contains("error") || 
-                        titleLower.contains("oops") || 
-                        titleLower.contains("something went wrong") ||
-                        titleLower.contains("forbidden") ||
-                        titleLower.contains("failed")) {
+                    val isExactError = titleLower == "error" || titleLower == "404" || titleLower == "502" || titleLower == "504"
+                    val containsError = titleLower.contains("404 not found") || 
+                            titleLower.contains("page not found") || 
+                            titleLower.contains("bad gateway") || 
+                            titleLower.contains("gateway timeout") || 
+                            titleLower.contains("service unavailable") ||
+                            titleLower.contains("connection error") ||
+                            titleLower.contains("something went wrong") ||
+                            titleLower.contains("forbidden") ||
+                            titleLower.contains("failed") ||
+                            titleLower.contains("oops")
+                    
+                    if (isExactError || containsError) {
                         DebugLogManager.log("ANIPLEX_PLAYER", "Received error in title: '$title'. Triggering server fallback...")
                         Handler(Looper.getMainLooper()).post {
                             fallbackToNextServerRef?.invoke()
@@ -638,8 +644,12 @@ fun PlayerScreen(
 
     DisposableEffect(webView) {
         onDispose {
-            webView.stopLoading()
-            webView.destroy()
+            try {
+                webView.stopLoading()
+                webView.destroy()
+            } catch (e: Exception) {
+                DebugLogManager.log("ANIPLEX_PLAYER", "Error cleaning WebView on dispose: ${e.message}")
+            }
         }
     }
 
@@ -652,18 +662,18 @@ fun PlayerScreen(
                 if (!isNewEpisode) {
                     serverSwitchPosition = pos
                     DebugLogManager.log("ANIPLEX_PLAYER", "Cached current position $pos in resetPlayerState for server switch (duration: $dur).")
-                }
-                if (dur > 0) {
-                    val ep = currentEpisode ?: episodes.find { it.id == episodeId }
-                    viewModel.saveProgress(
-                        animeId = animeId,
-                        animeTitle = animeTitle,
-                        episodeId = ep?.id ?: episodeId,
-                        episodeNumber = ep?.number ?: episodeNumber,
-                        episodeTitle = ep?.title ?: "Episode ${ep?.number ?: episodeNumber}",
-                        progress = pos,
-                        duration = dur
-                    )
+                    if (dur > 0) {
+                        val ep = currentEpisode ?: episodes.find { it.id == episodeId }
+                        viewModel.saveProgress(
+                            animeId = animeId,
+                            animeTitle = animeTitle,
+                            episodeId = ep?.id ?: episodeId,
+                            episodeNumber = ep?.number ?: episodeNumber,
+                            episodeTitle = ep?.title ?: "Episode ${ep?.number ?: episodeNumber}",
+                            progress = pos,
+                            duration = dur
+                        )
+                    }
                 }
             }
         }
@@ -687,14 +697,18 @@ fun PlayerScreen(
         isControlsVisible = false
         showGestureIndicator = false
         
-        exoPlayerRef?.stop()
-        exoPlayerRef?.clearMediaItems()
-        
-        webView.apply {
-            stopLoading()
-            clearHistory()
-            onResume()
-            loadUrl(newEpisodeEmbedUrl)
+        try {
+            exoPlayerRef?.stop()
+            exoPlayerRef?.clearMediaItems()
+            
+            webView.apply {
+                stopLoading()
+                clearHistory()
+                onResume()
+                loadUrl(newEpisodeEmbedUrl)
+            }
+        } catch (e: Exception) {
+            DebugLogManager.log("ANIPLEX_PLAYER", "Error resetting player WebView state: ${e.message}")
         }
     }
 
@@ -819,6 +833,7 @@ fun PlayerScreen(
         localResumePlayback = resumePlayback
         
         val isNewEpisode = (activeEpisodeId != lastEpisodeId)
+        val isFirstLoad = lastEpisodeId.isEmpty()
         
         // Caching current position of ExoPlayer if it's a server or category switch
         if (!isNewEpisode && (selectedServer != lastServer || activeCategory != lastCategory)) {
@@ -828,6 +843,28 @@ fun PlayerScreen(
                 if (currentPos > 0) {
                     serverSwitchPosition = currentPos
                     DebugLogManager.log("ANIPLEX_PLAYER", "Cached current position $currentPos before manual switch")
+                }
+            }
+        }
+
+        // Save progress of the PREVIOUS episode before resetting the player state
+        if (isNewEpisode && !isFirstLoad) {
+            val player = exoPlayerRef
+            if (player != null) {
+                val pos = player.currentPosition
+                val dur = player.duration
+                if (pos > 0 && dur > 0) {
+                    val prevEp = episodes.find { it.id == lastEpisodeId }
+                    viewModel.saveProgress(
+                        animeId = animeId,
+                        animeTitle = animeTitle,
+                        episodeId = prevEp?.id ?: lastEpisodeId,
+                        episodeNumber = prevEp?.number ?: episodeNumber,
+                        episodeTitle = prevEp?.title ?: "Episode ${prevEp?.number ?: episodeNumber}",
+                        progress = pos,
+                        duration = dur
+                    )
+                    DebugLogManager.log("ANIPLEX_PLAYER", "Saved progress for previous episode $lastEpisodeId: $pos/$dur")
                 }
             }
         }
@@ -843,7 +880,7 @@ fun PlayerScreen(
             "s-3" -> "megastream"
             else -> "hd-1"
         }
-        val flowStartProgress = if (lastEpisodeId.isEmpty()) initialProgressParam else 0L
+        val flowStartProgress = if (isFirstLoad) initialProgressParam else 0L
         viewModel.initialize(animeId, activeEpisodeId, activeCategory, apiServer, flowStartProgress)
     }
 
@@ -857,7 +894,11 @@ fun PlayerScreen(
                     retryCount++
                     timeoutKey++
                     val retryUrl = getEmbedUrl(selectedServer, activeEpisodeId, activeCategory)
-                    webView.loadUrl(retryUrl)
+                    try {
+                        webView.loadUrl(retryUrl)
+                    } catch (e: Exception) {
+                        DebugLogManager.log("ANIPLEX_PLAYER", "Failed to load retry URL: ${e.message}")
+                    }
                 } else {
                     fallbackToNextServer()
                 }
@@ -900,7 +941,7 @@ fun PlayerScreen(
                     .setContentTitle("Preparing Download")
                     .setContentText("Downloading $animeTitle - Episode $currentEpNum...")
                     .setPriority(androidx.core.app.NotificationCompat.PRIORITY_LOW)
-                notificationManager.notify(4829, builder.build())
+                notificationManager.notify(epId.hashCode(), builder.build())
             }
         }
     }
@@ -924,7 +965,11 @@ fun PlayerScreen(
                 getEmbedUrl(selectedServer, activeEpisodeId, activeCategory)
             }
             if (webView.url != embedUrl) {
-                webView.loadUrl(embedUrl)
+                try {
+                    webView.loadUrl(embedUrl)
+                } catch (e: Exception) {
+                    DebugLogManager.log("ANIPLEX_PLAYER", "Failed to load auto-check URL: ${e.message}")
+                }
             }
         }
     }
@@ -977,6 +1022,7 @@ fun PlayerScreen(
         ExoPlayer.Builder(context, renderersFactory)
             .setLoadControl(loadControl)
             .setAudioAttributes(audioAttributes, true)
+            .setHandleAudioBecomingNoisy(true)
             .build()
     }
 
@@ -994,18 +1040,27 @@ fun PlayerScreen(
     }
 
     val onPlayerErrorAction by rememberUpdatedState {
-        if (retryCount < 2) {
-            retryCount++
-            capturedStreamUrl = null
-            extractedUserAgent = null
-            extractedCookies = null
-            capturedSubtitles.clear()
-            extractionState = ExtractionState.EXTRACTING
-            timeoutKey++
-            val retryUrl = getEmbedUrl(selectedServer, activeEpisodeId, activeCategory)
-            webView.loadUrl(retryUrl)
+        val currentProvider = viewModel.activeProvider.value
+        if (currentProvider != "zoro") {
+            viewModel.handlePlaybackError(activeCategory)
         } else {
-            fallbackToNextServer()
+            if (retryCount < 2) {
+                retryCount++
+                capturedStreamUrl = null
+                extractedUserAgent = null
+                extractedCookies = null
+                capturedSubtitles.clear()
+                extractionState = ExtractionState.EXTRACTING
+                timeoutKey++
+                val retryUrl = getEmbedUrl(selectedServer, activeEpisodeId, activeCategory)
+                try {
+                    webView.loadUrl(retryUrl)
+                } catch (e: Exception) {
+                    DebugLogManager.log("ANIPLEX_PLAYER", "Failed to load error retry URL: ${e.message}")
+                }
+            } else {
+                fallbackToNextServer()
+            }
         }
     }
 

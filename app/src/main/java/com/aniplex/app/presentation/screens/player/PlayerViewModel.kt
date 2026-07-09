@@ -122,6 +122,31 @@ class PlayerViewModel @Inject constructor(
 
     init {
         DebugLogManager.isLoggingEnabled = enableDiagnostics
+
+        viewModelScope.launch {
+            combine(_episodes, _currentEpisodeId) { list, id ->
+                list.find { it.id == id }
+            }.collect { ep ->
+                if (ep != null) {
+                    _currentEpisode.value = ep
+                }
+            }
+        }
+
+        viewModelScope.launch {
+            combine(_animeDetail, _currentEpisode) { detail, episode ->
+                if (detail != null && episode != null) {
+                    Pair(detail.malId, episode.number)
+                } else null
+            }.collect { pair ->
+                if (pair != null) {
+                    val (malId, epNum) = pair
+                    if (malId.isNotEmpty() && malId != "0") {
+                        fetchSkipTimes(malId, epNum)
+                    }
+                }
+            }
+        }
     }
 
     var preferredQuality: String
@@ -253,10 +278,15 @@ class PlayerViewModel @Inject constructor(
     private val _currentEpisode = MutableStateFlow<Episode?>(null)
     val currentEpisode: StateFlow<Episode?> = _currentEpisode.asStateFlow()
 
+    private val _currentEpisodeId = MutableStateFlow("")
+
     private val _skipTimes = MutableStateFlow<SkipTimes>(SkipTimes())
     val skipTimes: StateFlow<SkipTimes> = _skipTimes.asStateFlow()
 
     private var lastFetchedSkipKey: String? = null
+    private var detailsJob: Job? = null
+    private var episodesJob: Job? = null
+    private var lastAnimeId: String? = null
 
     private fun fetchSkipTimes(malIdStr: String, episodeNumber: Int) {
         val malId = malIdStr.toIntOrNull() ?: return
@@ -306,44 +336,42 @@ class PlayerViewModel @Inject constructor(
         _fallbackStatusMessage.value = null
         failedProviders.clear()
         
-        _animeDetail.value = null
-        _currentEpisode.value = null
         lastFetchedSkipKey = null
-        
-        viewModelScope.launch {
-            // 1. Fetch Anime Detail (for poster image)
-            repository.getAnimeDetail(animeId, false).collect { result ->
-                if (result is Result.Success) {
-                    posterUrl = result.data.poster
-                    _animeDetail.value = result.data
-                }
-            }
-        }
+        _currentEpisodeId.value = episodeId
 
-        viewModelScope.launch {
-            // 2. Fetch Episodes List (to support next/prev navigation)
-            repository.getEpisodes(animeId, false).collect { result ->
-                if (result is Result.Success) {
-                    _episodes.value = result.data
-                    val ep = result.data.find { it.id == episodeId }
-                    _currentEpisode.value = ep
-                }
-            }
-        }
+        val isNewAnime = (animeId != lastAnimeId)
+        lastAnimeId = animeId
 
-        viewModelScope.launch {
-            // Reactively fetch skip times once both detail (malId) and currentEpisode (episode number) are loaded
-            combine(_animeDetail, _currentEpisode) { detail, episode ->
-                if (detail != null && episode != null) {
-                    Pair(detail.malId, episode.number)
-                } else null
-            }.collect { pair ->
-                if (pair != null) {
-                    val (malId, epNum) = pair
-                    if (malId.isNotEmpty() && malId != "0") {
-                        fetchSkipTimes(malId, epNum)
+        if (isNewAnime) {
+            _animeDetail.value = null
+            _currentEpisode.value = null
+            _episodes.value = emptyList()
+            detailsJob?.cancel()
+            episodesJob?.cancel()
+
+            detailsJob = viewModelScope.launch {
+                // 1. Fetch Anime Detail (for poster image)
+                repository.getAnimeDetail(animeId, false).collect { result ->
+                    if (result is Result.Success) {
+                        posterUrl = result.data.poster
+                        _animeDetail.value = result.data
                     }
                 }
+            }
+
+            episodesJob = viewModelScope.launch {
+                // 2. Fetch Episodes List (to support next/prev navigation)
+                repository.getEpisodes(animeId, false).collect { result ->
+                    if (result is Result.Success) {
+                        _episodes.value = result.data
+                    }
+                }
+            }
+        } else {
+            // Same anime, reactively update the active episode details instantly from existing list
+            val ep = _episodes.value.find { it.id == episodeId }
+            if (ep != null) {
+                _currentEpisode.value = ep
             }
         }
 
@@ -521,6 +549,23 @@ class PlayerViewModel @Inject constructor(
         failedProviders.add("zoro")
         val epId = _currentEpisode.value?.id ?: ""
         if (epId.isNotEmpty()) {
+            loadPlaybackStream(
+                episodeId = epId,
+                server = "hd-1",
+                category = audioCategory
+            )
+        } else {
+            loadIframeFallback(audioCategory)
+        }
+    }
+
+    fun handlePlaybackError(audioCategory: String) {
+        val current = _activeProvider.value
+        DebugLogManager.log("ANIPLEX_PLAYER", "Playback failed for provider: $current. Adding to failed providers.")
+        failedProviders.add(current)
+        
+        val epId = _currentEpisode.value?.id ?: ""
+        if (epId.isNotEmpty() && current != "megaplay-iframe") {
             loadPlaybackStream(
                 episodeId = epId,
                 server = "hd-1",
