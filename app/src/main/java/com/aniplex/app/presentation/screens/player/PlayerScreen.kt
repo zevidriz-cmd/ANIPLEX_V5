@@ -696,6 +696,23 @@ fun PlayerScreen(
         playbackError = null
         isControlsVisible = false
         showGestureIndicator = false
+
+        if (isNewEpisode) {
+            try {
+                // Wipe cache and storage to prevent Cloudflare/Zoro error leak across shows/episodes
+                webView.clearCache(true)
+                webView.clearFormData()
+                android.webkit.WebStorage.getInstance().deleteAllData()
+                
+                val cookieManager = android.webkit.CookieManager.getInstance()
+                cookieManager.removeSessionCookies(null)
+                cookieManager.flush()
+                
+                DebugLogManager.log("ANIPLEX_PLAYER", "Cleaned WebView cache, storage, and session cookies for new episode.")
+            } catch (e: Exception) {
+                DebugLogManager.log("ANIPLEX_PLAYER", "Error cleaning WebView cache: ${e.message}")
+            }
+        }
         
         try {
             exoPlayerRef?.stop()
