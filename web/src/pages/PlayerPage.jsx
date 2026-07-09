@@ -604,9 +604,9 @@ export default function PlayerPage() {
     try {
       const isNearEnd = (durationMs > 0) && (progressMs / durationMs >= 0.90 || (durationMs - progressMs) <= 120000);
 
-      const currentIndex = episodes.findIndex(e => e.episodeId === episodeId);
+      const currentIndex = episodes.findIndex(e => e.episodeId === currentEpisode.episodeId);
 
-      let finalEpisodeId = episodeId;
+      let finalEpisodeId = currentEpisode.episodeId;
       let finalEpisodeNumber = currentEpisode.number;
       let finalEpisodeTitle = currentEpisode.title || `Episode ${currentEpisode.number}`;
       let finalProgress = progressMs;
@@ -650,6 +650,8 @@ export default function PlayerPage() {
   };
 
   const handleEpisodeEnded = () => {
+    if (!currentEpisode || currentEpisode.episodeId !== episodeId) return;
+
     const currentIndex = episodes.findIndex(e => e.episodeId === episodeId);
     const isLastEpisode = currentIndex !== -1 && currentIndex === episodes.length - 1;
     if (isLastEpisode) {

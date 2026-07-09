@@ -91,6 +91,7 @@ export default function WatchlistPage() {
               id={item.id}
               name={item.name}
               poster={item.poster}
+              status={item.status}
               onRemove={handleRemove}
             />
           ))}

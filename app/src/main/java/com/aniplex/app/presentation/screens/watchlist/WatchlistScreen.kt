@@ -41,6 +41,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -439,7 +441,6 @@ fun WatchlistRowCard(
                 modifier = Modifier
                     .size(width = 54.dp, height = 76.dp)
                     .clip(RoundedCornerShape(8.dp))
-                    .background(Color.DarkGray)
             ) {
                 AsyncImage(
                     model = item.poster,
@@ -448,12 +449,32 @@ fun WatchlistRowCard(
                     onLoading = { isImageLoading = true; isImageError = false },
                     onSuccess = { isImageLoading = false; isImageError = false },
                     onError = { isImageLoading = false; isImageError = true },
+                    colorFilter = if (item.status == "completed") {
+                        ColorFilter.colorMatrix(ColorMatrix().apply { setToSaturation(0f) })
+                    } else {
+                        null
+                    },
                     modifier = Modifier
                         .fillMaxSize()
                         .then(if (isImageLoading) Modifier.shimmer() else Modifier)
                 )
                 if (isImageError) {
                     ErrorPlaceholder(modifier = Modifier.fillMaxSize())
+                }
+                if (item.status == "completed") {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.Black.copy(alpha = 0.4f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Replay,
+                            contentDescription = "Rewatch",
+                            tint = Color.White,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
                 }
             }
 
@@ -471,14 +492,49 @@ fun WatchlistRowCard(
                     overflow = TextOverflow.Ellipsis
                 )
                 Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "Dub | Sub",
-                    fontSize = 11.sp,
-                    color = TextSecondary
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        text = "Dub | Sub",
+                        fontSize = 11.sp,
+                        color = TextSecondary
+                    )
+                    
+                    val statusText = when (item.status) {
+                        "watching" -> "Watching"
+                        "planning" -> "Plan to Watch"
+                        "completed" -> "Completed"
+                        else -> null
+                    }
+                    val statusColor = when (item.status) {
+                        "watching" -> Color(0xFF4CAF50)
+                        "planning" -> Color(0xFF00BCD4)
+                        "completed" -> CrunchyrollOrange
+                        else -> null
+                    }
+                    
+                    if (statusText != null && statusColor != null) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(statusColor.copy(alpha = 0.15f))
+                                .border(0.5.dp, statusColor.copy(alpha = 0.5f), RoundedCornerShape(4.dp))
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                text = statusText,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = statusColor
+                            )
+                        }
+                    }
+                }
             }
 
-            Spacer(modifier = Modifier.width(8.dp))
+            Spacer(modifier = Modifier.width(16.dp))
 
             // Stitch Buttons: Favorite Heart
             IconButton(onClick = onToggleFavorite) {

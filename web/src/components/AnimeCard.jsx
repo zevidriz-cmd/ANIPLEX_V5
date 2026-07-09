@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
-import { Play, Info, Trash2, MoreVertical } from "lucide-react";
+import { Play, Info, Trash2, MoreVertical, RotateCcw } from "lucide-react";
 
 export default function AnimeCard({ 
   id, 
@@ -14,7 +14,8 @@ export default function AnimeCard({
   onRemove,
   episodeId,
   audioCategory,
-  onClick
+  onClick,
+  status
 }) {
   const subCount = episodes?.sub;
   const dubCount = episodes?.dub;
@@ -58,14 +59,25 @@ export default function AnimeCard({
         className="anime-card-link"
       >
         <div className="poster-wrapper">
-          <img src={poster} alt={name} loading="lazy" className="poster-img" />
+          <img src={poster} alt={name} loading="lazy" className={`poster-img ${status === "completed" ? "completed-grayscale" : ""}`} />
           <div className="poster-overlay">
             <span className="play-icon-circle">
-              <Play size={20} fill="white" />
+              {status === "completed" ? (
+                <RotateCcw size={20} color="white" strokeWidth={2.5} />
+              ) : (
+                <Play size={20} fill="white" />
+              )}
             </span>
           </div>
           
-          {type && <span className="type-badge">{type}</span>}
+          <div className="left-badges">
+            {status && (
+              <span className={`status-badge ${status}`}>
+                {status === "watching" ? "Watching" : status === "completed" ? "Completed" : "Plan to Watch"}
+              </span>
+            )}
+            {type && <span className="type-badge">{type}</span>}
+          </div>
           {rating && <span className="rating-badge">★ {rating}</span>}
           
           <div className="episodes-badges">
@@ -352,6 +364,39 @@ export default function AnimeCard({
         .menu-item-btn.remove:hover {
           background: rgba(229, 9, 20, 0.1);
           color: var(--primary);
+        }
+        .completed-grayscale {
+          filter: grayscale(100%);
+        }
+        .left-badges {
+          position: absolute;
+          top: 8px;
+          left: 8px;
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+          z-index: 3;
+        }
+        .left-badges .type-badge, .left-badges .status-badge {
+          position: static;
+        }
+        .status-badge {
+          padding: 2px 6px;
+          font-size: 0.7rem;
+          font-weight: 700;
+          border-radius: 4px;
+          color: white;
+          text-align: center;
+          white-space: nowrap;
+        }
+        .status-badge.completed {
+          background-color: #E50914;
+        }
+        .status-badge.watching {
+          background-color: #4CAF50;
+        }
+        .status-badge.planning {
+          background-color: #00BCD4;
         }
       `}</style>
     </div>
