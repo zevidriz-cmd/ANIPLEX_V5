@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import javax.inject.Inject
@@ -255,8 +256,14 @@ class PlayerViewModel @Inject constructor(
     private val _skipTimes = MutableStateFlow<SkipTimes>(SkipTimes())
     val skipTimes: StateFlow<SkipTimes> = _skipTimes.asStateFlow()
 
+    private var lastFetchedSkipKey: String? = null
+
     private fun fetchSkipTimes(malIdStr: String, episodeNumber: Int) {
         val malId = malIdStr.toIntOrNull() ?: return
+        val key = "${malId}_$episodeNumber"
+        if (lastFetchedSkipKey == key) return
+        lastFetchedSkipKey = key
+
         viewModelScope.launch {
             repository.getSkipTimes(malId, episodeNumber).collect { result ->
                 if (result is Result.Success) {
@@ -299,18 +306,16 @@ class PlayerViewModel @Inject constructor(
         _fallbackStatusMessage.value = null
         failedProviders.clear()
         
+        _animeDetail.value = null
+        _currentEpisode.value = null
+        lastFetchedSkipKey = null
+        
         viewModelScope.launch {
             // 1. Fetch Anime Detail (for poster image)
             repository.getAnimeDetail(animeId, false).collect { result ->
                 if (result is Result.Success) {
                     posterUrl = result.data.poster
                     _animeDetail.value = result.data
-                    
-                    val epNum = _currentEpisode.value?.number
-                    val mId = result.data.malId
-                    if (epNum != null && mId.isNotEmpty()) {
-                        fetchSkipTimes(mId, epNum)
-                    }
                 }
             }
         }
@@ -322,10 +327,21 @@ class PlayerViewModel @Inject constructor(
                     _episodes.value = result.data
                     val ep = result.data.find { it.id == episodeId }
                     _currentEpisode.value = ep
-                    
-                    val mId = _animeDetail.value?.malId
-                    if (ep != null && mId != null && mId.isNotEmpty()) {
-                        fetchSkipTimes(mId, ep.number)
+                }
+            }
+        }
+
+        viewModelScope.launch {
+            // Reactively fetch skip times once both detail (malId) and currentEpisode (episode number) are loaded
+            combine(_animeDetail, _currentEpisode) { detail, episode ->
+                if (detail != null && episode != null) {
+                    Pair(detail.malId, episode.number)
+                } else null
+            }.collect { pair ->
+                if (pair != null) {
+                    val (malId, epNum) = pair
+                    if (malId.isNotEmpty() && malId != "0") {
+                        fetchSkipTimes(malId, epNum)
                     }
                 }
             }

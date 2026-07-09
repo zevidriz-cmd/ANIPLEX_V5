@@ -843,7 +843,7 @@ fun PlayerScreen(
             "s-3" -> "megastream"
             else -> "hd-1"
         }
-        val flowStartProgress = if (isNewEpisode) initialProgressParam else 0L
+        val flowStartProgress = if (lastEpisodeId.isEmpty()) initialProgressParam else 0L
         viewModel.initialize(animeId, activeEpisodeId, activeCategory, apiServer, flowStartProgress)
     }
 
