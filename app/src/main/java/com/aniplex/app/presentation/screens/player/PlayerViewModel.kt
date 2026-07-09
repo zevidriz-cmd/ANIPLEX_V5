@@ -120,34 +120,7 @@ class PlayerViewModel @Inject constructor(
             profileManager.saveSettingsToFirestore()
         }
 
-    init {
-        DebugLogManager.isLoggingEnabled = enableDiagnostics
 
-        viewModelScope.launch {
-            combine(_episodes, _currentEpisodeId) { list, id ->
-                list.find { it.id == id }
-            }.collect { ep ->
-                if (ep != null) {
-                    _currentEpisode.value = ep
-                }
-            }
-        }
-
-        viewModelScope.launch {
-            combine(_animeDetail, _currentEpisode) { detail, episode ->
-                if (detail != null && episode != null) {
-                    Pair(detail.malId, episode.number)
-                } else null
-            }.collect { pair ->
-                if (pair != null) {
-                    val (malId, epNum) = pair
-                    if (malId.isNotEmpty() && malId != "0") {
-                        fetchSkipTimes(malId, epNum)
-                    }
-                }
-            }
-        }
-    }
 
     var preferredQuality: String
         get() = preferenceManager.preferredQuality
@@ -327,6 +300,35 @@ class PlayerViewModel @Inject constructor(
 
     private val failedProviders = mutableSetOf<String>()
     private var streamJob: Job? = null
+
+    init {
+        DebugLogManager.isLoggingEnabled = enableDiagnostics
+
+        viewModelScope.launch {
+            combine(_episodes, _currentEpisodeId) { list, id ->
+                list.find { it.id == id }
+            }.collect { ep ->
+                if (ep != null) {
+                    _currentEpisode.value = ep
+                }
+            }
+        }
+
+        viewModelScope.launch {
+            combine(_animeDetail, _currentEpisode) { detail, episode ->
+                if (detail != null && episode != null) {
+                    Pair(detail.malId, episode.number)
+                } else null
+            }.collect { pair ->
+                if (pair != null) {
+                    val (malId, epNum) = pair
+                    if (malId.isNotEmpty() && malId != "0") {
+                        fetchSkipTimes(malId, epNum)
+                    }
+                }
+            }
+        }
+    }
 
     fun initialize(animeId: String, episodeId: String, category: String, server: String = "hd-1", initialSavedProgress: Long = 0L) {
         _uiState.value = PlayerUiState.Loading
