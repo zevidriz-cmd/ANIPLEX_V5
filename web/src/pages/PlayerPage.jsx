@@ -280,7 +280,10 @@ export default function PlayerPage() {
 
           if (!isMounted) return;
           currentDetail = detailData;
-          currentEps = epData?.episodes || [];
+          currentEps = (epData?.episodes || []).map(ep => ({
+            ...ep,
+            number: typeof ep.number === 'number' ? ep.number : (parseFloat(ep.number) || 0)
+          })).sort((a, b) => a.number - b.number);
 
           setAnimeDetail(detailData);
           setEpisodes(currentEps);
