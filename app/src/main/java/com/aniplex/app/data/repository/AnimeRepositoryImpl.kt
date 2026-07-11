@@ -1182,7 +1182,7 @@ class AnimeRepositoryImpl @Inject constructor(
         }
     }.flowOn(Dispatchers.IO)
 
-    private val STREAM_PROXY_BASE = "https://aniplex-proxy.f1886391.workers.dev"
+    private val STREAM_PROXY_BASE = "https://anistream-proxy.f1886391.workers.dev"
 
     /**
      * Fetch fallback stream from the Netlify serverless function.
@@ -1210,8 +1210,10 @@ class AnimeRepositoryImpl @Inject constructor(
                 // Map subtitles
                 val subtitles = response.subtitles?.mapNotNull { sub ->
                     if (sub.url != null) {
+                        val cleanTrackUrl = sub.url.removePrefix("https://").removePrefix("http://")
+                        val proxiedTrackUrl = "$STREAM_PROXY_BASE/$cleanTrackUrl"
                         SubtitleTrack(
-                            url = sub.url,
+                            url = proxiedTrackUrl,
                             label = sub.lang ?: "English",
                             isDefault = sub.lang.equals("English", ignoreCase = true)
                         )
@@ -1327,8 +1329,10 @@ class AnimeRepositoryImpl @Inject constructor(
 
             val subtitles = sourcesJson?.tracks?.mapNotNull { track ->
                 if (track.file != null) {
+                    val cleanTrackUrl = track.file.removePrefix("https://").removePrefix("http://")
+                    val proxiedTrackUrl = "$STREAM_PROXY_BASE/$cleanTrackUrl"
                     SubtitleTrack(
-                        url = track.file,
+                        url = proxiedTrackUrl,
                         label = track.label ?: "English",
                         isDefault = track.label?.equals("English", ignoreCase = true) == true
                     )

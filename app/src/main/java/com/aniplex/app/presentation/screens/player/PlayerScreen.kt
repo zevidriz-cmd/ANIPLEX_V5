@@ -258,7 +258,8 @@ data class PlayerCallbacks(
     val onDebugClick: () -> Unit,
     val onDiagnosticsChange: (Boolean) -> Unit,
     val onScreenFitChange: (String) -> Unit = {},
-    val onDismissUpNext: () -> Unit = {}
+    val onDismissUpNext: () -> Unit = {},
+    val onIframeServerSwitch: (String) -> Unit = {}
 )
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
@@ -1677,7 +1678,8 @@ fun PlayerScreen(
             }
         },
         onScreenFitChange = { screenFitMode = it },
-        onDismissUpNext = { isUpNextDismissed = true }
+        onDismissUpNext = { isUpNextDismissed = true },
+        onIframeServerSwitch = { viewModel.switchIframeServer(it) }
     )
 
     if (showDownloadServerDialog) {
@@ -2698,6 +2700,69 @@ fun PlayerContainer(
                                     )
                                     .padding(horizontal = 8.dp, vertical = 4.dp)
                             )
+                        }
+
+                        // Backup Server Selector overlay at the bottom center
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(bottom = 24.dp),
+                            contentAlignment = Alignment.BottomCenter
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .background(
+                                        Color.Black.copy(alpha = 0.75f),
+                                        shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp)
+                                    )
+                                    .border(
+                                        width = 1.dp,
+                                        color = Color.White.copy(alpha = 0.15f),
+                                        shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp)
+                                    )
+                                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                val servers = listOf(
+                                    "megaplay" to "MegaPlay",
+                                    "vidsrc-to" to "VidSrc.to",
+                                    "vidsrc-me" to "VidSrc.me",
+                                    "embed-su" to "Embed.su"
+                                )
+                                servers.forEach { (srvId, srvName) ->
+                                    val isActive = uiState.provider == srvId
+                                    var isFocused by remember { mutableStateOf(false) }
+                                    Box(
+                                        modifier = Modifier
+                                            .onFocusChanged { isFocused = it.isFocused }
+                                            .focusable()
+                                            .background(
+                                                color = when {
+                                                    isActive -> CrunchyrollOrange
+                                                    isFocused -> Color.White.copy(alpha = 0.2f)
+                                                    else -> Color.Transparent
+                                                },
+                                                shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp)
+                                            )
+                                            .border(
+                                                width = if (isFocused && !isActive) 1.5.dp else 0.dp,
+                                                color = if (isFocused) Color.White else Color.Transparent,
+                                                shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp)
+                                            )
+                                            .clickable {
+                                                callbacks.onIframeServerSwitch(srvId)
+                                            }
+                                            .padding(horizontal = 12.dp, vertical = 6.dp)
+                                    ) {
+                                        Text(
+                                            text = srvName,
+                                            color = if (isActive) Color.Black else Color.White,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 }
