@@ -481,9 +481,14 @@ fun PlayerScreen(
                             "WebView load error on: ${request?.url} | Error: $desc (Code: $code)"
                         )
                         if (request?.isForMainFrame == true) {
-                            DebugLogManager.log("ANIPLEX_PLAYER", "Main frame load error: $desc. Triggering fallback...")
-                            Handler(Looper.getMainLooper()).post {
-                                fallbackToNextServerRef?.invoke()
+                            val curProvider = viewModel.activeProvider.value ?: preferredProvider
+                            if (curProvider == "zoro") {
+                                DebugLogManager.log("ANIPLEX_PLAYER", "Main frame load error: $desc. Triggering fallback...")
+                                Handler(Looper.getMainLooper()).post {
+                                    fallbackToNextServerRef?.invoke()
+                                }
+                            } else {
+                                DebugLogManager.log("ANIPLEX_PLAYER", "Main frame load error ignored since active provider is $curProvider")
                             }
                         }
                     } else {
@@ -504,9 +509,14 @@ fun PlayerScreen(
                         "WebView HTTP error response on URL: ${request?.url} | Status: $status | Reason: $phrase"
                     )
                     if (request?.isForMainFrame == true && (status == 404 || status >= 500)) {
-                        DebugLogManager.log("ANIPLEX_PLAYER", "HTTP error $status on main frame. Triggering server fallback...")
-                        Handler(Looper.getMainLooper()).post {
-                            fallbackToNextServerRef?.invoke()
+                        val curProvider = viewModel.activeProvider.value ?: preferredProvider
+                        if (curProvider == "zoro") {
+                            DebugLogManager.log("ANIPLEX_PLAYER", "HTTP error $status on main frame. Triggering server fallback...")
+                            Handler(Looper.getMainLooper()).post {
+                                fallbackToNextServerRef?.invoke()
+                            }
+                        } else {
+                            DebugLogManager.log("ANIPLEX_PLAYER", "HTTP error $status ignored since active provider is $curProvider")
                         }
                     }
                 }
@@ -515,6 +525,9 @@ fun PlayerScreen(
                     view: WebView?,
                     request: WebResourceRequest?
                 ): WebResourceResponse? {
+                    val curProvider = viewModel.activeProvider.value ?: preferredProvider
+                    if (curProvider != "zoro") return null
+                    
                     val url = request?.url?.toString() ?: return null
                     val urlLower = url.lowercase()
                     val cleanUrl = url.split("?")[0].lowercase()
@@ -731,6 +744,11 @@ fun PlayerScreen(
     }
 
     fun fallbackToNextServer() {
+        val curProvider = viewModel.activeProvider.value ?: preferredProvider
+        if (curProvider != "zoro") {
+            DebugLogManager.log("ANIPLEX_PLAYER", "fallbackToNextServer ignored because active provider is $curProvider")
+            return
+        }
         val currentIndex = availableServers.indexOf(selectedServer)
         if (currentIndex != -1 && currentIndex < availableServers.lastIndex) {
             val nextServer = availableServers[currentIndex + 1]
@@ -847,7 +865,11 @@ fun PlayerScreen(
     }
 
     LaunchedEffect(activeEpisodeId, activeCategory, selectedServer) {
-        val initialEmbedUrl = getEmbedUrl(selectedServer, activeEpisodeId, activeCategory)
+        val initialEmbedUrl = if (preferredProvider == "zoro") {
+            getEmbedUrl(selectedServer, activeEpisodeId, activeCategory)
+        } else {
+            "about:blank"
+        }
         localResumePlayback = resumePlayback
         
         val isNewEpisode = (activeEpisodeId != lastEpisodeId)
