@@ -199,7 +199,8 @@ data class PlayerScreenState(
     val showSubtitleBgOpacityDialog: Boolean = false,
     val subtitlePosition: Float = 0.10f,
     val screenFitMode: String = "Fit",
-    val isUpNextDismissed: Boolean = false
+    val isUpNextDismissed: Boolean = false,
+    val fallbackStatusMessage: String? = null
 )
 
 data class PlayerCallbacks(
@@ -289,6 +290,7 @@ fun PlayerScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val animeDetail by viewModel.animeDetail.collectAsStateWithLifecycle()
     val currentEpisode by viewModel.currentEpisode.collectAsStateWithLifecycle()
+    val fallbackStatusMessage by viewModel.fallbackStatusMessage.collectAsStateWithLifecycle()
     var activeEpisodeId by remember(episodeId) { mutableStateOf(episodeId) }
     val currentEpNum = currentEpisode?.number ?: episodeNumber
     val skipTimes by viewModel.skipTimes.collectAsStateWithLifecycle()
@@ -847,12 +849,20 @@ fun PlayerScreen(
         }
     }
 
-    // Reset orientation to portrait on leaving player screen
+    // Reset orientation to portrait and restore screen brightness on leaving player screen
     DisposableEffect(Unit) {
         onDispose {
             if (!isTv) {
                 val activity = context as? Activity
                 activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                
+                // Reset screen brightness to system default on leaving
+                activity?.runOnUiThread {
+                    val window = activity.window
+                    val lp = window.attributes
+                    lp.screenBrightness = android.view.WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+                    window.attributes = lp
+                }
             }
         }
     }
@@ -1471,7 +1481,8 @@ fun PlayerScreen(
         showSubtitleBgOpacityDialog = showSubtitleBgOpacityDialog,
         subtitlePosition = subtitlePosition,
         screenFitMode = screenFitMode,
-        isUpNextDismissed = isUpNextDismissed
+        isUpNextDismissed = isUpNextDismissed,
+        fallbackStatusMessage = fallbackStatusMessage
     )
 
     val callbacks = PlayerCallbacks(
@@ -2452,7 +2463,18 @@ fun PlayerContainer(
             when (uiState) {
                 is PlayerUiState.Loading -> {
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator(color = CrunchyrollOrange)
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            CircularProgressIndicator(color = CrunchyrollOrange)
+                            if (state.fallbackStatusMessage != null) {
+                                Spacer(modifier = Modifier.height(16.dp))
+                                Text(
+                                    text = state.fallbackStatusMessage,
+                                    color = Color.White,
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
                     }
                 }
                 is PlayerUiState.Error -> {
@@ -2908,6 +2930,9 @@ fun ExoVideoPlayer(
                     }
                 },
                 update = { view ->
+                    if (view.player != exoPlayer) {
+                        view.player = exoPlayer
+                    }
                     view.resizeMode = when (state.screenFitMode) {
                         "Stretch" -> AspectRatioFrameLayout.RESIZE_MODE_FILL
                         "Zoom" -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM

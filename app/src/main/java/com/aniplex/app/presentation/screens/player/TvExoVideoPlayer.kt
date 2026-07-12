@@ -256,6 +256,9 @@ fun TvExoVideoPlayer(
                     }
                 },
                 update = { view ->
+                    if (view.player != exoPlayer) {
+                        view.player = exoPlayer
+                    }
                     view.resizeMode = when (state.screenFitMode) {
                         "Stretch" -> AspectRatioFrameLayout.RESIZE_MODE_FILL
                         "Zoom" -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM

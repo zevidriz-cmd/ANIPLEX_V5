@@ -885,6 +885,35 @@ fun TvSettingsContent(
                 }
             }
         }
+        
+        // 4.1. Preferred Streaming Provider
+        val preferredProvider by viewModel.preferredProvider.collectAsStateWithLifecycle()
+        TvSettingsRow(title = "Preferred Streaming Provider") {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                listOf("zoro" to "Zoro (HD-1)", "gogoanime" to "Gogoanime (RapidCloud)").forEach { (providerId, providerLabel) ->
+                    val isSelected = preferredProvider == providerId
+                    var isFocused by remember { mutableStateOf(false) }
+                    Box(
+                        modifier = Modifier
+                            .onFocusChanged { isFocused = it.isFocused }
+                            .clickable { viewModel.setPreferredProvider(providerId) }
+                            .background(
+                                color = if (isSelected) CrunchyrollOrange else if (isFocused) SurfaceDark else Color(0xFF14141A),
+                                shape = RoundedCornerShape(12.dp)
+                            )
+                            .border(
+                                width = if (isFocused) 2.dp else 1.dp,
+                                color = if (isFocused) Color.White else if (isSelected) Color.Transparent else Color(0xFF2C2C35),
+                                shape = RoundedCornerShape(12.dp)
+                            )
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(providerLabel, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
 
         // 4.5. App Updates Settings
         var isCheckingUpdates by remember { mutableStateOf(false) }
