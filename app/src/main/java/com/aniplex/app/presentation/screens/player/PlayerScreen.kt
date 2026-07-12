@@ -345,6 +345,9 @@ fun PlayerScreen(
     var retryPlaybackKey by remember { mutableStateOf(0) }
     var playbackError by remember { mutableStateOf<String?>(null) }
     var lastSavedProgressTime by remember { mutableStateOf(0L) }
+    // Stable ref: defers playWhenReady until ExoPlayer reaches STATE_READY,
+    // preventing audio from leaking while the video surface is still attaching.
+    val pendingPlayWhenReady = remember { mutableStateOf(false) }
     var isControlsVisible by remember { mutableStateOf(false) }
     var controlsInteractionKey by remember { mutableStateOf(0) }
     var gestureIndicatorType by remember { mutableStateOf<String?>(null) }
@@ -741,6 +744,7 @@ fun PlayerScreen(
         
         retryPlaybackKey = 0
         playbackError = null
+        pendingPlayWhenReady.value = false
         isControlsVisible = false
         showGestureIndicator = false
 
@@ -840,11 +844,21 @@ fun PlayerScreen(
                     subtitlesEnabled = viewModel.subtitlesEnabled
                     qualityOption = viewModel.preferredQuality
                     setActiveCategory(viewModel.defaultAudioCategory)
-                    if (localResumePlayback) exoPlayerRef?.play()
+                    // Only resume playback if ExoPlayer is already prepared and ready.
+                    // If it's still buffering or idle, the pendingPlayWhenReady flag
+                    // will handle starting playback when STATE_READY is reached.
+                    val player = exoPlayerRef
+                    if (localResumePlayback && player != null && player.playbackState == Player.STATE_READY) {
+                        player.play()
+                    } else if (localResumePlayback && player != null && player.playbackState != Player.STATE_IDLE) {
+                        // Player is buffering — set the pending flag so it auto-plays when ready
+                        pendingPlayWhenReady.value = true
+                    }
                     webViewRef?.onResume()
                 }
                 Lifecycle.Event.ON_PAUSE, Lifecycle.Event.ON_STOP -> {
                     exoPlayerRef?.pause()
+                    pendingPlayWhenReady.value = false
                     webViewRef?.onPause()
                 }
                 Lifecycle.Event.ON_DESTROY -> {
@@ -1176,6 +1190,13 @@ fun PlayerScreen(
                 DebugLogManager.log("ANIPLEX_EXOPLAYER", "Playback state changed to: $stateName | playWhenReady: ${exoPlayer.playWhenReady}")
                 
                 if (playbackState == Player.STATE_READY) {
+                    // Consume the deferred play flag — this ensures audio doesn't
+                    // start until the video surface is attached and rendering.
+                    if (pendingPlayWhenReady.value) {
+                        exoPlayer.playWhenReady = true
+                        pendingPlayWhenReady.value = false
+                        DebugLogManager.log("ANIPLEX_PLAYER", "Deferred playWhenReady consumed on STATE_READY")
+                    }
                     val pos = serverSwitchPosition
                     if (pos != null && pos > 0) {
                         serverSwitchPosition = null
@@ -1328,7 +1349,10 @@ fun PlayerScreen(
             }
 
             exoPlayer.prepare()
-            exoPlayer.playWhenReady = localResumePlayback
+            // Don't start playback immediately — defer until STATE_READY
+            // so audio doesn't leak while the video surface is still attaching.
+            exoPlayer.playWhenReady = false
+            pendingPlayWhenReady.value = localResumePlayback
         }
     }
 
