@@ -416,6 +416,27 @@ fun PlayerScreen(
             settings.userAgentString = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
             
             webChromeClient = object : android.webkit.WebChromeClient() {
+                override fun onProgressChanged(view: WebView?, newProgress: Int) {
+                    super.onProgressChanged(view, newProgress)
+                    view?.evaluateJavascript("""
+                        (function() {
+                            var muteMedia = function() {
+                                document.querySelectorAll('video, audio').forEach(function(el) {
+                                    el.muted = true;
+                                    el.volume = 0;
+                                    el.setAttribute('muted', 'true');
+                                });
+                            };
+                            muteMedia();
+                            if (!window.hasMuteObserver) {
+                                window.hasMuteObserver = true;
+                                var observer = new MutationObserver(muteMedia);
+                                observer.observe(document.documentElement, { childList: true, subtree: true });
+                            }
+                        })();
+                    """.trimIndent(), null)
+                }
+
                 override fun onReceivedTitle(view: WebView?, title: String?) {
                     super.onReceivedTitle(view, title)
                     val titleLower = title?.lowercase() ?: ""
@@ -1307,7 +1328,7 @@ fun PlayerScreen(
             }
 
             exoPlayer.prepare()
-            exoPlayer.playWhenReady = true
+            exoPlayer.playWhenReady = localResumePlayback
         }
     }
 

@@ -17,8 +17,8 @@ android {
         applicationId = "com.example.aniplex"
         minSdk = 26
         targetSdk = 36
-        versionCode = 24
-        versionName = "1.4.1"
+        versionCode = 25
+        versionName = "1.4.2"
         buildConfigField("String", "UPDATE_URL", "\"https://raw.githubusercontent.com/zevidriz-cmd/aniplex-releases/main/latest-version.json\"")
     }
 
