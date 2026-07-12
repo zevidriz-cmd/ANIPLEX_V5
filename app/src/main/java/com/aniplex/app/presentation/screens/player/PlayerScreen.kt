@@ -2089,72 +2089,74 @@ private fun PlayerScreenContent(
                         Text(text = if (state.activeCategory.equals("dub", true)) "Dubbed" else "Subtitled", color = Color.LightGray, fontSize = 14.sp)
                     }
 
-                    // ACTIVE STREAMING SERVER MULTI-SOURCE SELECTOR (QUICK SELECTOR CHIPS)
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text(
-                        text = "CHOOSE STREAMING SERVER",
-                        color = Color.LightGray.copy(alpha = 0.6f),
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 0.8.sp
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        listOf("s-1", "s-2", "s-3").forEach { srv ->
-                            val isSelected = state.selectedServer == srv
-                            val srvLabel = when (srv) {
-                                "s-1" -> "Server 1 (Primary - CF)"
-                                "s-2" -> "Server 2 (Backup - Animo)"
-                                "s-3" -> "Server 3 (Alternative - Kryz)"
-                                else -> srv
-                            }
-                            
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .background(
-                                        if (isSelected) CrunchyrollOrange else Color.DarkGray.copy(alpha = 0.35f),
-                                        RoundedCornerShape(8.dp)
-                                    )
-                                    .border(
-                                        1.dp,
-                                        if (isSelected) CrunchyrollOrange else Color.DarkGray.copy(alpha = 0.5f),
-                                        RoundedCornerShape(8.dp)
-                                    )
-                                    .clickable {
-                                        if (!isSelected) {
-                                            callbacks.onServerSelected(srv)
-                                            Toast.makeText(context, "Switching to $srvLabel...", Toast.LENGTH_SHORT).show()
+                    if (state.preferredProvider == "zoro") {
+                        // ACTIVE STREAMING SERVER MULTI-SOURCE SELECTOR (QUICK SELECTOR CHIPS)
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(
+                            text = "CHOOSE STREAMING SERVER",
+                            color = Color.LightGray.copy(alpha = 0.6f),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 0.8.sp
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            listOf("s-1", "s-2", "s-3").forEach { srv ->
+                                val isSelected = state.selectedServer == srv
+                                val srvLabel = when (srv) {
+                                    "s-1" -> "Server 1 (Primary - CF)"
+                                    "s-2" -> "Server 2 (Backup - Animo)"
+                                    "s-3" -> "Server 3 (Alternative - Kryz)"
+                                    else -> srv
+                                }
+                                
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .background(
+                                            if (isSelected) CrunchyrollOrange else Color.DarkGray.copy(alpha = 0.35f),
+                                            RoundedCornerShape(8.dp)
+                                        )
+                                        .border(
+                                            1.dp,
+                                            if (isSelected) CrunchyrollOrange else Color.DarkGray.copy(alpha = 0.5f),
+                                            RoundedCornerShape(8.dp)
+                                        )
+                                        .clickable {
+                                            if (!isSelected) {
+                                                callbacks.onServerSelected(srv)
+                                                Toast.makeText(context, "Switching to $srvLabel...", Toast.LENGTH_SHORT).show()
+                                            }
                                         }
-                                    }
-                                    .padding(vertical = 12.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        .padding(vertical = 12.dp),
+                                    contentAlignment = Alignment.Center
                                 ) {
-                                    Icon(
-                                        imageVector = if (isSelected) Icons.Default.CheckCircle else Icons.Default.Cloud,
-                                        contentDescription = null,
-                                        tint = if (isSelected) Color.White else Color.Gray,
-                                        modifier = Modifier.size(14.dp)
-                                    )
-                                    Text(
-                                        text = when (srv) {
-                                            "s-1" -> "Server 1"
-                                            "s-2" -> "Server 2"
-                                            "s-3" -> "Server 3"
-                                            else -> srv
-                                        },
-                                        color = if (isSelected) Color.White else Color.LightGray,
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = if (isSelected) Icons.Default.CheckCircle else Icons.Default.Cloud,
+                                            contentDescription = null,
+                                            tint = if (isSelected) Color.White else Color.Gray,
+                                            modifier = Modifier.size(14.dp)
+                                        )
+                                        Text(
+                                            text = when (srv) {
+                                                "s-1" -> "Server 1"
+                                                "s-2" -> "Server 2"
+                                                "s-3" -> "Server 3"
+                                                else -> srv
+                                            },
+                                            color = if (isSelected) Color.White else Color.LightGray,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
                                 }
                             }
                         }
