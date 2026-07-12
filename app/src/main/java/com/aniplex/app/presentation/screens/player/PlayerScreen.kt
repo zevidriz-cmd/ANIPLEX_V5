@@ -413,7 +413,9 @@ fun PlayerScreen(
         WebView(context).apply {
             layoutParams = ViewGroup.LayoutParams(1, 1)
             settings.javaScriptEnabled = true
-            settings.mediaPlaybackRequiresUserGesture = false
+            // Require user gesture to prevent background sniffer WebView from ever playing audio
+            // and stealing audio focus from the main ExoPlayer.
+            settings.mediaPlaybackRequiresUserGesture = true
             settings.domStorageEnabled = true
             settings.databaseEnabled = true
             settings.userAgentString = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
@@ -747,6 +749,11 @@ fun PlayerScreen(
         pendingPlayWhenReady.value = false
         isControlsVisible = false
         showGestureIndicator = false
+
+        extractedUserAgent = null
+        extractedCookies = null
+        interceptedReferer = null
+        interceptedOrigin = null
 
         if (isNewEpisode) {
             try {
