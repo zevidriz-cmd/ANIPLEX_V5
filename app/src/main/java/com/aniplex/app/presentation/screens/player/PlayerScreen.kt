@@ -662,9 +662,20 @@ fun PlayerScreen(
         onDispose {
             try {
                 webView.stopLoading()
+                webView.evaluateJavascript("""
+                    (function() {
+                        document.querySelectorAll('video, audio').forEach(function(el) {
+                            el.pause();
+                            el.src = '';
+                        });
+                    })();
+                """.trimIndent(), null)
+                val parent = webView.parent as? ViewGroup
+                parent?.removeView(webView)
                 webView.destroy()
+                DebugLogManager.log("ANIPLEX_PLAYER", "Successfully detached and destroyed sniffer WebView")
             } catch (e: Exception) {
-                DebugLogManager.log("ANIPLEX_PLAYER", "Error cleaning WebView on dispose: ${e.message}")
+                DebugLogManager.log("ANIPLEX_PLAYER", "Error cleaning sniffer WebView on dispose: ${e.message}")
             }
         }
     }
@@ -2575,6 +2586,30 @@ fun PlayerContainer(
                     Box(modifier = Modifier.fillMaxSize()) {
                         var iframeWebView by remember { mutableStateOf<android.webkit.WebView?>(null) }
                         var loadError by remember(uiState.iframeUrl) { mutableStateOf<String?>(null) }
+                        
+                        DisposableEffect(iframeWebView) {
+                            onDispose {
+                                iframeWebView?.let { webView ->
+                                    try {
+                                        webView.stopLoading()
+                                        webView.evaluateJavascript("""
+                                            (function() {
+                                                document.querySelectorAll('video, audio').forEach(function(el) {
+                                                    el.pause();
+                                                    el.src = '';
+                                                });
+                                            })();
+                                        """.trimIndent(), null)
+                                        val parent = webView.parent as? ViewGroup
+                                        parent?.removeView(webView)
+                                        webView.destroy()
+                                        DebugLogManager.log("ANIPLEX_PLAYER", "Successfully detached and destroyed iframe WebView")
+                                    } catch (e: Exception) {
+                                        DebugLogManager.log("ANIPLEX_PLAYER", "Error cleaning iframe WebView on dispose: ${e.message}")
+                                    }
+                                }
+                            }
+                        }
                         
                         if (loadError != null) {
                             Column(
