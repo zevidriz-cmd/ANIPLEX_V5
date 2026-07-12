@@ -662,18 +662,17 @@ fun PlayerScreen(
         onDispose {
             try {
                 webView.stopLoading()
-                webView.evaluateJavascript("""
-                    (function() {
-                        document.querySelectorAll('video, audio').forEach(function(el) {
-                            el.pause();
-                            el.src = '';
-                        });
-                    })();
-                """.trimIndent(), null)
-                val parent = webView.parent as? ViewGroup
-                parent?.removeView(webView)
-                webView.destroy()
-                DebugLogManager.log("ANIPLEX_PLAYER", "Successfully detached and destroyed sniffer WebView")
+                webView.loadUrl("about:blank")
+                Handler(Looper.getMainLooper()).post {
+                    try {
+                        val parent = webView.parent as? ViewGroup
+                        parent?.removeView(webView)
+                        webView.destroy()
+                        DebugLogManager.log("ANIPLEX_PLAYER", "Successfully detached and destroyed sniffer WebView")
+                    } catch (e: Exception) {
+                        DebugLogManager.log("ANIPLEX_PLAYER", "Error cleaning sniffer WebView on main loop: ${e.message}")
+                    }
+                }
             } catch (e: Exception) {
                 DebugLogManager.log("ANIPLEX_PLAYER", "Error cleaning sniffer WebView on dispose: ${e.message}")
             }
@@ -828,7 +827,23 @@ fun PlayerScreen(
                     webViewRef?.onPause()
                 }
                 Lifecycle.Event.ON_DESTROY -> {
-                    webViewRef?.destroy()
+                    try {
+                        webViewRef?.let { webView ->
+                            webView.stopLoading()
+                            webView.loadUrl("about:blank")
+                            Handler(Looper.getMainLooper()).post {
+                                try {
+                                    val parent = webView.parent as? ViewGroup
+                                    parent?.removeView(webView)
+                                    webView.destroy()
+                                } catch (e: Exception) {
+                                    DebugLogManager.log("ANIPLEX_PLAYER", "Error destroying webViewRef: ${e.message}")
+                                }
+                            }
+                        }
+                    } catch (e: Exception) {
+                        DebugLogManager.log("ANIPLEX_PLAYER", "Error in Lifecycle ON_DESTROY cleanup: ${e.message}")
+                    }
                 }
                 else -> {}
             }
@@ -2592,18 +2607,17 @@ fun PlayerContainer(
                                 iframeWebView?.let { webView ->
                                     try {
                                         webView.stopLoading()
-                                        webView.evaluateJavascript("""
-                                            (function() {
-                                                document.querySelectorAll('video, audio').forEach(function(el) {
-                                                    el.pause();
-                                                    el.src = '';
-                                                });
-                                            })();
-                                        """.trimIndent(), null)
-                                        val parent = webView.parent as? ViewGroup
-                                        parent?.removeView(webView)
-                                        webView.destroy()
-                                        DebugLogManager.log("ANIPLEX_PLAYER", "Successfully detached and destroyed iframe WebView")
+                                        webView.loadUrl("about:blank")
+                                        Handler(Looper.getMainLooper()).post {
+                                            try {
+                                                val parent = webView.parent as? ViewGroup
+                                                parent?.removeView(webView)
+                                                webView.destroy()
+                                                DebugLogManager.log("ANIPLEX_PLAYER", "Successfully detached and destroyed iframe WebView")
+                                            } catch (e: Exception) {
+                                                DebugLogManager.log("ANIPLEX_PLAYER", "Error cleaning iframe WebView on main loop: ${e.message}")
+                                            }
+                                        }
                                     } catch (e: Exception) {
                                         DebugLogManager.log("ANIPLEX_PLAYER", "Error cleaning iframe WebView on dispose: ${e.message}")
                                     }
