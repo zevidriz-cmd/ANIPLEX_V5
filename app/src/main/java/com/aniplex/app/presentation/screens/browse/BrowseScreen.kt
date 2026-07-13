@@ -92,10 +92,11 @@ fun BrowseScreen(
             .background(BackgroundVoid)
     ) {
         // Stitch Top Tab Row
-        TabRow(
+        ScrollableTabRow(
             selectedTabIndex = pagerState.currentPage,
             containerColor = BackgroundVoid,
             contentColor = Color.White,
+            edgePadding = 16.dp,
             indicator = { tabPositions ->
                 if (pagerState.currentPage < tabPositions.size) {
                     TabRowDefaults.SecondaryIndicator(
@@ -121,6 +122,8 @@ fun BrowseScreen(
                             text = title,
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            softWrap = false,
                             modifier = Modifier.padding(vertical = 12.dp)
                         )
                     }

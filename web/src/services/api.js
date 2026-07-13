@@ -358,8 +358,28 @@ export async function getSeasons(malId) {
   return fetchJson(`${BASE_URL}/seasons/${malId}`);
 }
 
+const STATIC_MAL_RESOLUTIONS = {
+  // Mushoku Tensei
+  "39535": "5694",   // Season 1 Part 1
+  "45576": "6675",   // Season 1 Part 2
+  "51179": "6537",   // Season 2 Part 1
+  "55888": "6159",   // Season 2 Part 2
+  "59193": "8800",   // Season 3
+  "58752": "8800",   // Season 3 Alternative MAL ID
+  "50360": "7045",   // Eris Special
+  
+  // Demon Slayer
+  "38000": "1551",   // Season 1
+  "49926": "17870",  // Mugen Train Arc
+  "47074": "18056"   // Entertainment District Arc
+};
+
 export async function resolveMAL(malId) {
-  return fetchJson(`${BASE_URL}/resolve-mal/${malId}`);
+  const parsedId = String(malId);
+  if (STATIC_MAL_RESOLUTIONS[parsedId]) {
+    return { success: true, anikotoId: STATIC_MAL_RESOLUTIONS[parsedId] };
+  }
+  return fetchJson(`${BASE_URL}/resolve-mal/${parsedId}`);
 }
 
 // AniSkip API integration (direct endpoint)

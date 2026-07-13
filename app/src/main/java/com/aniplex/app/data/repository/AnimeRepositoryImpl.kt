@@ -62,6 +62,24 @@ class AnimeRepositoryImpl @Inject constructor(
     private val DETAIL_CACHE_LIFETIME = 30 * 60 * 1000L // 30 minutes
     private val EPISODES_CACHE_LIFETIME = 60 * 60 * 1000L // 1 hour
 
+    private fun getStaticResolution(malId: String): String? {
+        return when (malId) {
+            // Mushoku Tensei
+            "39535" -> "5694"   // Season 1 Part 1
+            "45576" -> "6675"   // Season 1 Part 2
+            "51179" -> "6537"   // Season 2 Part 1
+            "55888" -> "6159"   // Season 2 Part 2
+            "59193" -> "8800"   // Season 3
+            "58752" -> "8800"   // Season 3 Alternative
+            "50360" -> "7045"   // Eris Special
+
+            // Demon Slayer
+            "38000" -> "1551"   // Demon Slayer: Kimetsu no Yaiba S1
+            "49926" -> "17870"  // Demon Slayer Mugen Train TV Arc
+            "47074" -> "18056"  // Entertainment District Arc
+            else -> null
+        }
+    }
     override fun getHomePage(forceRefresh: Boolean): Flow<Result<HomeData>> = flow {
         val cacheKey = "home_page"
         emit(Result.Loading)
@@ -1473,38 +1491,62 @@ class AnimeRepositoryImpl @Inject constructor(
             kotlinx.coroutines.coroutineScope {
                 seasons.map { season ->
                     async {
-                        val isResolvable = try {
-                            if (season.malId == "38000" || season.malId == "49926") {
-                                true
+                        val resolvedId = try {
+                            val staticId = getStaticResolution(season.malId)
+                            if (staticId != null) {
+                                staticId
                             } else {
                                 val cacheKey = "resolve_mal_${season.malId}"
                                 val cached = cacheDao.getCache(cacheKey)
                                 if (cached != null && cached.jsonContent.isNotBlank()) {
-                                    true
+                                    cached.jsonContent
                                 } else {
-                                    val resolveResponse = apiService.resolveMAL(season.malId)
-                                    if (resolveResponse.success && resolveResponse.data != null && resolveResponse.data.anikotoId.isNotBlank()) {
+                                    val resolveResponse = try {
+                                        apiService.resolveMAL(season.malId)
+                                    } catch (e: Exception) {
+                                        null
+                                    }
+                                    if (resolveResponse != null && resolveResponse.success && resolveResponse.data != null && resolveResponse.data.anikotoId.isNotBlank()) {
+                                        val id = resolveResponse.data.anikotoId
                                         cacheDao.insertCache(
                                             CacheEntity(
                                                 cacheKey = cacheKey,
-                                                jsonContent = resolveResponse.data.anikotoId,
+                                                jsonContent = id,
                                                 timestamp = System.currentTimeMillis()
                                             )
                                         )
-                                        true
+                                        id
                                     } else {
-                                        false
+                                        // Fallback to title search
+                                        val searchResponse = try {
+                                            apiService.search(season.title, 1)
+                                        } catch (e: Exception) {
+                                            null
+                                        }
+                                        val searchId = searchResponse?.data?.animes?.firstOrNull()?.id
+                                        if (!searchId.isNullOrBlank()) {
+                                            cacheDao.insertCache(
+                                                CacheEntity(
+                                                    cacheKey = cacheKey,
+                                                    jsonContent = searchId,
+                                                    timestamp = System.currentTimeMillis()
+                                                )
+                                            )
+                                            searchId
+                                        } else null
                                     }
                                 }
                             }
                         } catch (e: Exception) {
-                            false
+                            null
                         }
-                        season to isResolvable
+                        season to resolvedId
                     }
                 }.map { it.await() }
             }
-        }.filter { it.second }.map { it.first }
+        }.filter { it.second != null }
+         .distinctBy { it.second } // DEDUPLICATE SEASONS BY THEIR RESOLVED CATALOG ID!
+         .map { it.first }
     }
 
     override fun getSeasons(malId: String, forceRefresh: Boolean): Flow<Result<List<Season>>> = flow {
@@ -1788,12 +1830,8 @@ class AnimeRepositoryImpl @Inject constructor(
             return@flow
         }
 
-        // Handle known duplicate MAL ID mappings (e.g., Demon Slayer S1 TV vs Sibling's Bond Movie)
-        val overrideId = when (malId) {
-            "38000" -> "1551" // Demon Slayer: Kimetsu no Yaiba S1 (26 episodes) instead of Sibling's Bond Movie (1 episode)
-            "49926" -> "17870" // Demon Slayer Mugen Train TV Arc (7 episodes)
-            else -> null
-        }
+        // Handle known duplicate MAL ID mappings
+        val overrideId = getStaticResolution(malId)
         if (overrideId != null) {
             emit(Result.Success(overrideId))
             return@flow
@@ -1821,8 +1859,12 @@ class AnimeRepositoryImpl @Inject constructor(
         }
 
         try {
-            val response = apiService.resolveMAL(malId)
-            if (response.success && response.data != null) {
+            val response = try {
+                apiService.resolveMAL(malId)
+            } catch (e: Exception) {
+                null
+            }
+            if (response != null && response.success && response.data != null && response.data.anikotoId.isNotBlank()) {
                 val resolvedId = response.data.anikotoId
                 cacheDao.insertCache(
                     CacheEntity(
@@ -1833,10 +1875,46 @@ class AnimeRepositoryImpl @Inject constructor(
                 )
                 emit(Result.Success(resolvedId))
             } else {
-                if (cachedEntity != null) {
-                    emit(Result.Success(cachedEntity.jsonContent))
+                // Fallback to Jikan title search
+                val jikanTitle = try {
+                    val url = "https://api.jikan.moe/v4/anime/$malId"
+                    val req = okhttp3.Request.Builder().url(url).build()
+                    val resString = withContext(Dispatchers.IO) {
+                        val okResponse = okHttpClient.newCall(req).execute()
+                        if (okResponse.isSuccessful) okResponse.body?.string() else null
+                    }
+                    if (!resString.isNullOrEmpty()) {
+                        val parsed = gson.fromJson(resString, JikanDetailResponse::class.java)
+                        parsed.data?.title_english ?: parsed.data?.title
+                    } else null
+                } catch (e: Exception) {
+                    null
+                }
+
+                val searchId = if (!jikanTitle.isNullOrBlank()) {
+                    try {
+                        val searchResponse = apiService.search(jikanTitle, 1)
+                        searchResponse.data.animes?.firstOrNull()?.id
+                    } catch (e: Exception) {
+                        null
+                    }
+                } else null
+
+                if (!searchId.isNullOrBlank()) {
+                    cacheDao.insertCache(
+                        CacheEntity(
+                            cacheKey = cacheKey,
+                            jsonContent = searchId,
+                            timestamp = currentTime
+                        )
+                    )
+                    emit(Result.Success(searchId))
                 } else {
-                    emit(Result.Error("Could not resolve MAL ID"))
+                    if (cachedEntity != null) {
+                        emit(Result.Success(cachedEntity.jsonContent))
+                    } else {
+                        emit(Result.Error("Could not resolve MAL ID"))
+                    }
                 }
             }
         } catch (e: Exception) {
@@ -2161,6 +2239,10 @@ private data class TmdbSeasonDto(
 
 private data class JikanSchedulesResponse(
     val data: List<JikanAnime>?
+)
+
+private data class JikanDetailResponse(
+    val data: JikanAnime?
 )
 
 private data class JikanSearchRes(

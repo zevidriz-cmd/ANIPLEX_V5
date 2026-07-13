@@ -11,6 +11,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import java.util.Calendar
 import javax.inject.Inject
@@ -48,21 +50,16 @@ class SeasonalViewModel @Inject constructor(
     private val _page = MutableStateFlow(1)
     val page: StateFlow<Int> = _page.asStateFlow()
 
+    private var fetchJob: kotlinx.coroutines.Job? = null
+
     init {
         viewModelScope.launch {
-            selectedSeason.collectLatest {
-                fetchSeasonalData()
-            }
-        }
-        viewModelScope.launch {
-            selectedYear.collectLatest {
-                fetchSeasonalData()
-            }
-        }
-        viewModelScope.launch {
-            page.collectLatest {
-                fetchSeasonalData()
-            }
+            combine(selectedSeason, selectedYear, page) { season, year, p ->
+                Triple(season, year, p)
+            }.distinctUntilChanged()
+             .collectLatest {
+                 fetchSeasonalData()
+             }
         }
     }
 
@@ -81,7 +78,8 @@ class SeasonalViewModel @Inject constructor(
         val year = _selectedYear.value
         val p = _page.value
 
-        viewModelScope.launch {
+        fetchJob?.cancel()
+        fetchJob = viewModelScope.launch {
             repository.getSeasonalAnime(year, season, p).collect { result ->
                 when (result) {
                     is Result.Loading -> _uiState.value = SeasonalUiState.Loading

@@ -208,6 +208,22 @@ const checkIsPart = (titleA, titleB) => {
   return false;
 };
 
+const STATIC_MAL_RESOLUTIONS = {
+  // Mushoku Tensei
+  "39535": "5694",   // Season 1 Part 1
+  "45576": "6675",   // Season 1 Part 2
+  "51179": "6537",   // Season 2 Part 1
+  "55888": "6159",   // Season 2 Part 2
+  "59193": "8800",   // Season 3
+  "58752": "8800",   // Season 3 Alternative MAL ID
+  "50360": "7045",   // Eris Special
+  
+  // Demon Slayer
+  "38000": "1551",   // Season 1
+  "49926": "17870",  // Mugen Train Arc
+  "47074": "18056"   // Entertainment District Arc
+};
+
 export default function DetailPage() {
   const { id: animeId } = useParams();
   const { currentUser } = useAuth();
@@ -220,6 +236,7 @@ export default function DetailPage() {
   const [characters, setCharacters] = useState([]);
   const [seasons, setSeasons] = useState([]);
   const [seasonsLoading, setSeasonsLoading] = useState(false);
+  const [episodesLoading, setEpisodesLoading] = useState(false);
   const [relations, setRelations] = useState([]);
   const [relationsLoading, setRelationsLoading] = useState(false);
   const [resolvingRelationId, setResolvingRelationId] = useState(null);
@@ -395,30 +412,51 @@ export default function DetailPage() {
     };
   }, [detail]);
 
+  const seasonsRef = useRef(seasons);
+  seasonsRef.current = seasons;
+  const detailRef = useRef(detail);
+  detailRef.current = detail;
+  const charactersRef = useRef(characters);
+  charactersRef.current = characters;
+
   useEffect(() => {
+    let isMounted = true;
     async function loadData() {
-      setLoading(true);
-      setSeasons([]);
-      setHasAltVersion(false);
+      // Check if we are just switching seasons of the already loaded franchise
+      const isSwitchingSeason = seasonsRef.current.some(s => s.resolvedId === animeId);
+
+      if (!isSwitchingSeason) {
+        setLoading(true);
+        setSeasons([]);
+        setHasAltVersion(false);
+      } else {
+        setEpisodesLoading(true);
+      }
+
       try {
         // Fetch Details, Episodes, Characters in parallel
         const [detailData, epData, charData] = await Promise.all([
-          getAnimeDetail(animeId),
+          isSwitchingSeason && detailRef.current ? Promise.resolve(detailRef.current) : getAnimeDetail(animeId),
           getEpisodes(animeId).catch(() => ({ episodes: [] })),
-          getCharacters(animeId).catch(() => ({ characters: [] }))
+          isSwitchingSeason && charactersRef.current.length > 0 ? Promise.resolve({ characters: charactersRef.current }) : getCharacters(animeId).catch(() => ({ characters: [] }))
         ]);
 
-        setDetail(detailData);
+        if (!isMounted) return;
+
+        if (!isSwitchingSeason) {
+          setDetail(detailData);
+          setCharacters(charData?.characters || []);
+        }
+        
         const rawEpisodes = epData?.episodes || [];
         setEpisodes(rawEpisodes);
-        setCharacters(charData?.characters || []);
 
         // Respect locked audio preference from settings
         const savedAudioPref = localStorage.getItem("anistream_audio_preference") || "sub";
         setAudioPreference(savedAudioPref);
 
         // Determine if current title is uncut/uncensored
-        const nameLower = detailData?.anime?.info?.name?.toLowerCase() || "";
+        const nameLower = (isSwitchingSeason ? detailRef.current?.anime?.info?.name : detailData?.anime?.info?.name)?.toLowerCase() || "";
         const isUncut = nameLower.includes("uncut") || nameLower.includes("uncensored") || animeId.includes("-uncut");
         setCurrentVersion(isUncut ? "uncensored" : "censored");
 
@@ -433,21 +471,23 @@ export default function DetailPage() {
             getDoc(doc(db, ...profilePath, "ratings", animeId))
           ]);
 
-          setIsWatchlisted(watchSnap.exists());
-          if (watchSnap.exists()) {
-            setWatchlistStatus(watchSnap.data().status || "planning");
-          } else {
-            setWatchlistStatus("");
-          }
-          if (histSnap.exists()) {
-            setHistoryItem(histSnap.data());
-          } else {
-            setHistoryItem(null);
-          }
-          if (rateSnap.exists()) {
-            setUserRating(rateSnap.data().rating || 0);
-          } else {
-            setUserRating(0);
+          if (isMounted) {
+            setIsWatchlisted(watchSnap.exists());
+            if (watchSnap.exists()) {
+              setWatchlistStatus(watchSnap.data().status || "planning");
+            } else {
+              setWatchlistStatus("");
+            }
+            if (histSnap.exists()) {
+              setHistoryItem(histSnap.data());
+            } else {
+              setHistoryItem(null);
+            }
+            if (rateSnap.exists()) {
+              setUserRating(rateSnap.data().rating || 0);
+            } else {
+              setUserRating(0);
+            }
           }
         }
 
@@ -455,7 +495,7 @@ export default function DetailPage() {
         setLoading(false);
 
         // Fetch Jikan fillers asynchronously in the background
-        const malId = detailData?.anime?.info?.malId;
+        const malId = isSwitchingSeason ? detailRef.current?.anime?.info?.malId : detailData?.anime?.info?.malId;
         if (malId && malId !== "0" && malId !== "") {
           const cachedFillers = getCachedFillers(malId);
           if (cachedFillers) {
@@ -468,20 +508,22 @@ export default function DetailPage() {
             );
           } else {
             fetchJikanFillers(malId, rawEpisodes.length).then(({ fillerMap, recapMap }) => {
-              setEpisodes(prev => 
-                prev.map(ep => ({
-                  ...ep,
-                  isFiller: !!fillerMap[ep.number],
-                  isRecap: !!recapMap[ep.number]
-                }))
-              );
-              setCachedFillers(malId, { fillerMap, recapMap });
+              if (isMounted) {
+                setEpisodes(prev => 
+                  prev.map(ep => ({
+                    ...ep,
+                    isFiller: !!fillerMap[ep.number],
+                    isRecap: !!recapMap[ep.number]
+                  }))
+                );
+                setCachedFillers(malId, { fillerMap, recapMap });
+              }
             });
           }
         }
 
-        // Fetch seasons asynchronously in the background
-        if (malId && malId !== "0" && malId !== "") {
+        // Fetch seasons asynchronously in the background (only if loading a fresh show, or if seasons list is empty)
+        if (!isSwitchingSeason && malId && malId !== "0" && malId !== "") {
           const cached = getCachedSeasons(malId);
           if (cached) {
             setSeasons(cached.seasons);
@@ -587,11 +629,12 @@ export default function DetailPage() {
 
               const currentMalId = parseInt(malId);
               const hasCurrent = list.some(s => parseInt(s.malId) === currentMalId);
-              if (!hasCurrent && detailData?.anime?.info) {
+              if (!hasCurrent && (detailData?.anime?.info || detailRef.current?.anime?.info)) {
+                const info = detailData?.anime?.info || detailRef.current?.anime?.info;
                 const currentSeason = {
                   malId: currentMalId,
-                  title: detailData.anime.info.name,
-                  poster: detailData.anime.info.poster,
+                  title: info.name,
+                  poster: info.poster,
                   seasonNumber: null
                 };
                 list = [currentSeason, ...list];
@@ -603,20 +646,26 @@ export default function DetailPage() {
                   try {
                     let resolvedId = null;
                     if (parseInt(s.malId) === currentMalId) {
-                      const currentEpsCount = epData?.episodes?.length || 0;
+                      const currentEpsCount = rawEpisodes.length || 0;
                       if (currentEpsCount > 0) {
                         return { ...s, resolvedId: animeId, isResolvable: true };
                       }
                       return { ...s, isResolvable: false };
                     }
 
-                    const res = await resolveMAL(s.malId);
-                    if (res && res.anikotoId && res.anikotoId !== "") {
-                      resolvedId = res.anikotoId;
+                    // Check static overrides first
+                    const staticId = STATIC_MAL_RESOLUTIONS[String(s.malId)];
+                    if (staticId) {
+                      resolvedId = staticId;
                     } else {
-                      const searchRes = await search(s.title);
-                      if (searchRes && searchRes.animes && searchRes.animes.length > 0) {
-                        resolvedId = searchRes.animes[0].id;
+                      const res = await resolveMAL(s.malId).catch(() => null);
+                      if (res && res.anikotoId && res.anikotoId !== "") {
+                        resolvedId = res.anikotoId;
+                      } else {
+                        const searchRes = await search(s.title).catch(() => null);
+                        if (searchRes && searchRes.animes && searchRes.animes.length > 0) {
+                          resolvedId = searchRes.animes[0].id;
+                        }
                       }
                     }
 
@@ -633,7 +682,15 @@ export default function DetailPage() {
                 })
               );
 
-              let filteredList = resolvedList.filter(s => s.isResolvable);
+              // DEDUPLICATE BY RESOLVED ID to prevent duplicate seasons!
+              const seenResolvedIds = new Set();
+              let filteredList = resolvedList.filter(s => {
+                if (!s.isResolvable || !s.resolvedId) return false;
+                if (seenResolvedIds.has(s.resolvedId)) return false;
+                seenResolvedIds.add(s.resolvedId);
+                return true;
+              });
+
               filteredList.sort((a, b) => {
                 const aNum = a.seasonNumber ? parseInt(a.seasonNumber) : null;
                 const bNum = b.seasonNumber ? parseInt(b.seasonNumber) : null;
@@ -682,7 +739,7 @@ export default function DetailPage() {
 
               let hasAlt = false;
               if (filteredList.length > 0) {
-                const baseTitle = detailData?.anime?.info?.name
+                const baseTitle = (detailData?.anime?.info?.name || detailRef.current?.anime?.info?.name)
                   .replace(/\s*\(uncut\)/gi, "")
                   .replace(/\s*\(uncensored\)/gi, "")
                   .replace(/\s*\(censored\)/gi, "")
@@ -695,38 +752,45 @@ export default function DetailPage() {
                 });
               }
 
-              // Update state and cache if different or if not cached yet
-              const freshData = {
-                seasons: tvSeasonsWithNumbers,
-                hasAltVersion: hasAlt
-              };
-              const isDifferent = !cached || JSON.stringify(cached.seasons) !== JSON.stringify(tvSeasonsWithNumbers) || cached.hasAltVersion !== hasAlt;
-
-              if (isDifferent) {
+              if (isMounted) {
                 setSeasons(tvSeasonsWithNumbers);
                 setHasAltVersion(hasAlt);
                 
                 // Save to cache for all MAL IDs in this franchise
+                const freshData = {
+                  seasons: tvSeasonsWithNumbers,
+                  hasAltVersion: hasAlt
+                };
                 tvSeasonsWithNumbers.forEach(s => {
                   if (s.malId) {
                     setCachedSeasons(s.malId, freshData);
                   }
                 });
+                setSeasonsLoading(false);
               }
-              setSeasonsLoading(false);
             })
             .catch(e => {
               console.warn("Background seasons fetch error:", e);
-              setSeasonsLoading(false);
+              if (isMounted) setSeasonsLoading(false);
             });
         }
 
       } catch (err) {
         console.error("Detail page fetch error:", err);
-        setLoading(false);
+        if (isMounted) {
+          setLoading(false);
+          setEpisodesLoading(false);
+        }
+      } finally {
+        if (isMounted) {
+          setEpisodesLoading(false);
+        }
       }
     }
     loadData();
+    return () => {
+      isMounted = false;
+    };
   }, [animeId, currentUser, activeProfile]);
 
   const handleUpdateWatchlistStatus = async (status) => {
@@ -1475,91 +1539,102 @@ export default function DetailPage() {
 
               </div>
               
-              <div className="episodes-horizontal-list">
-                {activeEpisodes.map((ep) => {
-                  // Determine episode watch state: completed, in-progress, or unwatched
-                  let progressPercent = 0;
-                  let isCompleted = false;
-                  let isInProgress = false;
+              <div className="episodes-horizontal-list" style={{ position: "relative", minHeight: "150px" }}>
+                {episodesLoading ? (
+                  <div className="episodes-loading-overlay">
+                    <RefreshCw className="spin-icon text-primary" size={24} />
+                    <span style={{ color: "var(--text-muted)", fontSize: "0.85rem", fontWeight: "600" }}>Loading episodes...</span>
+                  </div>
+                ) : activeEpisodes.length === 0 ? (
+                  <div style={{ padding: "32px", textAlign: "center", color: "var(--text-muted)", width: "100%" }}>
+                    No episodes found for this season.
+                  </div>
+                ) : (
+                  activeEpisodes.map((ep) => {
+                    // Determine episode watch state: completed, in-progress, or unwatched
+                    let progressPercent = 0;
+                    let isCompleted = false;
+                    let isInProgress = false;
 
-                  if (historyItem) {
-                    if (historyItem.episodeId === ep.episodeId) {
-                      // This is the episode the user is currently on
-                      if (historyItem.totalDuration > 0) {
-                        progressPercent = (historyItem.progressPosition / historyItem.totalDuration) * 100;
-                        isCompleted = progressPercent >= 90;
-                        isInProgress = !isCompleted && progressPercent > 0;
+                    if (historyItem) {
+                      if (historyItem.episodeId === ep.episodeId) {
+                        // This is the episode the user is currently on
+                        if (historyItem.totalDuration > 0) {
+                          progressPercent = (historyItem.progressPosition / historyItem.totalDuration) * 100;
+                          isCompleted = progressPercent >= 90;
+                          isInProgress = !isCompleted && progressPercent > 0;
+                        }
+                      } else if (historyItem.episodeNumber > ep.number) {
+                        // User has moved past this episode
+                        isCompleted = true;
+                        progressPercent = 100;
                       }
-                    } else if (historyItem.episodeNumber > ep.number) {
-                      // User has moved past this episode
-                      isCompleted = true;
-                      progressPercent = 100;
                     }
-                  }
 
-                  return (
-                    <Link 
-                      key={ep.episodeId} 
-                      to={`/watch/${animeId}/${ep.episodeId}?audio=${audioPreference}`} 
-                      className={`episode-list-card ${isCompleted ? "completed" : ""}`}
-                    >
-                      <div className="episode-thumbnail-wrapper">
-                        <img src={info.poster} className="episode-thumbnail-img" alt={ep.title || `Episode ${ep.number}`} />
-                        
-                        {/* Completed: gray overlay + replay icon */}
-                        {isCompleted ? (
-                          <div className="completed-overlay">
-                            <div className="replay-icon-btn">
-                              <RotateCcw size={18} />
+                    return (
+                      <Link 
+                        key={ep.episodeId} 
+                        to={`/watch/${animeId}/${ep.episodeId}?audio=${audioPreference}`} 
+                        className={`episode-list-card ${isCompleted ? "completed" : ""}`}
+                      >
+                        <div className="episode-thumbnail-wrapper">
+                          <img src={info.poster} className="episode-thumbnail-img" alt={ep.title || `Episode ${ep.number}`} />
+                          
+                          {/* Completed: gray overlay + replay icon */}
+                          {isCompleted ? (
+                            <div className="completed-overlay">
+                              <div className="replay-icon-btn">
+                                <RotateCcw size={18} />
+                              </div>
                             </div>
-                          </div>
-                        ) : (
-                          <div className="circle-play-overlay">
-                            <div className="circle-play-btn">
-                              <Play size={16} fill="currentColor" />
+                          ) : (
+                            <div className="circle-play-overlay">
+                              <div className="circle-play-btn">
+                                <Play size={16} fill="currentColor" />
+                              </div>
                             </div>
-                          </div>
-                        )}
+                          )}
 
-                        {/* In-progress: show progress bar only (no badge) */}
-                        {isInProgress && (
-                          <div className="ep-progress-bar-container" style={{ height: "4px", bottom: 0, position: "absolute", left: 0, right: 0 }}>
-                            <div className="ep-progress-bar-fill" style={{ width: `${progressPercent}%`, backgroundColor: "var(--primary)", height: "100%" }}></div>
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="episode-info-column">
-                        <span className="episode-series-name">{info.name}</span>
-                        <div className="episode-title-row">
-                          <h4 className="episode-list-title">
-                            {seasonPrefix} E{ep.number} – {ep.title || `Episode ${ep.number}`}
-                          </h4>
-                          {ep.isFiller && <span className="filler-tag" style={{ marginLeft: "6px" }}>Filler</span>}
-                          {ep.isRecap && <span className="recap-tag" style={{ marginLeft: "6px" }}>Recap</span>}
+                          {/* In-progress: show progress bar only (no badge) */}
+                          {isInProgress && (
+                            <div className="ep-progress-bar-container" style={{ height: "4px", bottom: 0, position: "absolute", left: 0, right: 0 }}>
+                              <div className="ep-progress-bar-fill" style={{ width: `${progressPercent}%`, backgroundColor: "var(--primary)", height: "100%" }}></div>
+                            </div>
+                          )}
                         </div>
-                        <span className="episode-audio-type">
-                          {audioPreference === "sub" ? "Subtitled" : "Dubbed"}
-                        </span>
-                      </div>
 
-                      <div className="episode-right-actions">
-                        <button 
-                          className="episode-options-btn" 
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            alert("Episode options menu coming soon!");
-                          }}
-                          title="Episode Options"
-                          type="button"
-                        >
-                          <ChevronRight size={18} />
-                        </button>
-                      </div>
-                    </Link>
-                  );
-                })}
+                        <div className="episode-info-column">
+                          <span className="episode-series-name">{info.name}</span>
+                          <div className="episode-title-row">
+                            <h4 className="episode-list-title">
+                              {seasonPrefix} E{ep.number} – {ep.title || `Episode ${ep.number}`}
+                            </h4>
+                            {ep.isFiller && <span className="filler-tag" style={{ marginLeft: "6px" }}>Filler</span>}
+                            {ep.isRecap && <span className="recap-tag" style={{ marginLeft: "6px" }}>Recap</span>}
+                          </div>
+                          <span className="episode-audio-type">
+                            {audioPreference === "sub" ? "Subtitled" : "Dubbed"}
+                          </span>
+                        </div>
+
+                        <div className="episode-right-actions">
+                          <button 
+                            className="episode-options-btn" 
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              alert("Episode options menu coming soon!");
+                            }}
+                            title="Episode Options"
+                            type="button"
+                          >
+                            <ChevronRight size={18} />
+                          </button>
+                        </div>
+                      </Link>
+                    );
+                  })
+                )}
               </div>
             </section>
           )}
@@ -1936,6 +2011,17 @@ export default function DetailPage() {
         }
         @keyframes spin {
           100% { transform: rotate(360deg); }
+        }
+        .episodes-loading-overlay {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          gap: 12px;
+          width: 100%;
+          min-height: 150px;
+          background: rgba(10, 10, 10, 0.4);
+          border-radius: 8px;
         }
 
         .actions-row {
