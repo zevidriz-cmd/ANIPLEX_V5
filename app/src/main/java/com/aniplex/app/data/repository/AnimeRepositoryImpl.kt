@@ -487,7 +487,85 @@ class AnimeRepositoryImpl @Inject constructor(
                     }
                 }
 
-                // If both failed or are empty, and query length is >= 3, try Jikan search as fallback primary provider
+                // If primary search failed, try AniList search fallback first (high rate limits, fuzzy title match)
+                if (mergedAnimes.isEmpty() && primarySearchFailed && trimmedQuery.length >= 3) {
+                    try {
+                        val queryStr = """
+                            query (${'$'}search: String, ${'$'}page: Int, ${'$'}perPage: Int) {
+                              Page(page: ${'$'}page, perPage: ${'$'}perPage) {
+                                media(search: ${'$'}search, type: ANIME) {
+                                  id
+                                  idMal
+                                  title {
+                                    english
+                                    romaji
+                                    userPreferred
+                                  }
+                                  coverImage {
+                                    extraLarge
+                                    large
+                                    medium
+                                  }
+                                  type
+                                  format
+                                  duration
+                                  episodes
+                                  averageScore
+                                }
+                              }
+                            }
+                        """.trimIndent()
+
+                        val variables = mapOf("search" to trimmedQuery, "page" to page, "perPage" to 15)
+                        val payload = mapOf("query" to queryStr, "variables" to variables)
+                        val jsonPayload = gson.toJson(payload)
+
+                        val jsonString = withContext(Dispatchers.IO) {
+                            val url = java.net.URL("https://graphql.anilist.co")
+                            val connection = url.openConnection() as java.net.HttpURLConnection
+                            connection.requestMethod = "POST"
+                            connection.setRequestProperty("Content-Type", "application/json")
+                            connection.setRequestProperty("Accept", "application/json")
+                            connection.setRequestProperty("User-Agent", "Mozilla/5.0")
+                            connection.doOutput = true
+                            connection.connectTimeout = 8000
+                            connection.readTimeout = 8000
+                            connection.outputStream.use { os ->
+                                val input = jsonPayload.toByteArray(charset("utf-8"))
+                                os.write(input, 0, input.size)
+                            }
+                            if (connection.responseCode == 200) {
+                                connection.inputStream.bufferedReader().use { it.readText() }
+                            } else null
+                        }
+
+                        if (jsonString != null) {
+                            val parsed: ALSearchResponse = gson.fromJson(jsonString, ALSearchResponse::class.java)
+                            val rawList: List<Anime> = parsed.data?.searchPage?.media?.mapNotNull { item ->
+                                val malId = item.idMal
+                                val idString = if (malId != null && malId > 0) "mal-$malId" else "anilist-${item.id}"
+                                Anime(
+                                    id = idString,
+                                    title = item.title?.english ?: item.title?.userPreferred ?: item.title?.romaji ?: "Unknown",
+                                    poster = item.coverImage?.extraLarge ?: item.coverImage?.large ?: "",
+                                    type = item.format ?: item.type ?: "TV",
+                                    duration = if (item.duration != null) "${item.duration}m" else "",
+                                    subEpisodes = item.episodes ?: 0,
+                                    dubEpisodes = 0,
+                                    rate = if (item.averageScore != null) String.format(java.util.Locale.US, "%.2f", item.averageScore / 10.0) else "",
+                                    isBackup = true
+                                )
+                            } ?: emptyList()
+                            if (rawList.isNotEmpty()) {
+                                mergedAnimes.addAll(resolveBackupAnimeList(rawList, isBackupVal = primarySearchFailed))
+                            }
+                        }
+                    } catch (e: Exception) {
+                        // Ignore and proceed to Jikan
+                    }
+                }
+
+                // Last resort fallback: Jikan search if AniList search also fails or returns empty
                 if (mergedAnimes.isEmpty() && trimmedQuery.length >= 3) {
                     try {
                         val JIKAN_API_URL = "https://api.jikan.moe/v4/anime"
@@ -627,84 +705,7 @@ class AnimeRepositoryImpl @Inject constructor(
                 }
             }
 
-            // If we have AniList fallback (as a last resort when nothing is found and it failed)
-            if (finalAnimes.isEmpty() && primarySearchFailed) {
-                // Try AniList search as backup search
-                try {
-                    val queryStr = """
-                        query (${'$'}search: String, ${'$'}page: Int, ${'$'}perPage: Int) {
-                          Page(page: ${'$'}page, perPage: ${'$'}perPage) {
-                            media(search: ${'$'}search, type: ANIME) {
-                              id
-                              idMal
-                              title {
-                                english
-                                romaji
-                                userPreferred
-                              }
-                              coverImage {
-                                extraLarge
-                                large
-                                medium
-                              }
-                              type
-                              format
-                              duration
-                              episodes
-                              averageScore
-                            }
-                          }
-                        }
-                    """.trimIndent()
-
-                    val variables = mapOf("search" to trimmedQuery, "page" to page, "perPage" to 15)
-                    val payload = mapOf("query" to queryStr, "variables" to variables)
-                    val jsonPayload = gson.toJson(payload)
-
-                    val jsonString = withContext(Dispatchers.IO) {
-                        val url = java.net.URL("https://graphql.anilist.co")
-                        val connection = url.openConnection() as java.net.HttpURLConnection
-                        connection.requestMethod = "POST"
-                        connection.setRequestProperty("Content-Type", "application/json")
-                        connection.setRequestProperty("Accept", "application/json")
-                        connection.setRequestProperty("User-Agent", "Mozilla/5.0")
-                        connection.doOutput = true
-                        connection.connectTimeout = 8000
-                        connection.readTimeout = 8000
-                        connection.outputStream.use { os ->
-                            val input = jsonPayload.toByteArray(charset("utf-8"))
-                            os.write(input, 0, input.size)
-                        }
-                        if (connection.responseCode == 200) {
-                            connection.inputStream.bufferedReader().use { it.readText() }
-                        } else null
-                    }
-
-                    if (jsonString != null) {
-                        val parsed: ALSearchResponse = gson.fromJson(jsonString, ALSearchResponse::class.java)
-                        val rawList: List<Anime> = parsed.data?.searchPage?.media?.mapNotNull { item ->
-                            val malId = item.idMal
-                            val idString = if (malId != null && malId > 0) "mal-$malId" else "anilist-${item.id}"
-                            Anime(
-                                id = idString,
-                                title = item.title?.english ?: item.title?.userPreferred ?: item.title?.romaji ?: "Unknown",
-                                poster = item.coverImage?.extraLarge ?: item.coverImage?.large ?: "",
-                                type = item.format ?: item.type ?: "TV",
-                                duration = if (item.duration != null) "${item.duration}m" else "",
-                                subEpisodes = item.episodes ?: 0,
-                                dubEpisodes = 0,
-                                rate = if (item.averageScore != null) String.format(java.util.Locale.US, "%.2f", item.averageScore / 10.0) else "",
-                                isBackup = true
-                            )
-                        } ?: emptyList()
-                        if (rawList.isNotEmpty()) {
-                            finalAnimes = resolveBackupAnimeList(rawList)
-                        }
-                    }
-                } catch (e: Exception) {
-                    // Ignore
-                }
-            }
+            // AniList fallback is now processed first in the primary/fallback cascade block above
 
             emit(Result.Success(finalAnimes))
 
@@ -716,7 +717,91 @@ class AnimeRepositoryImpl @Inject constructor(
 
     override fun searchHiAnime(query: String): Flow<Result<List<Anime>>> = search(query, 1)
 
-    override fun getSuggestions(query: String): Flow<Result<List<Anime>>> = search(query, 1)
+    override fun getSuggestions(query: String): Flow<Result<List<Anime>>> = flow {
+        emit(Result.Loading)
+        val trimmedQuery = query.trim()
+        if (trimmedQuery.isEmpty()) {
+            emit(Result.Success(emptyList()))
+            return@flow
+        }
+        try {
+            val queryStr = """
+                query (${'$'}search: String, ${'$'}page: Int, ${'$'}perPage: Int) {
+                  Page(page: ${'$'}page, perPage: ${'$'}perPage) {
+                    media(search: ${'$'}search, type: ANIME) {
+                      id
+                      idMal
+                      title {
+                        english
+                        romaji
+                        userPreferred
+                      }
+                      coverImage {
+                        extraLarge
+                        large
+                        medium
+                      }
+                      type
+                      format
+                      duration
+                      episodes
+                      averageScore
+                    }
+                  }
+                }
+            """.trimIndent()
+
+            val variables = mapOf("search" to trimmedQuery, "page" to 1, "perPage" to 8)
+            val payload = mapOf("query" to queryStr, "variables" to variables)
+            val jsonPayload = gson.toJson(payload)
+
+            val jsonString = withContext(Dispatchers.IO) {
+                val url = java.net.URL("https://graphql.anilist.co")
+                val connection = url.openConnection() as java.net.HttpURLConnection
+                connection.requestMethod = "POST"
+                connection.setRequestProperty("Content-Type", "application/json")
+                connection.setRequestProperty("Accept", "application/json")
+                connection.setRequestProperty("User-Agent", "Mozilla/5.0")
+                connection.doOutput = true
+                connection.connectTimeout = 5000
+                connection.readTimeout = 5000
+                connection.outputStream.use { os ->
+                    val input = jsonPayload.toByteArray(charset("utf-8"))
+                    os.write(input, 0, input.size)
+                }
+                if (connection.responseCode == 200) {
+                    connection.inputStream.bufferedReader().use { it.readText() }
+                } else null
+            }
+
+            if (jsonString != null) {
+                val parsed: ALSearchResponse = gson.fromJson(jsonString, ALSearchResponse::class.java)
+                val rawList = parsed.data?.searchPage?.media?.mapNotNull { item ->
+                    val malId = item.idMal
+                    val idString = if (malId != null && malId > 0) "mal-$malId" else "anilist-${item.id}"
+                    Anime(
+                        id = idString,
+                        title = item.title?.english ?: item.title?.userPreferred ?: item.title?.romaji ?: "Unknown",
+                        poster = item.coverImage?.extraLarge ?: item.coverImage?.large ?: "",
+                        type = item.format ?: item.type ?: "TV",
+                        duration = if (item.duration != null) "${item.duration}m" else "",
+                        subEpisodes = item.episodes ?: 0,
+                        dubEpisodes = 0,
+                        rate = if (item.averageScore != null) String.format(java.util.Locale.US, "%.2f", item.averageScore / 10.0) else "",
+                        isBackup = true
+                    )
+                } ?: emptyList()
+                
+                // Let's resolve the top 3 items in the suggestion list to speed up detail page navigation later!
+                val resolvedList = resolveBackupAnimeList(rawList.take(3)) + rawList.drop(3)
+                emit(Result.Success(resolvedList))
+            } else {
+                emit(Result.Success(emptyList()))
+            }
+        } catch (e: Exception) {
+            emit(Result.Error(e.message ?: "Failed to load suggestions"))
+        }
+    }.flowOn(Dispatchers.IO)
 
     override fun getAnimeByCategory(category: String, page: Int): Flow<Result<List<Anime>>> = flow {
         emit(Result.Loading)

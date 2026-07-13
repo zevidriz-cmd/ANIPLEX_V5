@@ -320,8 +320,13 @@ class DetailViewModel @Inject constructor(
 
                         // Load seasons when detail is available
                         if (result.data.malId.isNotBlank()) {
-                            val currentSeasons = (_seasonsState.value as? DetailState.Success)?.data ?: emptyList()
-                            val alreadyHasSeason = currentSeasons.any { it.malId == result.data.malId }
+                            val currentSeasonsState = _seasonsState.value
+                            val currentSeasons = (currentSeasonsState as? DetailState.Success)?.data
+                            if (currentSeasons != null) {
+                                val updatedSeasons = injectCurrentSeasonIfMissing(currentSeasons, result.data)
+                                _seasonsState.value = DetailState.Success(updatedSeasons)
+                            }
+                            val alreadyHasSeason = currentSeasons?.any { it.malId == result.data.malId } == true
                             if (!alreadyHasSeason) {
                                 loadSeasons(result.data.malId)
                             }
@@ -501,6 +506,22 @@ class DetailViewModel @Inject constructor(
         }
     }
 
+    private fun injectCurrentSeasonIfMissing(seasons: List<Season>, detail: AnimeDetail?): List<Season> {
+        if (detail == null || detail.malId.isBlank()) return seasons
+        val hasCurrent = seasons.any { it.malId == detail.malId }
+        if (!hasCurrent) {
+            val currentSeason = Season(
+                malId = detail.malId,
+                title = detail.name,
+                poster = detail.poster,
+                episodes = detail.subEpisodes,
+                seasonNumber = 0
+            )
+            return listOf(currentSeason) + seasons
+        }
+        return seasons
+    }
+
     private fun loadSeasons(malId: String, forceRefresh: Boolean = false) {
         if (malId.isBlank()) {
             _seasonsState.value = DetailState.Success(emptyList())
@@ -515,7 +536,9 @@ class DetailViewModel @Inject constructor(
                         }
                     }
                     is Result.Success -> {
-                        _seasonsState.value = DetailState.Success(result.data)
+                        val currentDetail = (detailState.value as? DetailState.Success)?.data
+                        val updatedSeasons = injectCurrentSeasonIfMissing(result.data, currentDetail)
+                        _seasonsState.value = DetailState.Success(updatedSeasons)
                     }
                     is Result.Error -> {
                         if (_seasonsState.value !is DetailState.Success) {
