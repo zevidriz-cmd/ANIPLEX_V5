@@ -9,7 +9,9 @@ data class Anime(
     val subEpisodes: Int = 0,
     val dubEpisodes: Int = 0,
     val rate: String = "",
-    val isBackup: Boolean = false
+    val isBackup: Boolean = false,
+    val description: String = "",
+    val genres: String = ""
 )
 
 data class SpotlightAnime(
@@ -87,5 +89,11 @@ data class Season(
     val poster: String = "",
     val episodes: Int = 0,
     val seasonNumber: Int = 0
+)
+
+data class SeasonalData(
+    val animes: List<Anime>,
+    val totalPages: Int,
+    val hasNextPage: Boolean
 )
 

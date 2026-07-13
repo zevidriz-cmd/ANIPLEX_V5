@@ -466,6 +466,7 @@ fun DashboardShell(
             )
             DashboardTab.BROWSE -> BrowseScreen(
                 onAnimeClick = onAnimeClick,
+                onSearchClick = onSearchClick,
                 initialTab = browseInitialTab,
                 modifier = screenModifier
             )

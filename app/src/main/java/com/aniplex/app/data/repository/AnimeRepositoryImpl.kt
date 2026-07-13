@@ -1556,35 +1556,165 @@ class AnimeRepositoryImpl @Inject constructor(
                 }
             }
 
+            val enrichedSeasons = mutableListOf<Season>()
             if (response != null && response.success) {
-                val seasons = response.data.seasons?.map { it.toDomain() } ?: emptyList()
-                
-                // Cache this seasons list NOT ONLY under the requested malId,
-                // but ALSO under the malId of EVERY single season in the list!
-                // This guarantees that all secondary seasons are linked to the exact same full list of seasons.
-                if (seasons.isNotEmpty()) {
-                    seasons.forEach { season ->
-                        try {
-                            val linkedResponse = SeasonsResponse(
-                                success = true,
-                                data = SeasonsDataDto(
-                                    seasons = response.data.seasons,
-                                    currentMalId = season.malId
+                val apiSeasons = response.data.seasons?.map { it.toDomain() } ?: emptyList()
+                enrichedSeasons.addAll(apiSeasons)
+            }
+
+            // Fetch AniList relations to enrich seasons list
+            try {
+                val queryStr = """
+                    query (${'$'}idMal: Int) {
+                      Media(idMal: ${'$'}idMal, type: ANIME) {
+                        id
+                        idMal
+                        title {
+                          english
+                          romaji
+                          userPreferred
+                        }
+                        relations {
+                          edges {
+                            relationType
+                            node {
+                              id
+                              idMal
+                              title {
+                                english
+                                romaji
+                                userPreferred
+                              }
+                              type
+                              format
+                              episodes
+                              coverImage {
+                                large
+                              }
+                              relations {
+                                edges {
+                                  relationType
+                                  node {
+                                    id
+                                    idMal
+                                    title {
+                                      english
+                                      romaji
+                                      userPreferred
+                                    }
+                                    type
+                                    format
+                                    episodes
+                                    coverImage {
+                                      large
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                """.trimIndent()
+
+                val variables = mapOf("idMal" to malId.toIntOrNull())
+                val payload = mapOf("query" to queryStr, "variables" to variables)
+                val jsonPayload = gson.toJson(payload)
+
+                val jsonString = withContext(Dispatchers.IO) {
+                    val url = java.net.URL("https://graphql.anilist.co")
+                    val connection = url.openConnection() as java.net.HttpURLConnection
+                    connection.requestMethod = "POST"
+                    connection.setRequestProperty("Content-Type", "application/json")
+                    connection.setRequestProperty("Accept", "application/json")
+                    connection.setRequestProperty("User-Agent", "Mozilla/5.0")
+                    connection.doOutput = true
+                    connection.connectTimeout = 5000
+                    connection.readTimeout = 5000
+                    connection.outputStream.use { os ->
+                        val input = jsonPayload.toByteArray(charset("utf-8"))
+                        os.write(input, 0, input.size)
+                    }
+                    if (connection.responseCode == 200) {
+                        connection.inputStream.bufferedReader().use { it.readText() }
+                    } else null
+                }
+
+                if (jsonString != null) {
+                    val parsed = gson.fromJson(jsonString, ALRelationsResponse::class.java)
+                    val media = parsed.data?.media
+                    if (media != null) {
+                        val candidates = mutableListOf<ALRelationNode>()
+                        
+                        media.relations?.edges?.forEach { edge ->
+                            if (edge.node != null && edge.node.type == "ANIME" && edge.node.idMal != null) {
+                                if (edge.relationType in listOf("PREQUEL", "SEQUEL", "ALTERNATIVE", "SIDE_STORY", "SUMMARY")) {
+                                    candidates.add(edge.node)
+                                }
+                                edge.node.relations?.edges?.forEach { nestedEdge ->
+                                    if (nestedEdge.node != null && nestedEdge.node.type == "ANIME" && nestedEdge.node.idMal != null) {
+                                        if (nestedEdge.relationType in listOf("PREQUEL", "SEQUEL", "ALTERNATIVE", "SIDE_STORY", "SUMMARY")) {
+                                            candidates.add(nestedEdge.node)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        candidates.distinctBy { it.idMal }.forEach { node ->
+                            val parsedMalId = node.idMal.toString()
+                            if (enrichedSeasons.none { it.malId == parsedMalId }) {
+                                enrichedSeasons.add(
+                                    Season(
+                                        malId = parsedMalId,
+                                        title = node.title?.english ?: node.title?.userPreferred ?: node.title?.romaji ?: "Unknown",
+                                        poster = node.coverImage?.large ?: "",
+                                        episodes = node.episodes ?: 0,
+                                        seasonNumber = 0
+                                    )
                                 )
-                            )
-                            cacheDao.insertCache(
-                                CacheEntity(
-                                    cacheKey = "seasons_${season.malId}",
-                                    jsonContent = gson.toJson(linkedResponse),
-                                    timestamp = currentTime
-                                )
-                            )
-                        } catch (e: Exception) {
-                            // Non-blocking
+                            }
                         }
                     }
                 }
-                val filteredSeasons = filterReleasedSeasons(seasons)
+            } catch (e: Exception) {
+                // Ignore
+            }
+
+            if (enrichedSeasons.isNotEmpty()) {
+                // Cache this seasons list NOT ONLY under the requested malId,
+                // but ALSO under the malId of EVERY single season in the list!
+                enrichedSeasons.forEach { season ->
+                    try {
+                        val apiSeasonDtoList = enrichedSeasons.map { s ->
+                            com.aniplex.app.data.remote.dto.SeasonDto(
+                                malId = s.malId,
+                                title = s.title,
+                                poster = s.poster,
+                                episodes = s.episodes,
+                                seasonNumber = s.seasonNumber
+                            )
+                        }
+                        val linkedResponse = SeasonsResponse(
+                            success = true,
+                            data = SeasonsDataDto(
+                                seasons = apiSeasonDtoList,
+                                currentMalId = season.malId
+                            )
+                        )
+                        cacheDao.insertCache(
+                            CacheEntity(
+                                cacheKey = "seasons_${season.malId}",
+                                jsonContent = gson.toJson(linkedResponse),
+                                timestamp = currentTime
+                            )
+                        )
+                    } catch (e: Exception) {
+                        // Non-blocking
+                    }
+                }
+                val filteredSeasons = filterReleasedSeasons(enrichedSeasons)
                 emit(Result.Success(filteredSeasons))
             } else {
                 val errorMsg = lastException?.localizedMessage ?: "Failed to fetch seasons"
@@ -1603,6 +1733,52 @@ class AnimeRepositoryImpl @Inject constructor(
             } else {
                 emit(Result.Error(e.localizedMessage ?: "Failed to fetch seasons"))
             }
+        }
+    }.flowOn(Dispatchers.IO)
+
+    override fun getSeasonalAnime(year: Int?, season: String?, page: Int): Flow<Result<SeasonalData>> = flow {
+        emit(Result.Loading)
+        try {
+            val urlString = if (year == null || season == null) {
+                "https://api.jikan.moe/v4/seasons/now?page=$page&limit=24"
+            } else {
+                "https://api.jikan.moe/v4/seasons/$year/${season.lowercase()}?page=$page&limit=24"
+            }
+            val request = okhttp3.Request.Builder().url(urlString).build()
+            val resultJson = withContext(Dispatchers.IO) {
+                val okResponse = okHttpClient.newCall(request).execute()
+                if (okResponse.isSuccessful) okResponse.body?.string() else null
+            }
+
+            if (!resultJson.isNullOrEmpty()) {
+                val parsed = gson.fromJson(resultJson, JikanSeasonalResponse::class.java)
+                val rawList = parsed.data?.mapNotNull { item ->
+                    if (item.mal_id == null) return@mapNotNull null
+                    val genreString = item.genres?.mapNotNull { it.name }?.joinToString(" • ") ?: ""
+                    Anime(
+                        id = "mal-${item.mal_id}",
+                        title = item.title_english ?: item.title ?: "Unknown",
+                        poster = item.images?.webp?.large_image_url ?: item.images?.webp?.image_url ?: item.images?.jpg?.image_url ?: "",
+                        type = item.type ?: "TV",
+                        duration = item.duration ?: "",
+                        subEpisodes = item.episodes ?: 0,
+                        dubEpisodes = 0,
+                        rate = item.score?.toString() ?: "",
+                        isBackup = true,
+                        description = item.synopsis ?: "",
+                        genres = genreString
+                    )
+                } ?: emptyList()
+
+                val totalPages = parsed.pagination?.last_visible_page ?: 1
+                val hasNextPage = parsed.pagination?.has_next_page ?: false
+
+                emit(Result.Success(SeasonalData(rawList, totalPages, hasNextPage)))
+            } else {
+                emit(Result.Error("Failed to fetch seasonal anime data"))
+            }
+        } catch (e: Exception) {
+            emit(Result.Error(e.localizedMessage ?: "Failed to fetch seasonal anime"))
         }
     }.flowOn(Dispatchers.IO)
 
@@ -2005,7 +2181,9 @@ private data class JikanAnime(
     val duration: String? = null,
     val episodes: Int? = null,
     val score: Double? = null,
-    val aired: JikanAired? = null
+    val aired: JikanAired? = null,
+    val genres: List<JikanGenre>? = null,
+    val synopsis: String? = null
 )
 
 private data class JikanImages(
@@ -2100,4 +2278,37 @@ private data class ALSearchMedia(
     val duration: Int?,
     val episodes: Int?,
     val averageScore: Double?
+)
+
+private data class ALRelationsResponse(val data: ALRelationsData?)
+private data class ALRelationsData(
+    @com.google.gson.annotations.SerializedName("Media")
+    val media: ALMediaRelations?
+)
+private data class ALMediaRelations(
+    val id: Int,
+    val idMal: Int?,
+    val title: AniTitle?,
+    val relations: ALRelationsConnection?
+)
+private data class ALRelationsConnection(val edges: List<ALRelationEdge>?)
+private data class ALRelationEdge(val relationType: String?, val node: ALRelationNode?)
+private data class ALRelationNode(
+    val id: Int,
+    val idMal: Int?,
+    val title: AniTitle?,
+    val type: String?,
+    val format: String?,
+    val episodes: Int?,
+    val coverImage: AniCoverImage?,
+    val relations: ALRelationsConnection?
+)
+
+private data class JikanGenre(
+    val name: String?
+)
+
+private data class JikanSeasonalResponse(
+    val data: List<JikanAnime>?,
+    val pagination: JikanPagination?
 )

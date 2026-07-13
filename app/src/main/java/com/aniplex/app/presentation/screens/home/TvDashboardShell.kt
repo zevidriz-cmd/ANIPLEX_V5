@@ -61,9 +61,11 @@ import com.aniplex.app.presentation.screens.profile.ProfileViewModel
 import com.aniplex.app.presentation.screens.history.HistoryViewModel
 import com.aniplex.app.presentation.screens.history.HistoryUiState
 import com.aniplex.app.domain.model.HistoryItem
+import com.aniplex.app.presentation.screens.seasonal.TvSeasonalScreen
 
 enum class TvTab(val title: String, val icon: ImageVector) {
     DISCOVER("Discover", Icons.Default.Home),
+    SEASONAL("Seasonal", Icons.Default.CalendarMonth),
     SEARCH("Search", Icons.Default.Search),
     LIBRARY("Library", Icons.Default.Bookmark),
     SETTINGS("Settings", Icons.Default.Settings)
@@ -192,6 +194,12 @@ fun TvDashboardShell(
                         TvHomeScreen(
                             onAnimeClick = onAnimeClick,
                             onEpisodeClick = onEpisodeClick,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+                    TvTab.SEASONAL -> {
+                        TvSeasonalScreen(
+                            onAnimeClick = onAnimeClick,
                             modifier = Modifier.fillMaxSize()
                         )
                     }

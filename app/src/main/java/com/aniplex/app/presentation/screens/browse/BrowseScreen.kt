@@ -38,16 +38,18 @@ import com.aniplex.app.theme.CrunchyrollOrange
 import com.aniplex.app.theme.NetflixRed
 import com.aniplex.app.theme.SurfaceDark
 import com.aniplex.app.theme.SurfaceDarkVariant
+import com.aniplex.app.presentation.screens.seasonal.SeasonalScreen
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BrowseScreen(
     onAnimeClick: (String) -> Unit,
+    onSearchClick: () -> Unit,
     modifier: Modifier = Modifier,
     initialTab: Int = 0,
     viewModel: BrowseViewModel = hiltViewModel()
 ) {
-    val topTabs = listOf("All Anime", "Simulcasts", "Anime Genres")
+    val topTabs = listOf("All Anime", "Seasonal", "Simulcasts", "Anime Genres")
     val pagerState = rememberPagerState(initialPage = initialTab, pageCount = { topTabs.size })
     val coroutineScope = rememberCoroutineScope()
 
@@ -147,13 +149,21 @@ fun BrowseScreen(
                     )
                 }
                 1 -> {
+                    // Seasonal Tab
+                    SeasonalScreen(
+                        onAnimeClick = onAnimeClick,
+                        onSearchClick = onSearchClick,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+                2 -> {
                     // Simulcasts Tab
                     ScheduleScreen(
                         onAnimeClick = onAnimeClick,
                         modifier = Modifier.fillMaxSize()
                     )
                 }
-                2 -> {
+                3 -> {
                     // Anime Genres Tab
                     GenresTabContent(
                         genres = genres,
@@ -161,7 +171,7 @@ fun BrowseScreen(
                             viewModel.onGenreChange(genreKey)
                             coroutineScope.launch {
                                 pagerState.animateScrollToPage(0)
-                             }
+                            }
                         }
                     )
                 }

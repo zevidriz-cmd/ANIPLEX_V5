@@ -494,6 +494,97 @@ export default function DetailPage() {
           getSeasons(malId)
             .then(async (seasonData) => {
               let list = seasonData?.seasons || [];
+
+              // Enrich seasons list with AniList 2-hop relations lookup
+              try {
+                const graphqlQuery = `
+                  query ($idMal: Int) {
+                    Media(idMal: $idMal, type: ANIME) {
+                      relations {
+                        edges {
+                          relationType
+                          node {
+                            idMal
+                            title {
+                              english
+                              romaji
+                              userPreferred
+                            }
+                            type
+                            coverImage {
+                              large
+                            }
+                            relations {
+                              edges {
+                                relationType
+                                node {
+                                  idMal
+                                  title {
+                                    english
+                                    romaji
+                                    userPreferred
+                                  }
+                                  type
+                                  coverImage {
+                                    large
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                `;
+                const alRes = await fetch("https://graphql.anilist.co", {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                    "Accept": "application/json"
+                  },
+                  body: JSON.stringify({
+                    query: graphqlQuery,
+                    variables: { idMal: parseInt(malId) }
+                  })
+                });
+                if (alRes.ok) {
+                  const alJson = await alRes.json();
+                  const edges = alJson.data?.Media?.relations?.edges || [];
+                  const candidates = [];
+                  edges.forEach(edge => {
+                    const node = edge.node;
+                    if (node && node.type === "ANIME" && node.idMal) {
+                      if (["PREQUEL", "SEQUEL", "ALTERNATIVE", "SIDE_STORY", "SUMMARY"].includes(edge.relationType)) {
+                        candidates.push(node);
+                      }
+                      const nestedEdges = node.relations?.edges || [];
+                      nestedEdges.forEach(nestedEdge => {
+                        const nestedNode = nestedEdge.node;
+                        if (nestedNode && nestedNode.type === "ANIME" && nestedNode.idMal) {
+                          if (["PREQUEL", "SEQUEL", "ALTERNATIVE", "SIDE_STORY", "SUMMARY"].includes(nestedEdge.relationType)) {
+                            candidates.push(nestedNode);
+                          }
+                        }
+                      });
+                    }
+                  });
+                  candidates.forEach(node => {
+                    const parsedMalId = String(node.idMal);
+                    if (!list.some(s => String(s.malId) === parsedMalId)) {
+                      list.push({
+                        malId: parsedMalId,
+                        title: node.title?.english || node.title?.userPreferred || node.title?.romaji || "Unknown",
+                        poster: node.coverImage?.large || "",
+                        seasonNumber: null
+                      });
+                    }
+                  });
+                }
+              } catch (err) {
+                console.warn("AniList relations lookup failed for Web detail page:", err);
+              }
+
               const currentMalId = parseInt(malId);
               const hasCurrent = list.some(s => parseInt(s.malId) === currentMalId);
               if (!hasCurrent && detailData?.anime?.info) {
