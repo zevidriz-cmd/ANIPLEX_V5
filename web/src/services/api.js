@@ -1,3 +1,5 @@
+import anikotoMap from "./anikoto_map.json";
+
 const BASE_URL = "https://aniplex-proxy.f1886391.workers.dev/api/v2";
 
 export const STREAM_PROXY_BASE = import.meta.env.VITE_STREAM_PROXY_URL || "/stream-proxy";
@@ -358,28 +360,110 @@ export async function getSeasons(malId) {
   return fetchJson(`${BASE_URL}/seasons/${malId}`);
 }
 
-const STATIC_MAL_RESOLUTIONS = {
-  // Mushoku Tensei
-  "39535": "5694",   // Season 1 Part 1
-  "45576": "6675",   // Season 1 Part 2
-  "51179": "6537",   // Season 2 Part 1
-  "55888": "6159",   // Season 2 Part 2
-  "59193": "8800",   // Season 3
-  "58752": "8800",   // Season 3 Alternative MAL ID
-  "50360": "7045",   // Eris Special
-  
-  // Demon Slayer
-  "38000": "1551",   // Season 1
-  "49926": "17870",  // Mugen Train Arc
-  "47074": "18056"   // Entertainment District Arc
-};
+export async function resolveMAL(malId, format = null) {
+  const targetId = String(malId);
+  const normalizedFormat = format ? String(format).toUpperCase() : null;
 
-export async function resolveMAL(malId) {
-  const parsedId = String(malId);
-  if (STATIC_MAL_RESOLUTIONS[parsedId]) {
-    return { success: true, anikotoId: STATIC_MAL_RESOLUTIONS[parsedId] };
+  // 1. Check client-side memory/localStorage cache
+  const cacheKey = `anistream_mal_res_${targetId}_${normalizedFormat || "any"}`;
+  try {
+    const cached = localStorage.getItem(cacheKey);
+    if (cached) return { success: true, anikotoId: cached };
+  } catch {}
+
+  // 2. Check local static mapping database from anikoto_map.json
+  let localId = anikotoMap[targetId];
+
+  // Specific redirects/overrides to handle duplicates/specials
+  const OVERRIDES = {
+    // Mushoku Tensei
+    "39535": "5694",   // Season 1 Part 1
+    "45576": "6675",   // Season 1 Part 2
+    "51179": "6537",   // Season 2 Part 1
+    "55818": "6537",   // Season 2 Episode 0 "Guardian Fitz" -> S2 Part 1
+    "55888": "6159",   // Season 2 Part 2
+    "59193": "8800",   // Season 3 Part 1
+    "58752": "8800",   // Season 3 Alt
+    "50360": "7045",   // Eris Special
+
+    // Demon Slayer
+    "38000": normalizedFormat === "MOVIE" ? "6780" : "1551", // TV vs Movie for Demon Slayer S1
+    "40456": "5870",   // Mugen Train Movie
+    "49926": "6871",   // Mugen Train TV Arc
+    "47778": "7024",   // Entertainment District Arc
+    "51019": "6905",   // Swordsmith Village Arc
+    "55701": "6054",   // Hashira Training Arc
+    "59192": "8138",   // Infinity Castle Movie 1
+    "62546": "8847",   // Infinity Castle Movie 2
+    "47398": "7019",   // Valentine School
+    "48861": "7032",   // Utage Special
+  };
+
+  if (OVERRIDES[targetId]) {
+    localId = OVERRIDES[targetId];
   }
-  return fetchJson(`${BASE_URL}/resolve-mal/${parsedId}`);
+
+  if (localId) {
+    try {
+      localStorage.setItem(cacheKey, String(localId));
+    } catch {}
+    return { success: true, anikotoId: String(localId) };
+  }
+
+  // 3. Scan the first 5 pages of recent-anime dynamically in the browser
+  for (let page = 1; page <= 5; page++) {
+    try {
+      const res = await fetch(`https://anikotoapi.site/recent-anime?page=${page}&per_page=100`);
+      if (res.ok) {
+        const json = await res.json();
+        if (json && json.data) {
+          const matches = json.data.filter(item => item.mal_id && String(item.mal_id) === targetId);
+          if (matches.length > 0) {
+            let matchedItem = matches[0];
+            
+            // If multiple matches exist, filter by format (TV vs Movie)
+            if (matches.length > 1 && normalizedFormat) {
+              const matchedFormat = matches.find(item => {
+                const type = (item.terms_by_type?.type?.[0] || "").toUpperCase();
+                if (normalizedFormat === "TV") return type === "TV";
+                if (normalizedFormat === "MOVIE") return type === "MOVIE";
+                return false;
+              });
+              if (matchedFormat) matchedItem = matchedFormat;
+            }
+            
+            const resolvedId = String(matchedItem.id);
+            try {
+              localStorage.setItem(cacheKey, resolvedId);
+            } catch {}
+            return { success: true, anikotoId: resolvedId };
+          }
+        }
+      }
+    } catch (e) {
+      console.warn(`Dynamic resolve failed on page ${page}:`, e);
+      break;
+    }
+  }
+
+  // 4. Fallback to Cloudflare Worker resolve-mal endpoint (just in case)
+  try {
+    const res = await fetch(`${BASE_URL}/resolve-mal/${targetId}`);
+    if (res.ok) {
+      const json = await res.json();
+      if (json.success && json.data?.anikotoId) {
+        const resolvedId = String(json.data.anikotoId);
+        try {
+          localStorage.setItem(cacheKey, resolvedId);
+        } catch {}
+        return { success: true, anikotoId: resolvedId };
+      }
+    }
+  } catch (err) {
+    console.warn("Backend resolve-mal fallback failed:", err);
+  }
+
+  return { success: false, anikotoId: null };
 }
 
 // AniSkip API integration (direct endpoint)

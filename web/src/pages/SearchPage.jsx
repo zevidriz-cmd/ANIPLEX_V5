@@ -681,7 +681,103 @@ export default function SearchPage() {
     searchTimeoutRef.current = setTimeout(async () => {
       try {
         const data = await getSuggestions(val);
-        setSuggestions(data?.suggestions || []);
+        let suggestionsList = data?.suggestions || [];
+
+        // Fallback if backend suggestions are empty or down
+        if (suggestionsList.length === 0) {
+          const cleanedVal = val.trim().toLowerCase();
+          const localSuggestions = [];
+          const seenIds = new Set();
+
+          // 1. Check local accurate mappings for instant match
+          for (const entry of LOCAL_ACCURATE_MAPPINGS) {
+            if (entry.keywords.some(kw => kw.includes(cleanedVal) || cleanedVal.includes(kw))) {
+              const resolvedId = entry.id;
+              if (resolvedId && !seenIds.has(resolvedId)) {
+                // Find the first keyword that has spaces (or use the first keyword, capitalize first letters of words)
+                const displayName = entry.keywords.find(k => k.includes(" ")) || entry.keywords[0];
+                const formattedName = displayName.split(" ").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+                localSuggestions.push({
+                  id: resolvedId,
+                  name: formattedName,
+                  poster: "", // will be fallback, or loaded from details if we fetch it
+                  moreInfo: ["Instant Match"]
+                });
+                seenIds.add(resolvedId);
+              }
+            }
+          }
+
+          // 2. Perform AniList GraphQL search for autocomplete results
+          try {
+            const graphqlQuery = `
+              query ($search: String) {
+                Page(page: 1, perPage: 5) {
+                  media(search: $search, type: ANIME) {
+                    idMal
+                    title {
+                      english
+                      romaji
+                      userPreferred
+                    }
+                    coverImage {
+                      large
+                    }
+                    format
+                    seasonYear
+                    episodes
+                  }
+                }
+              }
+            `;
+            
+            const alRes = await fetch("https://graphql.anilist.co", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "Accept": "application/json"
+              },
+              body: JSON.stringify({
+                query: graphqlQuery,
+                variables: { search: val }
+              })
+            });
+
+            if (alRes.ok) {
+              const alJson = await alRes.json();
+              const mediaList = alJson.data?.Page?.media || [];
+              
+              for (const media of mediaList) {
+                if (!media.idMal) continue;
+                
+                // Resolve MAL ID to Zoro/HiAnime ID using resolveMAL
+                const res = await resolveMAL(media.idMal).catch(() => null);
+                if (res && res.anikotoId) {
+                  const zoroId = res.anikotoId;
+                  if (!seenIds.has(zoroId)) {
+                    localSuggestions.push({
+                      id: zoroId,
+                      name: media.title.english || media.title.userPreferred || media.title.romaji,
+                      poster: media.coverImage?.large || "",
+                      moreInfo: [
+                        media.format || "TV",
+                        media.seasonYear ? String(media.seasonYear) : "",
+                        media.episodes ? `${media.episodes} eps` : ""
+                      ].filter(Boolean)
+                    });
+                    seenIds.add(zoroId);
+                  }
+                }
+              }
+            }
+          } catch (err) {
+            console.warn("AniList suggestions fallback failed:", err);
+          }
+
+          suggestionsList = localSuggestions;
+        }
+
+        setSuggestions(suggestionsList);
       } catch (err) {
         console.warn(err);
       }
@@ -758,8 +854,12 @@ export default function SearchPage() {
                     setSuggestions([]);
                   }}
                 >
-                  <div className="suggestion-poster">
-                    <img src={item.poster} alt={item.name} />
+                  <div className="suggestion-poster" style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    {item.poster ? (
+                      <img src={item.poster} alt={item.name} />
+                    ) : (
+                      <Play size={16} style={{ color: "var(--primary)" }} />
+                    )}
                   </div>
                   <div className="suggestion-info">
                     <h4 className="suggestion-title">{item.name}</h4>
