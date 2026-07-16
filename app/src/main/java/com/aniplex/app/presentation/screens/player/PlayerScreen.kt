@@ -1323,8 +1323,9 @@ fun PlayerScreen(
             // Wait 800ms for WebView sniffer to capture subtitles
             kotlinx.coroutines.delay(800)
 
-            // Trigger fallback if Zoro subtitles list is empty
-            if (capturedSubtitles.isEmpty() && !hasAttemptedBackupSubtitles) {
+            // Trigger fallback if Zoro subtitles list is empty (Only if Zoro is active provider)
+            val curProvider = viewModel.activeProvider.value ?: preferredProvider
+            if (curProvider == "zoro" && capturedSubtitles.isEmpty() && !hasAttemptedBackupSubtitles) {
                 hasAttemptedBackupSubtitles = true
                 DebugLogManager.log("ANIPLEX_SUBS", "Zoro subtitles empty. Fetching backup subtitles from Gogo/AnimePahe fallback API...")
                 viewModel.getBackupSubtitles { backupSubs ->
