@@ -3073,6 +3073,7 @@ fun ExoVideoPlayer(
 
                         subtitleView?.visibility = android.view.View.VISIBLE
                         subtitleView?.apply {
+                             setViewType(androidx.media3.ui.SubtitleView.VIEW_TYPE_WEB)
                              val parsedForegroundColor = when (state.subtitleColor.lowercase()) {
                                  "yellow" -> AndroidColor.YELLOW
                                  "green" -> AndroidColor.GREEN
@@ -3171,6 +3172,7 @@ fun ExoVideoPlayer(
                         parsedEdgeColor,
                         parsedTypeface
                     )
+                    view.subtitleView?.setViewType(androidx.media3.ui.SubtitleView.VIEW_TYPE_WEB)
                     view.subtitleView?.setStyle(styleCompat)
                     view.subtitleView?.setFixedTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, state.subtitleSizeSp * state.subtitleSizeScale)
                     view.subtitleView?.post {

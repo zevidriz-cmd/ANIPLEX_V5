@@ -115,7 +115,7 @@ export default function VideoPlayer({
   const [subOpacity, setSubOpacity] = useState(60);
 
   const [activeTrackIndex, setActiveTrackIndex] = useState(-1);
-  const [currentCuesText, setCurrentCuesText] = useState("");
+  const [activeCues, setActiveCues] = useState([]);
   const [containerWidth, setContainerWidth] = useState(800);
   const [showNotice, setShowNotice] = useState(false);
   const [noticeData, setNoticeData] = useState(null);
@@ -264,14 +264,18 @@ export default function VideoPlayer({
     const handleCueChange = (e) => {
       const track = e.target;
       if (track.mode === "hidden") {
-        const activeCues = track.activeCues;
-        if (activeCues && activeCues.length > 0) {
-          const text = Array.from(activeCues)
-            .map(cue => cue.text)
-            .join("\n");
-          setCurrentCuesText(text);
+        const cues = track.activeCues;
+        if (cues && cues.length > 0) {
+          const list = Array.from(cues).map(cue => ({
+            text: cue.text,
+            line: cue.line,
+            position: cue.position,
+            align: cue.align,
+            size: cue.size
+          }));
+          setActiveCues(list);
         } else {
-          setCurrentCuesText("");
+          setActiveCues([]);
         }
       }
     };
@@ -303,7 +307,7 @@ export default function VideoPlayer({
 
   useEffect(() => {
     if (activeTrackIndex === -1) {
-      setCurrentCuesText("");
+      setActiveCues([]);
     }
   }, [activeTrackIndex]);
 
@@ -1588,24 +1592,67 @@ export default function VideoPlayer({
 
   const calculatedFontSize = Math.max(12, Math.min(48, (subSize * containerWidth) / 1000));
 
-  const subtitleOverlayStyles = {
-    position: "absolute",
-    left: "50%",
-    transform: "translateX(-50%)",
-    bottom: `${subPosition}%`,
-    zIndex: 36,
-    color: subColor,
-    fontSize: `${calculatedFontSize}px`,
-    backgroundColor: `rgba(0, 0, 0, ${subOpacity / 100})`,
-    padding: "6px 12px",
-    borderRadius: "6px",
-    textAlign: "center",
-    maxWidth: "85%",
-    wordBreak: "break-word",
-    lineHeight: "1.4",
-    pointerEvents: "none",
-    transition: "bottom 0.2s, font-size 0.1s",
-    ...getSubFontStyles()
+  const getCueStyle = (cue) => {
+    const styles = {
+      position: "absolute",
+      zIndex: 36,
+      color: subColor,
+      fontSize: `${calculatedFontSize}px`,
+      backgroundColor: `rgba(0, 0, 0, ${subOpacity / 100})`,
+      padding: "6px 12px",
+      borderRadius: "6px",
+      textAlign: cue.align === "start" ? "left" : cue.align === "end" ? "right" : "center",
+      maxWidth: cue.size !== 100 && cue.size > 0 ? `${cue.size}%` : "85%",
+      wordBreak: "break-word",
+      lineHeight: "1.4",
+      pointerEvents: "none",
+      transition: "bottom 0.2s, top 0.2s, left 0.2s, font-size 0.1s",
+      ...getSubFontStyles()
+    };
+
+    let isTop = false;
+    let verticalPercent = null;
+
+    if (typeof cue.line === "number") {
+      if (cue.line >= 0 && cue.line <= 100) {
+        verticalPercent = cue.line;
+        if (cue.line < 50) isTop = true;
+      } else if (cue.line < 0) {
+        isTop = false;
+      }
+    } else if (typeof cue.line === "string" && cue.line !== "auto") {
+      const parsed = parseFloat(cue.line);
+      if (!isNaN(parsed)) {
+        verticalPercent = parsed;
+        if (parsed < 50) isTop = true;
+      }
+    }
+
+    if (verticalPercent !== null) {
+      if (isTop) {
+        styles.top = `${verticalPercent}%`;
+        styles.bottom = "auto";
+      } else {
+        styles.bottom = `${100 - verticalPercent}%`;
+        styles.top = "auto";
+      }
+    } else {
+      styles.bottom = `${subPosition}%`;
+      styles.top = "auto";
+    }
+
+    let horizontalPercent = 50;
+    if (typeof cue.position === "number" && cue.position >= 0 && cue.position <= 100) {
+      horizontalPercent = cue.position;
+    } else if (typeof cue.position === "string" && cue.position !== "auto") {
+      const parsed = parseFloat(cue.position);
+      if (!isNaN(parsed)) horizontalPercent = parsed;
+    }
+
+    styles.left = `${horizontalPercent}%`;
+    styles.transform = `translateX(-${horizontalPercent}%)`;
+
+    return styles;
   };
 
   return (
@@ -1805,13 +1852,14 @@ export default function VideoPlayer({
       </video>
 
       {/* Custom DOM Subtitle Overlay */}
-      {activeTrackIndex !== -1 && currentCuesText && (
+      {activeTrackIndex !== -1 && activeCues.length > 0 && activeCues.map((cue, idx) => (
         <div
+          key={idx}
           className="custom-subtitle-overlay"
-          style={subtitleOverlayStyles}
-          dangerouslySetInnerHTML={{ __html: cleanWebVttText(currentCuesText).replace(/\n/g, "<br/>") }}
+          style={getCueStyle(cue)}
+          dangerouslySetInnerHTML={{ __html: cleanWebVttText(cue.text).replace(/\n/g, "<br/>") }}
         />
-      )}
+      ))}
 
       {/* Tap/Click capturing overlay when controls are hidden */}
       {!showControls && (
