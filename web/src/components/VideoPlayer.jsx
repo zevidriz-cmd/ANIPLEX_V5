@@ -31,7 +31,8 @@ export default function VideoPlayer({
   onPlaybackError,
   provider = "zoro",
   availableAudioCategories = [],
-  onAudioCategoryChange
+  onAudioCategoryChange,
+  onSubtitleError
 }) {
   const videoRef = useRef(null);
   const { saveSettings } = useProfile();
@@ -1795,6 +1796,10 @@ export default function VideoPlayer({
             label={track.label}
             srcLang={track.label?.substring(0, 2).toLowerCase() || "en"}
             default={track.label?.toLowerCase() === "english" || i === 0}
+            onError={(e) => {
+              console.warn(`[VideoPlayer] Subtitle track failed to load: ${track.label} (${track.file})`);
+              if (onSubtitleError) onSubtitleError(track);
+            }}
           />
         ))}
       </video>

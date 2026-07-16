@@ -278,6 +278,9 @@ export async function handler(event, context) {
             console.log(`[Fallback API] Mapped MAL ID ${malId} to AniList ID ${anilistId}`);
             
             const providerBacking = selectedProvider === "animepahe" ? new ANIME.AnimePahe() : new ANIME.Hianime();
+            if (selectedProvider === "animepahe") {
+              providerBacking.baseUrl = "https://animepahe.ru";
+            }
             const anilist = new META.Anilist(providerBacking);
             
             const animeInfo = await anilist.fetchAnimeInfo(anilistId.toString());
@@ -305,6 +308,9 @@ export async function handler(event, context) {
         
         const resolveTitleSearch = async () => {
           const providerInstance = selectedProvider === "animepahe" ? new ANIME.AnimePahe() : new ANIME.Hianime();
+          if (selectedProvider === "animepahe") {
+            providerInstance.baseUrl = "https://animepahe.ru";
+          }
           const searchResults = await providerInstance.search(title);
           
           if (searchResults && searchResults.results && searchResults.results.length > 0) {

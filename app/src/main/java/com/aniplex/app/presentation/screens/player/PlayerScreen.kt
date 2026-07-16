@@ -315,6 +315,7 @@ fun PlayerScreen(
     // Lifted playback and sniffer states
     var capturedStreamUrl by remember { mutableStateOf<String?>(null) }
     val capturedSubtitles = remember { mutableStateListOf<SniffedSubtitle>() }
+    var hasAttemptedBackupSubtitles by remember { mutableStateOf(false) }
     var currentSubtitleSelection by remember { mutableStateOf("en") }
     var durationMs by remember { mutableStateOf(0L) }
     var currentPositionMs by remember { mutableStateOf(0L) }
@@ -340,6 +341,7 @@ fun PlayerScreen(
     var lastEpisodeId by remember { mutableStateOf("") }
     var lastCategory by remember { mutableStateOf("") }
     var lastServer by remember { mutableStateOf("") }
+    var sniffingEpisodeId by remember { mutableStateOf<String?>(null) }
 
     // Additional player states lifted from ExoVideoPlayer
     var retryPlaybackKey by remember { mutableStateOf(0) }
@@ -556,6 +558,11 @@ fun PlayerScreen(
                     val curProvider = viewModel.activeProvider.value ?: preferredProvider
                     if (curProvider != "zoro") return null
                     
+                    val currentSniffingId = sniffingEpisodeId
+                    if (currentSniffingId == null) {
+                        return null
+                    }
+                    
                     val url = request?.url?.toString() ?: return null
                     val urlLower = url.lowercase()
                     val cleanUrl = url.split("?")[0].lowercase()
@@ -604,7 +611,7 @@ fun PlayerScreen(
                         
                         if (capturedStreamUrl == null) {
                             DebugLogManager.log("ANIPLEX_PLAYER", "Registering capturedStreamUrl source: $url")
-                            DownloadManager.setStreamUrl(activeEpisodeId, url)
+                            DownloadManager.setStreamUrl(currentSniffingId, url)
 
                             // 1. Synchronously grab cookies from CookieManager for the specific domains before any page wiping
                             val cookieManager = android.webkit.CookieManager.getInstance()
@@ -706,6 +713,7 @@ fun PlayerScreen(
     }
 
     fun resetPlayerState(newEpisodeEmbedUrl: String, isNewEpisode: Boolean = true) {
+        sniffingEpisodeId = null
         val player = exoPlayerRef
         if (player != null) {
             val pos = player.currentPosition
@@ -754,8 +762,42 @@ fun PlayerScreen(
         extractedCookies = null
         interceptedReferer = null
         interceptedOrigin = null
+        
+        hasAttemptedBackupSubtitles = false
+        viewModel.setFallbackStatusMessage(null)
+
+        fun loadNewUrlAfterReset(url: String) {
+            try {
+                exoPlayerRef?.stop()
+                exoPlayerRef?.clearMediaItems()
+                
+                webView.apply {
+                    stopLoading()
+                    clearHistory()
+                    onPause()
+                    loadUrl("about:blank")
+                }
+                
+                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                    try {
+                        webView.onResume()
+                        sniffingEpisodeId = activeEpisodeId
+                        webView.loadUrl(url)
+                        DebugLogManager.log("ANIPLEX_PLAYER", "WebView loadUrl triggered for: $url after flush delay")
+                    } catch (e: Exception) {
+                        sniffingEpisodeId = null
+                        DebugLogManager.log("ANIPLEX_PLAYER", "Error loading embed URL after delay: ${e.message}")
+                    }
+                }, 200)
+            } catch (e: Exception) {
+                DebugLogManager.log("ANIPLEX_PLAYER", "Error resetting player WebView state: ${e.message}")
+            }
+        }
 
         if (isNewEpisode) {
+            val prefs = context.getSharedPreferences("aniplex_saved_cookies", Context.MODE_PRIVATE)
+            prefs.edit().clear().apply()
+            
             try {
                 // Wipe cache and storage to prevent Cloudflare/Zoro error leak across shows/episodes
                 webView.clearCache(true)
@@ -763,27 +805,20 @@ fun PlayerScreen(
                 android.webkit.WebStorage.getInstance().deleteAllData()
                 
                 val cookieManager = android.webkit.CookieManager.getInstance()
-                cookieManager.removeSessionCookies(null)
+                cookieManager.removeAllCookies {
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        loadNewUrlAfterReset(newEpisodeEmbedUrl)
+                    }
+                }
                 cookieManager.flush()
                 
-                DebugLogManager.log("ANIPLEX_PLAYER", "Cleaned WebView cache, storage, and session cookies for new episode.")
+                DebugLogManager.log("ANIPLEX_PLAYER", "Cleaned WebView cache, storage, and persistent/session cookies for new episode.")
             } catch (e: Exception) {
                 DebugLogManager.log("ANIPLEX_PLAYER", "Error cleaning WebView cache: ${e.message}")
+                loadNewUrlAfterReset(newEpisodeEmbedUrl)
             }
-        }
-        
-        try {
-            exoPlayerRef?.stop()
-            exoPlayerRef?.clearMediaItems()
-            
-            webView.apply {
-                stopLoading()
-                clearHistory()
-                onResume()
-                loadUrl(newEpisodeEmbedUrl)
-            }
-        } catch (e: Exception) {
-            DebugLogManager.log("ANIPLEX_PLAYER", "Error resetting player WebView state: ${e.message}")
+        } else {
+            loadNewUrlAfterReset(newEpisodeEmbedUrl)
         }
     }
 
@@ -932,13 +967,6 @@ fun PlayerScreen(
                     window.attributes = lp
                 }
             }
-        }
-    }
-
-    LaunchedEffect(activeEpisodeId, activeCategory) {
-        val defaultServer = availableServers.firstOrNull() ?: "s-1"
-        if (selectedServer != defaultServer) {
-            selectedServer = defaultServer
         }
     }
 
@@ -1153,6 +1181,8 @@ fun PlayerScreen(
         val nextEp = episodes.find { it.number == currentEpNum + 1 }
         if (viewModel.autoplayNextEpisode && nextEp != null && !isUpNextDismissed) {
             localResumePlayback = false
+            val defaultServer = availableServers.firstOrNull() ?: "s-1"
+            selectedServer = defaultServer
             activeEpisodeId = nextEp.id
         }
     }
@@ -1266,9 +1296,35 @@ fun PlayerScreen(
         }
     }
 
-    LaunchedEffect(capturedStreamUrl, retryPlaybackKey) {
+    LaunchedEffect(capturedStreamUrl, retryPlaybackKey, capturedSubtitles.size) {
         val stream = capturedStreamUrl
         if (stream != null) {
+            // Wait 800ms for WebView sniffer to capture subtitles
+            kotlinx.coroutines.delay(800)
+
+            // Trigger fallback if Zoro subtitles list is empty
+            if (capturedSubtitles.isEmpty() && !hasAttemptedBackupSubtitles) {
+                hasAttemptedBackupSubtitles = true
+                DebugLogManager.log("ANIPLEX_SUBS", "Zoro subtitles empty. Fetching backup subtitles from Gogo/AnimePahe fallback API...")
+                viewModel.getBackupSubtitles { backupSubs ->
+                    if (backupSubs.isNotEmpty()) {
+                        val sniffed = backupSubs.map { sub ->
+                            SniffedSubtitle(
+                                url = sub.url,
+                                mime = if (sub.url.endsWith(".ass")) "text/x-ass" else androidx.media3.common.MimeTypes.TEXT_VTT,
+                                langCode = "en"
+                            )
+                        }
+                        capturedSubtitles.addAll(sniffed)
+                        // Trigger reload with backup subtitles
+                        retryPlaybackKey++
+                    } else {
+                        DebugLogManager.log("ANIPLEX_SUBS", "No soft subtitles in backup. Swapping provider to Gogoanime for hard subtitles...")
+                        viewModel.runFallbackChain(activeCategory)
+                    }
+                }
+            }
+
             val userAgentHeader = extractedUserAgent ?: "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
             
             val referer = interceptedReferer ?: when {
@@ -1340,6 +1396,10 @@ fun PlayerScreen(
             val mediaSourceFactory = androidx.media3.exoplayer.source.DefaultMediaSourceFactory(dataSourceFactory)
             val mediaSource = mediaSourceFactory.createMediaSource(mediaItem)
 
+            val isInitialized = exoPlayer.playbackState != Player.STATE_IDLE
+            val currentPos = if (isInitialized) exoPlayer.currentPosition else -1L
+            val playWhenReadyState = if (isInitialized) exoPlayer.playWhenReady else false
+
             exoPlayer.setMediaSource(mediaSource)
 
             // Apply Subtitle Defaults (Keep trackSelectionParameters logic)
@@ -1349,17 +1409,23 @@ fun PlayerScreen(
                 .setPreferredTextLanguage(if (currentSubtitleSelection == "off") "en" else currentSubtitleSelection)
                 .build()
 
-            if (!hasSeekedToInitialProgress && localResumePlayback && initialProgress > 0L) {
-                exoPlayer.seekTo(initialProgress)
-                hasSeekedToInitialProgress = true
-                DebugLogManager.log("ANIPLEX_PLAYER", "Successfully seeked inside stream LaunchedEffect to saved progress: $initialProgress")
+            if (currentPos > 0L) {
+                exoPlayer.seekTo(currentPos)
+                exoPlayer.prepare()
+                exoPlayer.playWhenReady = playWhenReadyState
+                DebugLogManager.log("ANIPLEX_PLAYER", "ExoPlayer updated media source and restored position to: $currentPos")
+            } else {
+                if (!hasSeekedToInitialProgress && localResumePlayback && initialProgress > 0L) {
+                    exoPlayer.seekTo(initialProgress)
+                    hasSeekedToInitialProgress = true
+                    DebugLogManager.log("ANIPLEX_PLAYER", "Successfully seeked inside stream LaunchedEffect to saved progress: $initialProgress")
+                }
+                exoPlayer.prepare()
+                // Don't start playback immediately — defer until STATE_READY
+                // so audio doesn't leak while the video surface is still attaching.
+                exoPlayer.playWhenReady = false
+                pendingPlayWhenReady.value = localResumePlayback
             }
-
-            exoPlayer.prepare()
-            // Don't start playback immediately — defer until STATE_READY
-            // so audio doesn't leak while the video surface is still attaching.
-            exoPlayer.playWhenReady = false
-            pendingPlayWhenReady.value = localResumePlayback
         }
     }
 
@@ -1487,6 +1553,8 @@ fun PlayerScreen(
     val onNextEpisodeClick = nextEp?.let { ep ->
         {
             localResumePlayback = false
+            val defaultServer = availableServers.firstOrNull() ?: "s-1"
+            selectedServer = defaultServer
             activeEpisodeId = ep.id
         }
     }
@@ -1765,6 +1833,8 @@ fun PlayerScreen(
         onEpisodeSelect = { clickedEp ->
             DebugLogManager.log("USER_ACTION", "Selected item from Episode selection list: Episode ${clickedEp.number} (ID: ${clickedEp.id}).")
             localResumePlayback = false
+            val defaultServer = availableServers.firstOrNull() ?: "s-1"
+            selectedServer = defaultServer
             activeEpisodeId = clickedEp.id
         },
         onServerSelected = { server ->

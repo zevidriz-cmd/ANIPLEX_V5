@@ -208,6 +208,9 @@ export default function PlayerPage() {
   // Stream & Skip times
   const [streamData, setStreamData] = useState(null);
   const [directStream, setDirectStream] = useState(null);
+  const [backupTracks, setBackupTracks] = useState([]);
+  const [fetchingBackupSubs, setFetchingBackupSubs] = useState(false);
+  const [backupAttempted, setBackupAttempted] = useState(false);
   const [skipTimes, setSkipTimes] = useState(null);
   const [initialSavedProgress, setInitialSavedProgress] = useState(0);
   const [loadingStatus, setLoadingStatus] = useState("Scraping stream sources...");
@@ -217,6 +220,68 @@ export default function PlayerPage() {
   const lastLoadedEpIdRef = useRef(null);
   const lastLoadedServerRef = useRef(null);
   const lastLoadedAudioRef = useRef(null);
+
+  const combinedTracks = useMemo(() => {
+    const primaryTracks = directStream ? directStream.tracks : (streamData?.tracks || []);
+    const seenLabels = new Set(primaryTracks.map(t => t.label?.toLowerCase()));
+    const uniqueBackupTracks = backupTracks.filter(t => !seenLabels.has(t.label?.toLowerCase()));
+    return [...primaryTracks, ...uniqueBackupTracks];
+  }, [directStream, streamData, backupTracks]);
+
+  const handleSubtitleError = async (failedTrack) => {
+    if (backupTracks.length > 0 || fetchingBackupSubs) return;
+    
+    const rawMalId = animeDetail?.anime?.info?.malId;
+    const malId = (rawMalId === "0" || !rawMalId) ? null : rawMalId;
+    const animeTitle = animeDetail?.anime?.info?.name;
+    const epNumber = currentEpisode?.number;
+    
+    if (!epNumber || (!malId && !animeTitle)) return;
+    
+    setFetchingBackupSubs(true);
+    setBackupAttempted(true);
+    console.log("[PlayerPage] Subtitle track failed or empty. Triggering automated backup routine...");
+    
+    let resolvedBackup = false;
+    const providers = ["gogoanime", "animepahe"];
+    for (const provider of providers) {
+      try {
+        console.log(`[PlayerPage] Fetching backup subtitles from ${provider}...`);
+        const res = await getSingleBackupStream(malId, epNumber, animeTitle, provider);
+        if (res && res.tracks && res.tracks.length > 0) {
+          console.log(`[PlayerPage] Successfully resolved ${res.tracks.length} backup tracks from ${provider}`);
+          setBackupTracks(res.tracks);
+          resolvedBackup = true;
+          break;
+        }
+      } catch (err) {
+        console.warn(`[PlayerPage] Failed to fetch backup subtitles from ${provider}:`, err);
+      }
+    }
+    setFetchingBackupSubs(false);
+
+    if (!resolvedBackup) {
+      console.warn("[PlayerPage] No soft subtitles in backup. Swapping provider to Gogoanime for hard subtitles...");
+      handlePlaybackError("zoro");
+    }
+  };
+
+  useEffect(() => {
+    const primaryTracks = directStream ? directStream.tracks : (streamData?.tracks || []);
+    if (directStream && primaryTracks.length === 0 && backupTracks.length === 0 && !fetchingBackupSubs && !backupAttempted) {
+      handleSubtitleError(null);
+    }
+  }, [directStream, streamData, backupTracks, fetchingBackupSubs, backupAttempted, animeDetail, currentEpisode]);
+
+  useEffect(() => {
+    const primaryTracks = directStream ? directStream.tracks : (streamData?.tracks || []);
+    if (directStream && directStream.provider === "zoro" && primaryTracks.length === 0 && backupTracks.length === 0 && !fetchingBackupSubs && backupAttempted) {
+      setFallbackNotice({
+        type: "warning",
+        message: "Soft subtitles are unavailable for this episode on Zoro. Try switching to the Gogoanime provider (which uses hardcoded subtitles) from the server bar below."
+      });
+    }
+  }, [directStream, streamData, backupTracks, fetchingBackupSubs, backupAttempted]);
 
   const handlePlaybackError = (providerName) => {
     console.warn(`[PlayerPage] Playback failed for provider: ${providerName}. Adding to failed list.`);
@@ -340,6 +405,8 @@ export default function PlayerPage() {
         if (isMounted) {
           setStreamData(null);
           setDirectStream(null);
+          setBackupTracks([]);
+          setBackupAttempted(false);
           setFallbackNotice(null);
           setLoadingStatus("Connecting to primary server (Zoro)...");
         }
@@ -764,7 +831,8 @@ export default function PlayerPage() {
         ) : (
           <VideoPlayer
             src={hlsSource}
-            tracks={directStream ? directStream.tracks : (streamData?.tracks || [])}
+            tracks={combinedTracks}
+            onSubtitleError={handleSubtitleError}
             intro={skipIntroRange}
             outro={skipOutroRange}
             initialTime={initialSavedProgress}

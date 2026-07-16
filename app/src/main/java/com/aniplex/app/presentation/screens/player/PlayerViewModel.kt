@@ -298,6 +298,10 @@ class PlayerViewModel @Inject constructor(
     private val _fallbackStatusMessage = MutableStateFlow<String?>(null)
     val fallbackStatusMessage: StateFlow<String?> = _fallbackStatusMessage.asStateFlow()
 
+    fun setFallbackStatusMessage(message: String?) {
+        _fallbackStatusMessage.value = message
+    }
+
     private val failedProviders = mutableSetOf<String>()
     private var streamJob: Job? = null
 
@@ -706,6 +710,32 @@ class PlayerViewModel @Inject constructor(
                 watchlistRef.set(watchlistData, com.google.firebase.firestore.SetOptions.merge()).await()
             } catch (e: Exception) {
                 // Ignore silent error
+            }
+        }
+    }
+
+    fun getBackupSubtitles(onBackupSubtitlesFound: (List<com.aniplex.app.domain.model.SubtitleTrack>) -> Unit) {
+        viewModelScope.launch {
+            val malId = awaitMetadataAndGetMalId()
+            val title = _animeDetail.value?.name
+            val epNum = _currentEpisode.value?.number ?: 1
+
+            if (malId == null && title.isNullOrEmpty()) return@launch
+
+            val providers = listOf("gogoanime", "animepahe")
+            for (provider in providers) {
+                var found = false
+                try {
+                    repository.getFallbackStream(malId, epNum, title, provider).collect { result ->
+                        if (result is Result.Success && result.data.subtitles.isNotEmpty()) {
+                            onBackupSubtitlesFound(result.data.subtitles)
+                            found = true
+                        }
+                    }
+                    if (found) break
+                } catch (e: Exception) {
+                    // Ignore
+                }
             }
         }
     }
