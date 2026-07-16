@@ -1671,6 +1671,52 @@ class AnimeRepositoryImpl @Inject constructor(
         }
     }.flowOn(Dispatchers.IO)
 
+    override fun getSeasonalAnime(year: Int?, season: String?, page: Int): Flow<Result<SeasonalData>> = flow {
+        emit(Result.Loading)
+        try {
+            val urlString = if (year == null || season == null) {
+                "https://api.jikan.moe/v4/seasons/now?page=$page&limit=24"
+            } else {
+                "https://api.jikan.moe/v4/seasons/$year/${season.lowercase()}?page=$page&limit=24"
+            }
+            val request = okhttp3.Request.Builder().url(urlString).build()
+            val resultJson = withContext(Dispatchers.IO) {
+                val okResponse = okHttpClient.newCall(request).execute()
+                if (okResponse.isSuccessful) okResponse.body?.string() else null
+            }
+
+            if (!resultJson.isNullOrEmpty()) {
+                val parsed = gson.fromJson(resultJson, JikanSeasonalResponse::class.java)
+                val rawList = parsed.data?.mapNotNull { item ->
+                    if (item.mal_id == null) return@mapNotNull null
+                    val genreString = item.genres?.mapNotNull { it.name }?.joinToString(" • ") ?: ""
+                    Anime(
+                        id = "mal-${item.mal_id}",
+                        title = item.title_english ?: item.title ?: "Unknown",
+                        poster = item.images?.webp?.large_image_url ?: item.images?.webp?.image_url ?: item.images?.jpg?.image_url ?: "",
+                        type = item.type ?: "TV",
+                        duration = item.duration ?: "",
+                        subEpisodes = item.episodes ?: 0,
+                        dubEpisodes = 0,
+                        rate = item.score?.toString() ?: "",
+                        isBackup = true,
+                        description = item.synopsis ?: "",
+                        genres = genreString
+                    )
+                } ?: emptyList()
+
+                val totalPages = parsed.pagination?.last_visible_page ?: 1
+                val hasNextPage = parsed.pagination?.has_next_page ?: false
+
+                emit(Result.Success(SeasonalData(rawList, totalPages, hasNextPage)))
+            } else {
+                emit(Result.Error("Failed to fetch seasonal anime data"))
+            }
+        } catch (e: Exception) {
+            emit(Result.Error(e.localizedMessage ?: "Failed to fetch seasonal anime"))
+        }
+    }.flowOn(Dispatchers.IO)
+
     override fun resolveMAL(malId: String): Flow<Result<String>> = flow {
         if (malId.isBlank()) {
             emit(Result.Error("Blank MAL ID"))
@@ -2089,7 +2135,18 @@ private data class JikanAnime(
     val duration: String? = null,
     val episodes: Int? = null,
     val score: Double? = null,
-    val aired: JikanAired? = null
+    val aired: JikanAired? = null,
+    val genres: List<JikanGenre>? = null,
+    val synopsis: String? = null
+)
+
+private data class JikanGenre(
+    val name: String?
+)
+
+private data class JikanSeasonalResponse(
+    val data: List<JikanAnime>?,
+    val pagination: JikanPagination?
 )
 
 private data class JikanImages(
