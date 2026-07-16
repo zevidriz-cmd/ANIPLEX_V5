@@ -7,6 +7,7 @@ import com.aniplex.app.data.local.preferences.ProfileManager
 import com.aniplex.app.domain.model.AnimeDetail
 import com.aniplex.app.domain.model.Episode
 import com.aniplex.app.domain.model.EpisodeStream
+import com.aniplex.app.domain.model.SubtitleTrack
 import com.aniplex.app.domain.model.SkipTimes
 import com.aniplex.app.domain.model.Result
 import com.aniplex.app.domain.repository.AnimeRepository
@@ -28,7 +29,7 @@ sealed interface PlayerUiState {
     data object Loading : PlayerUiState
     data class Success(val stream: EpisodeStream) : PlayerUiState
     data class Error(val message: String) : PlayerUiState
-    data class WebViewFallback(val embedUrl: String) : PlayerUiState
+    data class WebViewFallback(val embedUrl: String, val subtitles: List<SubtitleTrack> = emptyList()) : PlayerUiState
     data class IframeFallback(val iframeUrl: String, val provider: String) : PlayerUiState
 }
 
@@ -521,7 +522,7 @@ class PlayerViewModel @Inject constructor(
                 if (result.data.isHls) {
                     _uiState.value = PlayerUiState.Success(stream = result.data)
                 } else {
-                    _uiState.value = PlayerUiState.WebViewFallback(embedUrl = result.data.videoUrl)
+                    _uiState.value = PlayerUiState.WebViewFallback(embedUrl = result.data.videoUrl, subtitles = result.data.subtitles)
                 }
                 _fallbackStatusMessage.value = when (provider) {
                     "zoro" -> null

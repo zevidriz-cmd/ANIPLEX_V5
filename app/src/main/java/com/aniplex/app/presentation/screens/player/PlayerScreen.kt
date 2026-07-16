@@ -866,6 +866,27 @@ fun PlayerScreen(
                 if (extractionState != ExtractionState.READY) {
                     extractionState = ExtractionState.EXTRACTING
                 }
+                if (state.subtitles.isNotEmpty()) {
+                    val sniffed = state.subtitles.map { sub ->
+                        val urlLower = sub.url.lowercase()
+                        val labelLower = sub.label.lowercase()
+                        val mimeType = if (urlLower.endsWith(".ass") || urlLower.endsWith(".ssa")) "text/x-ass" else androidx.media3.common.MimeTypes.TEXT_VTT
+                        val lang = when {
+                            urlLower.contains("eng") || urlLower.contains("english") || labelLower.contains("eng") || labelLower.contains("english") -> "en"
+                            urlLower.contains("ara") || labelLower.contains("ara") || urlLower.contains("-ar") -> "ar"
+                            urlLower.contains("spa") || labelLower.contains("spa") || urlLower.contains("-es") -> "es"
+                            urlLower.contains("fre") || labelLower.contains("fre") || urlLower.contains("-fr") -> "fr"
+                            else -> "en"
+                        }
+                        SniffedSubtitle(url = sub.url, mime = mimeType, langCode = lang)
+                    }
+                    sniffed.forEach { item ->
+                        if (capturedSubtitles.none { it.url == item.url }) {
+                            capturedSubtitles.add(item)
+                        }
+                    }
+                    DebugLogManager.log("ANIPLEX_SUBS", "Pre-populated ${sniffed.size} subtitles from Zoro API response")
+                }
             }
             is PlayerUiState.IframeFallback -> {
                 // Iframe fallback is self-contained; mark extraction as READY
