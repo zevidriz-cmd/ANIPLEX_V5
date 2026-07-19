@@ -1037,9 +1037,9 @@ fun PlayerScreen(
     LaunchedEffect(uiState, timeoutKey, extractionState, selectedServer) {
         val curUiState = uiState
         if (curUiState is PlayerUiState.WebViewFallback && extractionState == ExtractionState.EXTRACTING) {
-            delay(25000) // Increase timeout to 25s
+            delay(12000) // 12s timeout - if the stream isn't captured by now, it won't be
             if (capturedStreamUrl == null) {
-                if (retryCount < 2) {
+                if (retryCount < 1) {
                     retryCount++
                     timeoutKey++
                     val retryUrl = getEmbedUrl(selectedServer, activeEpisodeId, activeCategory)
@@ -1205,7 +1205,7 @@ fun PlayerScreen(
         if (currentProvider != "zoro") {
             viewModel.handlePlaybackError(activeCategory)
         } else {
-            if (retryCount < 2) {
+            if (retryCount < 1) {
                 retryCount++
                 capturedStreamUrl = null
                 extractedUserAgent = null

@@ -1168,66 +1168,104 @@ class AnimeRepositoryImpl @Inject constructor(
                     var outroStart = data.outro?.let { it.start * 1000L } ?: 0L
                     var outroEnd = data.outro?.let { it.end * 1000L } ?: 0L
 
+                    // --- DIAGNOSTIC: Log raw API response ---
+                    DebugLogManager.log("ANIPLEX_PLAYER", "[Zoro Diag] API response: videoUrl=$videoUrl | type=${source.type} | isHls=$isHls")
+
+                    // If API returned an HLS URL directly but it's not proxied, wrap it through our proxy
+                    // (Cloudflare WAF blocks direct mobile requests to stream CDNs)
+                    if (isHls && !videoUrl.contains(STREAM_PROXY_BASE)) {
+                        val cleanHlsUrl = videoUrl.removePrefix("https://").removePrefix("http://")
+                        videoUrl = "$STREAM_PROXY_BASE/$cleanHlsUrl"
+                        DebugLogManager.log("ANIPLEX_PLAYER", "[Zoro Diag] HLS URL proxied: $videoUrl")
+                    }
+
                     // Try to programmatically extract direct stream link from Zoro iframe to bypass background WebView sniffing
-                    if (!isHls && (videoUrl.contains("embed") || videoUrl.contains("rapid-cloud") || videoUrl.contains("megacloud") || videoUrl.contains("rabbitstream"))) {
+                    // Broadened guard: attempt extraction for ANY non-HLS URL (not just specific domains)
+                    if (!isHls) {
+                        DebugLogManager.log("ANIPLEX_PLAYER", "[Zoro Diag] Entering programmatic extraction for non-HLS URL")
                         try {
                             val cleanUrl = videoUrl.removePrefix("https://").removePrefix("http://")
                             val proxyUrl = "$STREAM_PROXY_BASE/$cleanUrl"
+                            DebugLogManager.log("ANIPLEX_PLAYER", "[Zoro Diag] Step 1: Fetching iframe HTML via proxy: $proxyUrl")
                             val iframeRequest = okhttp3.Request.Builder()
                                 .url(proxyUrl)
                                 .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
                                 .build()
                             val iframeResponse = okHttpClient.newCall(iframeRequest).execute()
+                            DebugLogManager.log("ANIPLEX_PLAYER", "[Zoro Diag] Step 1 response: ${iframeResponse.code}")
                             if (iframeResponse.isSuccessful) {
                                 val html = iframeResponse.body?.string() ?: ""
+                                DebugLogManager.log("ANIPLEX_PLAYER", "[Zoro Diag] Step 1 HTML length: ${html.length}")
                                 val megaplayRegex = Regex("""src=["'](https://megaplay\.buzz/stream/s-[1-9]/\d+/(?:sub|dub))["']""")
                                 val megaplayMatch = megaplayRegex.find(html)
                                 val megaplayUrl = megaplayMatch?.groupValues?.get(1)
+                                DebugLogManager.log("ANIPLEX_PLAYER", "[Zoro Diag] Step 2: Megaplay URL from regex: ${megaplayUrl ?: "NOT FOUND"}")
                                 if (megaplayUrl != null) {
                                     val cleanMegaplayUrl = megaplayUrl.removePrefix("https://").removePrefix("http://")
                                     val megaplayProxyUrl = "$STREAM_PROXY_BASE/$cleanMegaplayUrl"
+                                    DebugLogManager.log("ANIPLEX_PLAYER", "[Zoro Diag] Step 2: Fetching megaplay page: $megaplayProxyUrl")
                                     val megaplayRequest = okhttp3.Request.Builder()
                                         .url(megaplayProxyUrl)
                                         .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
                                         .build()
                                     val megaplayResponse = okHttpClient.newCall(megaplayRequest).execute()
+                                    DebugLogManager.log("ANIPLEX_PLAYER", "[Zoro Diag] Step 2 response: ${megaplayResponse.code}")
                                     if (megaplayResponse.isSuccessful) {
                                         val megaplayHtml = megaplayResponse.body?.string() ?: ""
                                         val dataIdRegex = Regex("""data-id=["'](\d+)["']""")
                                         val dataIdMatch = dataIdRegex.find(megaplayHtml)
                                         val dataId = dataIdMatch?.groupValues?.get(1)
+                                        DebugLogManager.log("ANIPLEX_PLAYER", "[Zoro Diag] Step 3: data-id=${dataId ?: "NOT FOUND"}")
                                         if (dataId != null) {
                                             var sourcesJson: MegaplaySourcesResponse? = null
                                             var resolved = false
                                             try {
+                                                val getSourcesUrl = "$STREAM_PROXY_BASE/megaplay.buzz/stream/getSources?id=$dataId"
+                                                DebugLogManager.log("ANIPLEX_PLAYER", "[Zoro Diag] Step 4a: Trying getSources: $getSourcesUrl")
                                                 val sourcesRequest = okhttp3.Request.Builder()
-                                                    .url("$STREAM_PROXY_BASE/megaplay.buzz/stream/getSources?id=$dataId")
+                                                    .url(getSourcesUrl)
                                                     .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
                                                     .header("X-Requested-With", "XMLHttpRequest")
                                                     .build()
                                                 val sourcesResponse = okHttpClient.newCall(sourcesRequest).execute()
+                                                DebugLogManager.log("ANIPLEX_PLAYER", "[Zoro Diag] Step 4a response: ${sourcesResponse.code}")
                                                 if (sourcesResponse.isSuccessful) {
                                                     val body = sourcesResponse.body?.string()
                                                     if (body != null) {
+                                                        DebugLogManager.log("ANIPLEX_PLAYER", "[Zoro Diag] Step 4a body length: ${body.length}")
                                                         val parsed = gson.fromJson(body, MegaplaySourcesResponse::class.java)
                                                         if (parsed?.sources?.file != null) {
                                                             sourcesJson = parsed
                                                             resolved = true
+                                                            DebugLogManager.log("ANIPLEX_PLAYER", "[Zoro Diag] Step 4a SUCCESS: file=${parsed.sources.file}")
+                                                        } else {
+                                                            DebugLogManager.log("ANIPLEX_PLAYER", "[Zoro Diag] Step 4a: sources.file is null in response")
                                                         }
                                                     }
                                                 }
-                                            } catch (_: Exception) {}
+                                            } catch (e: Exception) {
+                                                DebugLogManager.log("ANIPLEX_PLAYER", "[Zoro Diag] Step 4a exception: ${e.message}")
+                                            }
                                             if (!resolved) {
+                                                val getSourcesNewUrl = "$STREAM_PROXY_BASE/megaplay.buzz/stream/getSourcesNew?id=$dataId"
+                                                DebugLogManager.log("ANIPLEX_PLAYER", "[Zoro Diag] Step 4b: Trying getSourcesNew: $getSourcesNewUrl")
                                                 val sourcesNewRequest = okhttp3.Request.Builder()
-                                                    .url("$STREAM_PROXY_BASE/megaplay.buzz/stream/getSourcesNew?id=$dataId")
+                                                    .url(getSourcesNewUrl)
                                                     .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
                                                     .header("X-Requested-With", "XMLHttpRequest")
                                                     .build()
                                                 val sourcesNewResponse = okHttpClient.newCall(sourcesNewRequest).execute()
+                                                DebugLogManager.log("ANIPLEX_PLAYER", "[Zoro Diag] Step 4b response: ${sourcesNewResponse.code}")
                                                 if (sourcesNewResponse.isSuccessful) {
                                                     val body = sourcesNewResponse.body?.string()
                                                     if (body != null) {
+                                                        DebugLogManager.log("ANIPLEX_PLAYER", "[Zoro Diag] Step 4b body length: ${body.length}")
                                                         sourcesJson = gson.fromJson(body, MegaplaySourcesResponse::class.java)
+                                                        if (sourcesJson?.sources?.file != null) {
+                                                            DebugLogManager.log("ANIPLEX_PLAYER", "[Zoro Diag] Step 4b SUCCESS: file=${sourcesJson?.sources?.file}")
+                                                        } else {
+                                                            DebugLogManager.log("ANIPLEX_PLAYER", "[Zoro Diag] Step 4b: sources.file is null in response")
+                                                        }
                                                     }
                                                 }
                                             }
@@ -1254,12 +1292,19 @@ class AnimeRepositoryImpl @Inject constructor(
                                                 DebugLogManager.log("ANIPLEX_PLAYER", "Successfully extracted Zoro stream programmatically: $videoUrl")
                                             }
                                         }
+                                    } else {
+                                        DebugLogManager.log("ANIPLEX_PLAYER", "[Zoro Diag] Step 2: megaplay response FAILED")
                                     }
+                                } else {
+                                    DebugLogManager.log("ANIPLEX_PLAYER", "[Zoro Diag] Step 2: Megaplay regex found no match in iframe HTML")
                                 }
+                            } else {
+                                DebugLogManager.log("ANIPLEX_PLAYER", "[Zoro Diag] Step 1: iframe proxy returned HTTP ${iframeResponse.code}")
                             }
                         } catch (e: Exception) {
-                            DebugLogManager.log("ANIPLEX_PLAYER", "Programmatic Zoro extraction failed, falling back to iframe WebView: ${e.message}", e)
+                            DebugLogManager.log("ANIPLEX_PLAYER", "[Zoro Diag] Programmatic extraction exception: ${e.javaClass.simpleName}: ${e.message}", e)
                         }
+                        DebugLogManager.log("ANIPLEX_PLAYER", "[Zoro Diag] Final state after extraction attempt: isHls=$isHls | videoUrl=$videoUrl")
                     }
 
                     if (useUncensored && isOptionA) {
