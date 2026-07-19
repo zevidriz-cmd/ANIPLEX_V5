@@ -61,6 +61,7 @@ fun ProfileScreen(
     val skipOutro by viewModel.skipOutro.collectAsStateWithLifecycle()
     val downloadOverCellular by viewModel.downloadOverCellular.collectAsStateWithLifecycle()
     val preferredProvider by viewModel.preferredProvider.collectAsStateWithLifecycle()
+    val enableDiagnostics by viewModel.enableDiagnostics.collectAsStateWithLifecycle()
     val hevcDecoderEnabled by viewModel.hevcDecoderEnabled.collectAsStateWithLifecycle()
     val dolbyAtmosEnabled by viewModel.dolbyAtmosEnabled.collectAsStateWithLifecycle()
     val preferredAccentColor by viewModel.preferredAccentColor.collectAsStateWithLifecycle()
@@ -411,12 +412,64 @@ fun ProfileScreen(
 
         // INTERACTIVE SPEED TESTING & STREAM OPTIMIZER
         Text(
-            text = "Network Diagnostics & Stream Optimizer",
+            text = "Network Diagnostics & Telemetry",
             fontSize = 13.sp,
             fontWeight = FontWeight.Bold,
             color = TextSecondary,
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp)
         )
+
+        // Capture Logs & Diagnostics Switch Card
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 4.dp)
+                .border(1.dp, SurfaceDarkVariant, RoundedCornerShape(12.dp)),
+            colors = CardDefaults.cardColors(containerColor = SurfaceDark),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.BugReport,
+                        contentDescription = "Diagnostics",
+                        tint = Color(0xFF00FFCC),
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column {
+                        Text(
+                            text = "Playback Diagnostics & Cookie Capture",
+                            color = Color.White,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Capture extracted stream telemetry & active cloudflare cookies",
+                            color = TextSecondary,
+                            fontSize = 11.sp
+                        )
+                    }
+                }
+                Switch(
+                    checked = enableDiagnostics,
+                    onCheckedChange = { viewModel.updateEnableDiagnostics(it) },
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = Color.Black,
+                        checkedTrackColor = Color(0xFF00FFCC)
+                    )
+                )
+            }
+        }
 
         Card(
             modifier = Modifier

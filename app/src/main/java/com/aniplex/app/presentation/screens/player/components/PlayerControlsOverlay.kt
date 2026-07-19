@@ -43,6 +43,7 @@ fun PlayerControlsOverlay(
     onFullscreenToggle: () -> Unit,
     onBackClick: () -> Unit,
     onSettingsClick: () -> Unit,
+    onDebugClick: (() -> Unit)? = null,
     onNextEpisodeClick: (() -> Unit)?,
     onBackgroundClick: () -> Unit,
     modifier: Modifier = Modifier
@@ -164,6 +165,20 @@ fun PlayerControlsOverlay(
                         tint = Color.White,
                         modifier = Modifier.size(24.dp)
                     )
+                }
+
+                if (onDebugClick != null) {
+                    IconButton(
+                        onClick = onDebugClick,
+                        modifier = Modifier.size(48.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.BugReport,
+                            contentDescription = "Diagnostics & Export Logs",
+                            tint = Color(0xFF00FFCC),
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
                 }
 
                 IconButton(

@@ -23,6 +23,9 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import javax.inject.Inject
 
 sealed interface PlayerUiState {
@@ -399,7 +402,10 @@ class PlayerViewModel @Inject constructor(
                     val doc = docRef.get().await()
                     if (doc.exists()) {
                         val savedEpisodeId = doc.getString("episodeId")
-                        if (savedEpisodeId == episodeId) {
+                        val savedEpisodeNum = doc.getLong("episodeNumber")?.toInt() ?: 0
+                        val epNum = _currentEpisode.value?.number ?: 0
+                        val matchesEpisode = (savedEpisodeId == episodeId) || (savedEpisodeNum > 0 && epNum > 0 && savedEpisodeNum == epNum)
+                        if (matchesEpisode) {
                             val dbProgress = doc.getLong("progressPosition") ?: 0L
                             if (_initialProgress.value <= 0L) {
                                 _initialProgress.value = dbProgress
@@ -697,6 +703,8 @@ class PlayerViewModel @Inject constructor(
         // Obsolete
     }
 
+    private val progressSaveScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+
     fun saveProgress(
         animeId: String,
         animeTitle: String,
@@ -710,7 +718,7 @@ class PlayerViewModel @Inject constructor(
         val profileId = profileManager.activeProfile.value?.id
         if (progress <= 0 || duration <= 0) return
 
-        viewModelScope.launch {
+        progressSaveScope.launch {
             try {
                 // Check if user is near the end of the episode (90% or higher, or last 2 minutes / 120 seconds)
                 val currentList = _episodes.value

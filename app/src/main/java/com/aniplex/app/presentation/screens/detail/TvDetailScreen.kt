@@ -79,7 +79,7 @@ import androidx.compose.foundation.shape.CircleShape
 fun TvDetailScreen(
     animeId: String,
     onBackClick: () -> Unit,
-    onPlayClick: (String, String, String, Int, String) -> Unit,
+    onPlayClick: (String, String, String, Int, String, Long) -> Unit,
     onRecommendationClick: (String) -> Unit,
     onSeasonSelect: (String) -> Unit,
     modifier: Modifier = Modifier,
@@ -242,7 +242,8 @@ fun TvDetailScreen(
                                                     detail.id,
                                                     detail.name,
                                                     watchHistory!!.episodeNumber,
-                                                    selectedAudioType.lowercase()
+                                                    selectedAudioType.lowercase(),
+                                                    watchHistory!!.progressPosition
                                                 )
                                             }
                                             .border(
@@ -692,6 +693,7 @@ fun TvDetailScreen(
                                                             verticalArrangement = Arrangement.spacedBy(12.dp)
                                                         ) {
                                                              items(displayEpisodes, key = { it.id }) { episode: Episode ->
+                                                                val epProg = if (watchHistory != null && (watchHistory!!.episodeId == episode.id || watchHistory!!.episodeNumber == episode.number)) watchHistory!!.progressPosition else 0L
                                                                 TvEpisodeCard(
                                                                     episode = episode,
                                                                     posterUrl = detail.poster,
@@ -701,7 +703,8 @@ fun TvDetailScreen(
                                                                             animeId,
                                                                             detail.name,
                                                                             episode.number,
-                                                                            selectedAudioType.lowercase()
+                                                                            selectedAudioType.lowercase(),
+                                                                            epProg
                                                                         )
                                                                     },
                                                                     modifier = Modifier.height(108.dp)

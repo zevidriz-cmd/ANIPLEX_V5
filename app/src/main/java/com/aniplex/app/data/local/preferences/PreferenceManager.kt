@@ -94,13 +94,13 @@ class PreferenceManager @Inject constructor(
     val preferredAnimeVersionFlow = _preferredAnimeVersionFlow.asStateFlow()
 
     var enableDiagnostics: Boolean
-        get() = prefs.getBoolean("enable_diagnostics", false)
+        get() = prefs.getBoolean("enable_diagnostics", true)
         set(value) {
             prefs.edit().putBoolean("enable_diagnostics", value).apply()
             _enableDiagnosticsFlow.value = value
         }
 
-    private val _enableDiagnosticsFlow = kotlinx.coroutines.flow.MutableStateFlow(prefs.getBoolean("enable_diagnostics", false))
+    private val _enableDiagnosticsFlow = kotlinx.coroutines.flow.MutableStateFlow(prefs.getBoolean("enable_diagnostics", true))
     val enableDiagnosticsFlow = _enableDiagnosticsFlow.asStateFlow()
 
     var downloadOverCellular: Boolean

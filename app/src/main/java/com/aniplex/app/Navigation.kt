@@ -211,8 +211,8 @@ fun MobileMainNavigation() {
                 DetailScreen(
                     animeId = key.animeId,
                     onBackClick = { backStack.removeLastOrNull() },
-                    onPlayClick = { epId, animId, title, epNum, cat ->
-                        backStack.add(Player(epId, animId, title, epNum, cat, resumePlayback = true))
+                    onPlayClick = { epId, animId, title, epNum, cat, progress ->
+                        backStack.add(Player(epId, animId, title, epNum, cat, resumePlayback = true, initialProgress = progress))
                     },
                     onRecommendationClick = { recId ->
                         backStack.add(Detail(recId))
@@ -569,8 +569,8 @@ fun TvMainNavigation() {
                 TvDetailScreen(
                     animeId = key.animeId,
                     onBackClick = { backStack.removeLastOrNull() },
-                    onPlayClick = { epId, animId, title, epNum, cat ->
-                        backStack.add(Player(epId, animId, title, epNum, cat, resumePlayback = true))
+                    onPlayClick = { epId, animId, title, epNum, cat, progress ->
+                        backStack.add(Player(epId, animId, title, epNum, cat, resumePlayback = true, initialProgress = progress))
                     },
                     onRecommendationClick = { recId ->
                         backStack.add(Detail(recId))

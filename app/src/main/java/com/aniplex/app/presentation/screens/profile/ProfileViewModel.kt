@@ -69,6 +69,15 @@ class ProfileViewModel @Inject constructor(
     private val _preferredProvider = MutableStateFlow(preferenceManager.preferredProvider)
     val preferredProvider = _preferredProvider.asStateFlow()
 
+    private val _enableDiagnostics = MutableStateFlow(preferenceManager.enableDiagnostics)
+    val enableDiagnostics = _enableDiagnostics.asStateFlow()
+
+    fun updateEnableDiagnostics(enabled: Boolean) {
+        preferenceManager.enableDiagnostics = enabled
+        com.aniplex.app.presentation.screens.player.DebugLogManager.isLoggingEnabled = enabled
+        _enableDiagnostics.value = enabled
+    }
+
     // Subtitle Customizer states
     private val _subtitleSizeScale = MutableStateFlow(preferenceManager.subtitleSizeScale)
     val subtitleSizeScale = _subtitleSizeScale.asStateFlow()

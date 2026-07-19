@@ -843,6 +843,28 @@ fun PlayerScreen(
             is PlayerUiState.Success -> {
                 capturedStreamUrl = state.stream.videoUrl
                 extractionState = ExtractionState.READY
+                // Populate subtitles from the programmatic extraction result
+                if (state.stream.subtitles.isNotEmpty()) {
+                    val sniffed = state.stream.subtitles.map { sub ->
+                        val urlLower = sub.url.lowercase()
+                        val labelLower = sub.label.lowercase()
+                        val mimeType = if (urlLower.endsWith(".ass") || urlLower.endsWith(".ssa")) "text/x-ass" else androidx.media3.common.MimeTypes.TEXT_VTT
+                        val lang = when {
+                            urlLower.contains("eng") || urlLower.contains("english") || labelLower.contains("eng") || labelLower.contains("english") -> "en"
+                            urlLower.contains("ara") || labelLower.contains("ara") || urlLower.contains("-ar") -> "ar"
+                            urlLower.contains("spa") || labelLower.contains("spa") || urlLower.contains("-es") -> "es"
+                            urlLower.contains("fre") || labelLower.contains("fre") || urlLower.contains("-fr") -> "fr"
+                            else -> "en"
+                        }
+                        SniffedSubtitle(url = sub.url, mime = mimeType, langCode = lang)
+                    }
+                    sniffed.forEach { item ->
+                        if (capturedSubtitles.none { it.url == item.url }) {
+                            capturedSubtitles.add(item)
+                        }
+                    }
+                    DebugLogManager.log("ANIPLEX_SUBS", "Pre-populated ${sniffed.size} subtitles from programmatic extraction")
+                }
             }
             is PlayerUiState.WebViewFallback -> {
                 if (extractionState != ExtractionState.READY) {
@@ -1501,7 +1523,7 @@ fun PlayerScreen(
             // Auto skipping is disabled per user request so videos always start at 0:00 and manual skip buttons can be clicked instead.
             
             val now = System.currentTimeMillis()
-            if (now - lastSavedProgressTime >= 30000L && player.isPlaying) {
+            if (now - lastSavedProgressTime >= 10000L && player.isPlaying) {
                 lastSavedProgressTime = now
                 val ep = currentEpisode ?: episodes.find { it.id == activeEpisodeId }
                 viewModel.saveProgress(
@@ -3422,6 +3444,18 @@ fun ExoVideoPlayer(
                                     imageVector = Icons.Default.Cast,
                                     contentDescription = "Cast",
                                     tint = Color.White,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+
+                            IconButton(
+                                onClick = callbacks.onDebugClick,
+                                modifier = Modifier.size(48.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.BugReport,
+                                    contentDescription = "Diagnostics & Export Logs",
+                                    tint = Color(0xFF00FFCC),
                                     modifier = Modifier.size(24.dp)
                                 )
                             }

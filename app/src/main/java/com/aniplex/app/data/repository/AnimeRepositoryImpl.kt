@@ -1319,12 +1319,20 @@ class AnimeRepositoryImpl @Inject constructor(
 
                     if (finalSubtitles.isEmpty()) {
                         val originalSubtitles = data.tracks?.filter { it.kind == "captions" || it.kind == "subtitles" }?.map {
+                            // Proxy subtitle URLs through STREAM_PROXY_BASE to bypass CDN restrictions
+                            val subtitleUrl = if (!it.file.contains(STREAM_PROXY_BASE)) {
+                                val cleanSubUrl = it.file.removePrefix("https://").removePrefix("http://")
+                                "$STREAM_PROXY_BASE/$cleanSubUrl"
+                            } else {
+                                it.file
+                            }
                             SubtitleTrack(
-                                url = it.file,
+                                url = subtitleUrl,
                                 label = it.label ?: "English",
                                 isDefault = it.label?.equals("english", ignoreCase = true) == true
                             )
                         } ?: emptyList()
+                        DebugLogManager.log("ANIPLEX_SUBS", "[Zoro Diag] Fallback subtitles from API tracks: ${originalSubtitles.size} tracks")
                         finalSubtitles = if (useUncensored && isOptionA) {
                             originalSubtitles + SubtitleTrack(
                                 url = "https://example.com/uncensored_indicator.vtt",

@@ -88,7 +88,7 @@ import com.aniplex.app.theme.TextSecondary
 fun DetailScreen(
     animeId: String,
     onBackClick: () -> Unit,
-    onPlayClick: (String, String, String, Int, String) -> Unit,
+    onPlayClick: (String, String, String, Int, String, Long) -> Unit,
     onRecommendationClick: (String) -> Unit,
     onSeasonSelect: (String) -> Unit,
     modifier: Modifier = Modifier,
@@ -275,7 +275,7 @@ fun DetailContent(
     userRating: Int,
     seasonsState: DetailState<List<Season>>,
     onBackClick: () -> Unit,
-    onPlayClick: (String, String, String, Int, String) -> Unit,
+    onPlayClick: (String, String, String, Int, String, Long) -> Unit,
     onRecommendationClick: (String) -> Unit,
     onWatchlistToggle: () -> Unit,
     onRatingSelected: (Int) -> Unit,
@@ -602,7 +602,7 @@ fun DetailContent(
                                         onPlayClick(firstEp.id, animeDetail.id, animeDetail.name, firstEp.number, selectedAudioType.lowercase())
                                     }
                                 } else if (hasHistory && watchHistory != null) {
-                                    onPlayClick(watchHistory.episodeId, animeDetail.id, animeDetail.name, watchHistory.episodeNumber, selectedAudioType.lowercase())
+                                    onPlayClick(watchHistory.episodeId, animeDetail.id, animeDetail.name, watchHistory.episodeNumber, selectedAudioType.lowercase(), watchHistory.progressPosition)
                                 } else if (episodes.isNotEmpty()) {
                                     val firstEpisode = episodes.first()
                                     onPlayClick(firstEpisode.id, animeDetail.id, animeDetail.name, firstEpisode.number, selectedAudioType.lowercase())
@@ -750,7 +750,8 @@ fun DetailContent(
                                 animeDetail.id,
                                 animeDetail.name,
                                 watchHistory.episodeNumber,
-                                selectedAudioType.lowercase()
+                                selectedAudioType.lowercase(),
+                                watchHistory.progressPosition
                             )
                         }
                         .border(1.dp, CrunchyrollOrange.copy(alpha = 0.3f), RoundedCornerShape(12.dp)),
@@ -1250,8 +1251,8 @@ fun DetailContent(
                     episodesState = episodesState,
                     selectedAudioType = selectedAudioType,
                     onAudioTypeChange = { selectedAudioType = it },
-                    onPlayClick = { epId, title, epNum, cat ->
-                        onPlayClick(epId, animeDetail.id, title, epNum, cat)
+                    onPlayClick = { epId, title, epNum, cat, progress ->
+                        onPlayClick(epId, animeDetail.id, title, epNum, cat, progress)
                     },
                     downloads = downloads,
                     triggerDownload = triggerDownload,
@@ -1284,7 +1285,7 @@ fun DetailContent(
             Button(
                 onClick = {
                     if (hasHistory && watchHistory != null) {
-                        onPlayClick(watchHistory.episodeId, animeDetail.id, animeDetail.name, watchHistory.episodeNumber, selectedAudioType.lowercase())
+                        onPlayClick(watchHistory.episodeId, animeDetail.id, animeDetail.name, watchHistory.episodeNumber, selectedAudioType.lowercase(), watchHistory.progressPosition)
                     } else if (episodes.isNotEmpty()) {
                         val firstEpisode = episodes.first()
                         onPlayClick(firstEpisode.id, animeDetail.id, animeDetail.name, firstEpisode.number, selectedAudioType.lowercase())
@@ -1410,7 +1411,7 @@ fun EpisodesTabContent(
     episodesState: DetailState<List<Episode>>,
     selectedAudioType: String,
     onAudioTypeChange: (String) -> Unit,
-    onPlayClick: (String, String, Int, String) -> Unit,
+    onPlayClick: (String, String, Int, String, Long) -> Unit,
     downloads: List<com.aniplex.app.data.download.DownloadTask>,
     triggerDownload: (Episode) -> Unit,
     watchHistory: HistoryItem? = null,
@@ -1429,9 +1430,6 @@ fun EpisodesTabContent(
         if (index != -1) index else 0
     }
     var selectedArcIndex by remember(activeArcIndex) { mutableStateOf(activeArcIndex) }
-
-    var showSeasonDialog by remember { mutableStateOf(false) }
-    var selectedChunkIndex by remember { mutableStateOf(0) }
 
     Column(
         modifier = Modifier
@@ -1612,10 +1610,12 @@ fun EpisodesTabContent(
                                 false
                             }
 
+                            val epProg = if (watchHistory != null && (watchHistory.episodeId == episode.id || watchHistory.episodeNumber == episode.number)) watchHistory.progressPosition else 0L
+
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clickable { onPlayClick(episode.id, animeTitle, episode.number, selectedAudioType.lowercase()) },
+                                    .clickable { onPlayClick(episode.id, animeTitle, episode.number, selectedAudioType.lowercase(), epProg) },
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 var isThumbLoading by remember(episode.id) { mutableStateOf(true) }

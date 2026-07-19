@@ -13,7 +13,7 @@ object DebugLogManager {
     private val logQueue = ConcurrentLinkedQueue<String>()
     private val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US)
     
-    var isLoggingEnabled: Boolean = false
+    var isLoggingEnabled: Boolean = true
 
     fun log(tag: String, msg: String, tr: Throwable? = null) {
         if (!isLoggingEnabled) return
