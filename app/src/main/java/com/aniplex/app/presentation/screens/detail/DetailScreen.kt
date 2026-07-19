@@ -599,13 +599,13 @@ fun DetailContent(
                                 } else if (isSeasonFinished) {
                                     if (episodes.isNotEmpty()) {
                                         val firstEp = episodes.first()
-                                        onPlayClick(firstEp.id, animeDetail.id, animeDetail.name, firstEp.number, selectedAudioType.lowercase())
+                                        onPlayClick(firstEp.id, animeDetail.id, animeDetail.name, firstEp.number, selectedAudioType.lowercase(), 0L)
                                     }
                                 } else if (hasHistory && watchHistory != null) {
                                     onPlayClick(watchHistory.episodeId, animeDetail.id, animeDetail.name, watchHistory.episodeNumber, selectedAudioType.lowercase(), watchHistory.progressPosition)
                                 } else if (episodes.isNotEmpty()) {
                                     val firstEpisode = episodes.first()
-                                    onPlayClick(firstEpisode.id, animeDetail.id, animeDetail.name, firstEpisode.number, selectedAudioType.lowercase())
+                                    onPlayClick(firstEpisode.id, animeDetail.id, animeDetail.name, firstEpisode.number, selectedAudioType.lowercase(), 0L)
                                 }
                             },
                             modifier = Modifier.weight(1f).fillMaxHeight(),
@@ -1288,7 +1288,7 @@ fun DetailContent(
                         onPlayClick(watchHistory.episodeId, animeDetail.id, animeDetail.name, watchHistory.episodeNumber, selectedAudioType.lowercase(), watchHistory.progressPosition)
                     } else if (episodes.isNotEmpty()) {
                         val firstEpisode = episodes.first()
-                        onPlayClick(firstEpisode.id, animeDetail.id, animeDetail.name, firstEpisode.number, selectedAudioType.lowercase())
+                        onPlayClick(firstEpisode.id, animeDetail.id, animeDetail.name, firstEpisode.number, selectedAudioType.lowercase(), 0L)
                     }
                 },
                 modifier = Modifier
@@ -1430,6 +1430,9 @@ fun EpisodesTabContent(
         if (index != -1) index else 0
     }
     var selectedArcIndex by remember(activeArcIndex) { mutableStateOf(activeArcIndex) }
+
+    var showSeasonDialog by remember { mutableStateOf(false) }
+    var selectedChunkIndex by remember { mutableStateOf(0) }
 
     Column(
         modifier = Modifier

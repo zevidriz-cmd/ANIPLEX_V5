@@ -296,7 +296,8 @@ fun TvDetailScreen(
                                                     detail.id,
                                                     detail.name,
                                                     firstEpisode.number,
-                                                    selectedAudioType.lowercase()
+                                                    selectedAudioType.lowercase(),
+                                                    0L
                                                 )
                                             },
                                             colors = ButtonDefaults.buttonColors(
