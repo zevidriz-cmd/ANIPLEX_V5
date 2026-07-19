@@ -1652,7 +1652,7 @@ class AnimeRepositoryImpl @Inject constructor(
                                     }
                                     if (override != null) return override
                                     val mapping = LOCAL_ACCURATE_MAPPINGS.find { it.malId.toString() == mId }
-                                    return mapping?.anikotoId
+                                    return mapping?.id
                                 }
 
                                 var tvIndex = 1
