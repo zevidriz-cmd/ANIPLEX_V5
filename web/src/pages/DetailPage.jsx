@@ -198,7 +198,7 @@ export default function DetailPage() {
   // Determine next season in franchise if available
   const nextFranchiseSeason = useMemo(() => {
     if (!seasons || seasons.length <= 1) return null;
-    const mainSeasons = seasons.filter(s => s.relationType === "MAIN" || (s.seasonNumber && s.seasonNumber > 0));
+    const mainSeasons = seasons.filter(s => s.relationType === "MAIN" && s.seasonNumber > 0 && s.format !== "MOVIE");
     const currentIndex = mainSeasons.findIndex(s => String(s.resolvedId) === String(animeId) || String(s.malId) === String(detail?.anime?.info?.malId));
     if (currentIndex !== -1 && currentIndex < mainSeasons.length - 1) {
       return mainSeasons[currentIndex + 1];
@@ -551,7 +551,7 @@ export default function DetailPage() {
 
     async function checkPrequelCompleted() {
       try {
-        const mainSeasons = seasons.filter(s => s.relationType === "MAIN" || (s.seasonNumber && s.seasonNumber > 0));
+        const mainSeasons = seasons.filter(s => s.relationType === "MAIN" && s.seasonNumber > 0 && s.format !== "MOVIE");
         const currentSeasonIndex = mainSeasons.findIndex(s => String(s.resolvedId) === String(animeId) || String(s.malId) === String(detail?.anime?.info?.malId));
 
         if (currentSeasonIndex !== -1 && currentSeasonIndex < mainSeasons.length - 1) {

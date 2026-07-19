@@ -387,37 +387,7 @@ class DetailViewModel @Inject constructor(
                 }
             }
 
-            viewModelScope.launch {
-                try {
-                    // 2. Check history
-                    val docRef = if (profileId != null) {
-                        firestore.collection("users").document(userId)
-                            .collection("profiles").document(profileId)
-                            .collection("history").document(animeId)
-                    } else {
-                        firestore.collection("users").document(userId)
-                            .collection("history").document(animeId)
-                    }
-                    val histDoc = docRef.get().await()
-                    if (histDoc.exists()) {
-                        _watchHistory.value = HistoryItem(
-                            animeId = animeId,
-                            animeTitle = histDoc.getString("animeTitle") ?: "",
-                            poster = histDoc.getString("poster") ?: "",
-                            episodeId = histDoc.getString("episodeId") ?: "",
-                            episodeNumber = histDoc.getLong("episodeNumber")?.toInt() ?: 1,
-                            episodeTitle = histDoc.getString("episodeTitle") ?: "",
-                            progressPosition = histDoc.getLong("progressPosition") ?: 0L,
-                            totalDuration = histDoc.getLong("totalDuration") ?: 0L,
-                            updatedAt = histDoc.getLong("updatedAt") ?: System.currentTimeMillis()
-                        )
-                    } else {
-                        _watchHistory.value = null
-                    }
-                } catch (e: Exception) {
-                    _watchHistory.value = null
-                }
-            }
+            refreshWatchHistory(animeId)
 
             viewModelScope.launch {
                 try {
@@ -688,6 +658,41 @@ class DetailViewModel @Inject constructor(
                         is Result.Error -> _storyArcsState.value = DetailState.Error(result.message)
                     }
                 }
+            }
+        }
+    }
+
+    fun refreshWatchHistory(animeId: String) {
+        val userId = auth.currentUser?.uid ?: return
+        val profileId = profileManager.activeProfile.value?.id
+        viewModelScope.launch {
+            try {
+                val docRef = if (profileId != null) {
+                    firestore.collection("users").document(userId)
+                        .collection("profiles").document(profileId)
+                        .collection("history").document(animeId)
+                } else {
+                    firestore.collection("users").document(userId)
+                        .collection("history").document(animeId)
+                }
+                val histDoc = docRef.get().await()
+                if (histDoc.exists()) {
+                    _watchHistory.value = HistoryItem(
+                        animeId = animeId,
+                        animeTitle = histDoc.getString("animeTitle") ?: "",
+                        poster = histDoc.getString("poster") ?: "",
+                        episodeId = histDoc.getString("episodeId") ?: "",
+                        episodeNumber = histDoc.getLong("episodeNumber")?.toInt() ?: 1,
+                        episodeTitle = histDoc.getString("episodeTitle") ?: "",
+                        progressPosition = histDoc.getLong("progressPosition") ?: 0L,
+                        totalDuration = histDoc.getLong("totalDuration") ?: 0L,
+                        updatedAt = histDoc.getLong("updatedAt") ?: System.currentTimeMillis()
+                    )
+                } else {
+                    _watchHistory.value = null
+                }
+            } catch (e: Exception) {
+                _watchHistory.value = null
             }
         }
     }

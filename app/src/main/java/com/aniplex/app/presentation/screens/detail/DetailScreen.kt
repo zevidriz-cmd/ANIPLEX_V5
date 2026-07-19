@@ -57,6 +57,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.content.Context
@@ -127,6 +129,15 @@ fun DetailScreen(
 
     LaunchedEffect(animeId) {
         viewModel.loadAnimeData(animeId)
+    }
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+    LaunchedEffect(lifecycleOwner, animeId) {
+        lifecycleOwner.lifecycle.currentStateFlow.collect { state ->
+            if (state == Lifecycle.State.RESUMED) {
+                viewModel.refreshWatchHistory(animeId)
+            }
+        }
     }
 
     Box(
@@ -580,7 +591,7 @@ fun DetailContent(
                     // Action Buttons (Play, Bookmark, Download)
                     val episodes = (episodesState as? DetailState.Success)?.data ?: emptyList()
                     val seasons = (seasonsState as? DetailState.Success)?.data ?: emptyList()
-                    val mainSeasons = seasons.filter { it.relationType == "MAIN" || it.seasonNumber > 0 }
+                    val mainSeasons = seasons.filter { it.relationType == "MAIN" && it.seasonNumber > 0 && it.format != "MOVIE" }
                     val currentSeasonIdx = mainSeasons.indexOfFirst { it.resolvedId == animeDetail.id || it.malId == animeDetail.malId }
                     val nextSeason = if (currentSeasonIdx != -1 && currentSeasonIdx < mainSeasons.size - 1) mainSeasons[currentSeasonIdx + 1] else null
 

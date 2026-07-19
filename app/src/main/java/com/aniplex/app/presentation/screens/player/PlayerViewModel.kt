@@ -338,7 +338,7 @@ class PlayerViewModel @Inject constructor(
         }
     }
 
-    fun initialize(animeId: String, episodeId: String, category: String, server: String = "hd-1", initialSavedProgress: Long = 0L) {
+    fun initialize(animeId: String, episodeId: String, category: String, server: String = "hd-1", initialSavedProgress: Long = 0L, episodeNumber: Int = 0) {
         _uiState.value = PlayerUiState.Loading
         _skipTimes.value = SkipTimes() // Reset skip times on load
         _initialProgress.value = initialSavedProgress // Reset initial progress too to avoid cross-anime progress leak
@@ -403,17 +403,21 @@ class PlayerViewModel @Inject constructor(
                     if (doc.exists()) {
                         val savedEpisodeId = doc.getString("episodeId")
                         val savedEpisodeNum = doc.getLong("episodeNumber")?.toInt() ?: 0
-                        val epNum = _currentEpisode.value?.number ?: 0
+                        val epNum = if (episodeNumber > 0) episodeNumber else (_currentEpisode.value?.number ?: 0)
                         val matchesEpisode = (savedEpisodeId == episodeId) || (savedEpisodeNum > 0 && epNum > 0 && savedEpisodeNum == epNum)
+                        DebugLogManager.log("ANIPLEX_PROGRESS", "History doc found. savedEpisodeId: $savedEpisodeId, savedEpisodeNum: $savedEpisodeNum, epNum: $epNum, matches: $matchesEpisode")
                         if (matchesEpisode) {
                             val dbProgress = doc.getLong("progressPosition") ?: 0L
                             if (_initialProgress.value <= 0L) {
                                 _initialProgress.value = dbProgress
+                                DebugLogManager.log("ANIPLEX_PROGRESS", "Successfully resolved and loaded initialProgress: $dbProgress")
                             }
                         }
+                    } else {
+                        DebugLogManager.log("ANIPLEX_PROGRESS", "No watch history document exists for animeId: $animeId")
                     }
                 } catch (e: Exception) {
-                    // Ignore, default to 0
+                    DebugLogManager.log("ANIPLEX_PROGRESS", "Error fetching watch history: ${e.message}", e)
                 }
             }
         }
@@ -438,42 +442,48 @@ class PlayerViewModel @Inject constructor(
 
                     if (seasons.size <= 1) return@launch
 
-                    // Get all related animeIds from the franchise (excluding current)
-                    val relatedAnimeIds = seasons
-                        .mapNotNull { it.resolvedId }
-                        .filter { it != animeId }
+                    // Find current anime in seasons to check its relationType
+                    val currentSeasonObj = seasons.find { it.resolvedId == animeId || it.malId == malId }
+                    
+                    // Only perform cleanup if current anime is a MAIN season
+                    if (currentSeasonObj?.relationType == "MAIN") {
+                        // Get all related animeIds from the franchise (excluding current) that are also MAIN seasons
+                        val relatedAnimeIds = seasons
+                            .filter { it.relationType == "MAIN" && it.resolvedId != null && it.resolvedId != animeId }
+                            .mapNotNull { it.resolvedId }
 
-                    for (oldAnimeId in relatedAnimeIds) {
-                        // Delete old season's history entry
-                        val oldHistRef = if (profileId != null) {
-                            firestore.collection("users").document(userId)
-                                .collection("profiles").document(profileId)
-                                .collection("history").document(oldAnimeId)
-                        } else {
-                            firestore.collection("users").document(userId)
-                                .collection("history").document(oldAnimeId)
-                        }
-                        val oldHistSnap = oldHistRef.get().await()
-                        if (oldHistSnap.exists()) {
-                            oldHistRef.delete().await()
-                            DebugLogManager.log("ANIPLEX_PLAYER", "Cleaned up old season history for animeId: $oldAnimeId")
-                        }
+                        for (oldAnimeId in relatedAnimeIds) {
+                            // Delete old season's history entry
+                            val oldHistRef = if (profileId != null) {
+                                firestore.collection("users").document(userId)
+                                    .collection("profiles").document(profileId)
+                                    .collection("history").document(oldAnimeId)
+                            } else {
+                                firestore.collection("users").document(userId)
+                                    .collection("history").document(oldAnimeId)
+                            }
+                            val oldHistSnap = oldHistRef.get().await()
+                            if (oldHistSnap.exists()) {
+                                oldHistRef.delete().await()
+                                DebugLogManager.log("ANIPLEX_PLAYER", "Cleaned up old season history for animeId: $oldAnimeId")
+                            }
 
-                        // Delete old season's watchlist entry only if it was "watching" (not "completed")
-                        val oldWatchlistRef = if (profileId != null) {
-                            firestore.collection("users").document(userId)
-                                .collection("profiles").document(profileId)
-                                .collection("watchlist").document(oldAnimeId)
-                        } else {
-                            firestore.collection("users").document(userId)
-                                .collection("watchlist").document(oldAnimeId)
-                        }
-                        val oldWatchlistSnap = oldWatchlistRef.get().await()
-                        if (oldWatchlistSnap.exists()) {
-                            val oldStatus = oldWatchlistSnap.getString("status")
-                            if (oldStatus == "watching" || oldStatus == "planning") {
-                                oldWatchlistRef.delete().await()
-                                DebugLogManager.log("ANIPLEX_PLAYER", "Cleaned up old season watchlist ($oldStatus) for animeId: $oldAnimeId")
+                            // Delete old season's watchlist entry only if it was "watching" (not "completed")
+                            val oldWatchlistRef = if (profileId != null) {
+                                firestore.collection("users").document(userId)
+                                    .collection("profiles").document(profileId)
+                                    .collection("watchlist").document(oldAnimeId)
+                            } else {
+                                firestore.collection("users").document(userId)
+                                    .collection("watchlist").document(oldAnimeId)
+                            }
+                            val oldWatchlistSnap = oldWatchlistRef.get().await()
+                            if (oldWatchlistSnap.exists()) {
+                                val oldStatus = oldWatchlistSnap.getString("status")
+                                if (oldStatus == "watching" || oldStatus == "planning") {
+                                    oldWatchlistRef.delete().await()
+                                    DebugLogManager.log("ANIPLEX_PLAYER", "Cleaned up old season watchlist ($oldStatus) for animeId: $oldAnimeId")
+                                }
                             }
                         }
                     }
@@ -759,6 +769,8 @@ class PlayerViewModel @Inject constructor(
                     firestore.collection("users").document(userId)
                         .collection("history").document(animeId)
                 }
+                
+                DebugLogManager.log("ANIPLEX_PROGRESS", "Saving progress to doc: ${docRef.path}. progress: $finalProgress / $finalDuration")
                 docRef.set(data).await()
 
                 // Also update/sync Watchlist status in Firestore
@@ -782,8 +794,9 @@ class PlayerViewModel @Inject constructor(
                     "addedAt" to System.currentTimeMillis()
                 )
                 watchlistRef.set(watchlistData, com.google.firebase.firestore.SetOptions.merge()).await()
+                DebugLogManager.log("ANIPLEX_PROGRESS", "Successfully saved progress to Firestore!")
             } catch (e: Exception) {
-                // Ignore silent error
+                DebugLogManager.log("ANIPLEX_PROGRESS", "Error saving progress to Firestore: ${e.message}", e)
             }
         }
     }

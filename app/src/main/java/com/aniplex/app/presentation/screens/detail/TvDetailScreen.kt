@@ -51,6 +51,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalContext
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
 import coil.compose.AsyncImage
 import androidx.compose.foundation.horizontalScroll
 import com.aniplex.app.domain.model.AnimeDetail
@@ -118,6 +120,15 @@ fun TvDetailScreen(
 
     LaunchedEffect(animeId) {
         viewModel.loadAnimeData(animeId)
+    }
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+    LaunchedEffect(lifecycleOwner, animeId) {
+        lifecycleOwner.lifecycle.currentStateFlow.collect { state ->
+            if (state == Lifecycle.State.RESUMED) {
+                viewModel.refreshWatchHistory(animeId)
+            }
+        }
     }
 
     Box(

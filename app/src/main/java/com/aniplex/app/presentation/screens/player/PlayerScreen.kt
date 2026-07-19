@@ -1052,7 +1052,7 @@ fun PlayerScreen(
             else -> "hd-1"
         }
         val flowStartProgress = if (isFirstLoad) initialProgressParam else 0L
-        viewModel.initialize(activeAnimeId, activeEpisodeId, activeCategory, apiServer, flowStartProgress)
+        viewModel.initialize(activeAnimeId, activeEpisodeId, activeCategory, apiServer, flowStartProgress, currentEpNum)
     }
 
     // Timeout sniffer LaunchedEffect
@@ -3432,32 +3432,6 @@ fun ExoVideoPlayer(
                                         modifier = Modifier.size(24.dp)
                                     )
                                 }
-                            }
-
-                            IconButton(
-                                onClick = {
-                                    callbacks.onControlsInteraction()
-                                },
-                                modifier = Modifier.size(48.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Cast,
-                                    contentDescription = "Cast",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(24.dp)
-                                )
-                            }
-
-                            IconButton(
-                                onClick = callbacks.onDebugClick,
-                                modifier = Modifier.size(48.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.BugReport,
-                                    contentDescription = "Diagnostics & Export Logs",
-                                    tint = Color(0xFF00FFCC),
-                                    modifier = Modifier.size(24.dp)
-                                )
                             }
 
                             IconButton(

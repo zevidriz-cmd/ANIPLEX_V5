@@ -433,12 +433,17 @@ export default function PlayerPage() {
               }
 
               if (seasons && seasons.length > 1) {
-                // Get all related animeIds from the franchise (excluding current)
-                const relatedAnimeIds = seasons
-                  .map(s => s.resolvedId)
-                  .filter(id => id && String(id) !== String(animeId));
+                // Find current anime in seasons to check its relationType
+                const currentSeasonObj = seasons.find(s => String(s.resolvedId) === String(animeId) || String(s.malId) === String(malId));
+                
+                // Only perform cleanup if current anime is a MAIN season
+                if (currentSeasonObj && currentSeasonObj.relationType === "MAIN") {
+                  // Get all related animeIds from the franchise (excluding current) that are also MAIN seasons
+                  const relatedAnimeIds = seasons
+                    .filter(s => s.relationType === "MAIN" && s.resolvedId && String(s.resolvedId) !== String(animeId))
+                    .map(s => s.resolvedId);
 
-                for (const oldAnimeId of relatedAnimeIds) {
+                  for (const oldAnimeId of relatedAnimeIds) {
                   // Delete old season's history entry
                   const oldHistRef = doc(db, "users", currentUser.uid, "profiles", activeProfile.id, "history", String(oldAnimeId));
                   const oldHistSnap = await getDoc(oldHistRef);
@@ -460,10 +465,11 @@ export default function PlayerPage() {
                 }
               }
             }
-          } catch (e) {
-            console.warn("Error cleaning up old season entries:", e);
           }
+        } catch (e) {
+          console.warn("Error cleaning up old season entries:", e);
         }
+      }
 
         // Clear previous stream data to trigger a clean transition in VideoPlayer
         if (isMounted) {
