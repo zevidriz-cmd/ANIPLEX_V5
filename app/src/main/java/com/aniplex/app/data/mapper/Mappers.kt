@@ -99,6 +99,7 @@ fun HomeDataDto.toDomain(): HomeData {
 fun SeasonDto.toDomain(): Season {
     return Season(
         malId = malId,
+        resolvedId = resolvedId,
         title = title,
         poster = poster ?: "",
         episodes = episodes ?: 0,

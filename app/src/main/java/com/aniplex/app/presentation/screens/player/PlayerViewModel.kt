@@ -412,6 +412,71 @@ class PlayerViewModel @Inject constructor(
             }
         }
 
+        // 4. Clean up old season history/watchlist entries from the same franchise
+        if (isNewAnime) {
+            viewModelScope.launch {
+                try {
+                    val userId = auth.currentUser?.uid ?: return@launch
+                    val profileId = profileManager.activeProfile.value?.id
+
+                    // Wait for anime detail to be available
+                    val malId = awaitMetadataAndGetMalId() ?: return@launch
+
+                    // Get seasons for the current anime
+                    var seasons: List<com.aniplex.app.domain.model.Season> = emptyList()
+                    repository.getSeasons(malId).collect { result ->
+                        if (result is Result.Success) {
+                            seasons = result.data
+                        }
+                    }
+
+                    if (seasons.size <= 1) return@launch
+
+                    // Get all related animeIds from the franchise (excluding current)
+                    val relatedAnimeIds = seasons
+                        .mapNotNull { it.resolvedId }
+                        .filter { it != animeId }
+
+                    for (oldAnimeId in relatedAnimeIds) {
+                        // Delete old season's history entry
+                        val oldHistRef = if (profileId != null) {
+                            firestore.collection("users").document(userId)
+                                .collection("profiles").document(profileId)
+                                .collection("history").document(oldAnimeId)
+                        } else {
+                            firestore.collection("users").document(userId)
+                                .collection("history").document(oldAnimeId)
+                        }
+                        val oldHistSnap = oldHistRef.get().await()
+                        if (oldHistSnap.exists()) {
+                            oldHistRef.delete().await()
+                            DebugLogManager.log("ANIPLEX_PLAYER", "Cleaned up old season history for animeId: $oldAnimeId")
+                        }
+
+                        // Delete old season's watchlist entry only if it was "watching" (not "completed")
+                        val oldWatchlistRef = if (profileId != null) {
+                            firestore.collection("users").document(userId)
+                                .collection("profiles").document(profileId)
+                                .collection("watchlist").document(oldAnimeId)
+                        } else {
+                            firestore.collection("users").document(userId)
+                                .collection("watchlist").document(oldAnimeId)
+                        }
+                        val oldWatchlistSnap = oldWatchlistRef.get().await()
+                        if (oldWatchlistSnap.exists()) {
+                            val oldStatus = oldWatchlistSnap.getString("status")
+                            if (oldStatus == "watching" || oldStatus == "planning") {
+                                oldWatchlistRef.delete().await()
+                                DebugLogManager.log("ANIPLEX_PLAYER", "Cleaned up old season watchlist ($oldStatus) for animeId: $oldAnimeId")
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    // Non-blocking
+                }
+            }
+        }
+
         loadPlaybackStream(episodeId, server, category)
     }
 

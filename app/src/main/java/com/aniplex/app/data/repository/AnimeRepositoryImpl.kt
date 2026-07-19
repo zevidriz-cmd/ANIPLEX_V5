@@ -1684,6 +1684,7 @@ class AnimeRepositoryImpl @Inject constructor(
                                     finalSeasonsList.add(
                                         Season(
                                             malId = malIdStr,
+                                            resolvedId = localId,
                                             title = media.title?.english ?: media.title?.userPreferred ?: media.title?.romaji ?: "Unknown",
                                             poster = media.coverImage?.large ?: "",
                                             episodes = media.episodes ?: 0,
@@ -1708,6 +1709,7 @@ class AnimeRepositoryImpl @Inject constructor(
                                     finalSeasonsList.add(
                                         Season(
                                             malId = malIdStr,
+                                            resolvedId = localId,
                                             title = media.title?.english ?: media.title?.userPreferred ?: media.title?.romaji ?: "Unknown",
                                             poster = media.coverImage?.large ?: "",
                                             episodes = media.episodes ?: 0,

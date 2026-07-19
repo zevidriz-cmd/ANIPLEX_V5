@@ -1320,12 +1320,12 @@ fun PlayerScreen(
     LaunchedEffect(capturedStreamUrl, retryPlaybackKey, capturedSubtitles.size) {
         val stream = capturedStreamUrl
         if (stream != null) {
-            // Wait 800ms for WebView sniffer to capture subtitles
-            kotlinx.coroutines.delay(800)
+            // Wait 3s for WebView sniffer to capture subtitles (800ms was too aggressive)
+            kotlinx.coroutines.delay(3000)
 
-            // Trigger fallback if Zoro subtitles list is empty (Only if Zoro is active provider)
+            // Trigger backup subtitle fetch if Zoro subtitles list is empty (Only if Zoro is active provider AND watching sub)
             val curProvider = viewModel.activeProvider.value ?: preferredProvider
-            if (curProvider == "zoro" && capturedSubtitles.isEmpty() && !hasAttemptedBackupSubtitles) {
+            if (curProvider == "zoro" && activeCategory == "sub" && capturedSubtitles.isEmpty() && !hasAttemptedBackupSubtitles) {
                 hasAttemptedBackupSubtitles = true
                 DebugLogManager.log("ANIPLEX_SUBS", "Zoro subtitles empty. Fetching backup subtitles from Gogo/AnimePahe fallback API...")
                 viewModel.getBackupSubtitles { backupSubs ->
@@ -1341,8 +1341,16 @@ fun PlayerScreen(
                         // Trigger reload with backup subtitles
                         retryPlaybackKey++
                     } else {
-                        DebugLogManager.log("ANIPLEX_SUBS", "No soft subtitles in backup. Swapping provider to Gogoanime for hard subtitles...")
-                        viewModel.runFallbackChain(activeCategory)
+                        if (isTv) {
+                            // On TV the user can't manually switch providers,
+                            // so auto-swap to Gogoanime for hardcoded subtitles.
+                            DebugLogManager.log("ANIPLEX_SUBS", "TV mode: No soft subtitles found. Auto-swapping to Gogoanime for hardcoded subs...")
+                            viewModel.runFallbackChain(activeCategory)
+                        } else {
+                            // On phone/tablet the user can switch from the server options.
+                            DebugLogManager.log("ANIPLEX_SUBS", "No soft subtitles found from any provider.")
+                            viewModel.setFallbackStatusMessage("Subtitles unavailable for this episode. Try switching to Gogoanime from the server options.")
+                        }
                     }
                 }
             }

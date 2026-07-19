@@ -1,10 +1,10 @@
 import React, { useEffect, useState, useRef, useMemo } from "react";
 import { useParams, useNavigate, useSearchParams, Link } from "react-router-dom";
-import { doc, getDoc, setDoc } from "firebase/firestore";
+import { doc, getDoc, setDoc, deleteDoc } from "firebase/firestore";
 import { db } from "../config/firebase";
 import { useAuth } from "../context/AuthContext";
 import { useProfile } from "../context/ProfileContext";
-import { getAnimeDetail, getEpisodes, getStreamSources, getSkipTimes, getDirectStream, getBackupStream, getMegaplayDirectStream, getSingleBackupStream } from "../services/api";
+import { getAnimeDetail, getEpisodes, getStreamSources, getSkipTimes, getDirectStream, getBackupStream, getMegaplayDirectStream, getSingleBackupStream, getSeasons } from "../services/api";
 import { resolveTmdId, fetchTmdSeasons, buildArcsFromSeasons } from "../services/tmdb";
 import VideoPlayer from "../components/VideoPlayer";
 import { ArrowLeft, RefreshCw, AlertTriangle, ChevronDown, Check, CheckSquare } from "lucide-react";
@@ -221,6 +221,16 @@ export default function PlayerPage() {
   const lastLoadedServerRef = useRef(null);
   const lastLoadedAudioRef = useRef(null);
 
+  // Helper: filter out thumbnail/metadata tracks, keep only real subtitle tracks
+  const getSubtitleOnlyTracks = (tracks) => {
+    if (!tracks || !Array.isArray(tracks)) return [];
+    return tracks.filter(t => {
+      const kind = (t.kind || '').toLowerCase();
+      const label = (t.label || '').toLowerCase();
+      return kind !== 'thumbnails' && label !== 'thumbnails';
+    });
+  };
+
   const combinedTracks = useMemo(() => {
     const primaryTracks = directStream ? directStream.tracks : (streamData?.tracks || []);
     const seenLabels = new Set(primaryTracks.map(t => t.label?.toLowerCase()));
@@ -229,7 +239,7 @@ export default function PlayerPage() {
   }, [directStream, streamData, backupTracks]);
 
   const handleSubtitleError = async (failedTrack) => {
-    if (backupTracks.length > 0 || fetchingBackupSubs) return;
+    if (getSubtitleOnlyTracks(backupTracks).length > 0 || fetchingBackupSubs) return;
     
     const rawMalId = animeDetail?.anime?.info?.malId;
     const malId = (rawMalId === "0" || !rawMalId) ? null : rawMalId;
@@ -240,7 +250,7 @@ export default function PlayerPage() {
     
     setFetchingBackupSubs(true);
     setBackupAttempted(true);
-    console.log("[PlayerPage] Subtitle track failed or empty. Triggering automated backup routine...");
+    console.log("[PlayerPage] Subtitle track failed or empty. Triggering automated backup subtitle fetch...");
     
     let resolvedBackup = false;
     const providers = ["gogoanime", "animepahe"];
@@ -248,9 +258,10 @@ export default function PlayerPage() {
       try {
         console.log(`[PlayerPage] Fetching backup subtitles from ${provider}...`);
         const res = await getSingleBackupStream(malId, epNumber, animeTitle, provider);
-        if (res && res.tracks && res.tracks.length > 0) {
-          console.log(`[PlayerPage] Successfully resolved ${res.tracks.length} backup tracks from ${provider}`);
-          setBackupTracks(res.tracks);
+        const realTracks = getSubtitleOnlyTracks(res?.tracks);
+        if (realTracks.length > 0) {
+          console.log(`[PlayerPage] Successfully resolved ${realTracks.length} backup subtitle tracks from ${provider}`);
+          setBackupTracks(realTracks);
           resolvedBackup = true;
           break;
         }
@@ -261,27 +272,34 @@ export default function PlayerPage() {
     setFetchingBackupSubs(false);
 
     if (!resolvedBackup) {
-      console.warn("[PlayerPage] No soft subtitles in backup. Swapping provider to Gogoanime for hard subtitles...");
-      handlePlaybackError("zoro");
+      // Don't auto-swap provider — the video stream itself is fine,
+      // just no soft subtitles available. Show a notice instead.
+      console.warn("[PlayerPage] No soft subtitles found from any provider.");
+      setFallbackNotice({
+        type: "warning",
+        message: "Subtitles are unavailable for this episode on the current server. Try switching to Gogoanime (hardcoded subtitles) from the server options below."
+      });
     }
   };
 
+  // Auto-detect missing subtitles: only when watching SUB and no real subtitle tracks exist
   useEffect(() => {
-    const primaryTracks = directStream ? directStream.tracks : (streamData?.tracks || []);
-    if (directStream && primaryTracks.length === 0 && backupTracks.length === 0 && !fetchingBackupSubs && !backupAttempted) {
-      handleSubtitleError(null);
-    }
-  }, [directStream, streamData, backupTracks, fetchingBackupSubs, backupAttempted, animeDetail, currentEpisode]);
+    // Don't check for subtitles in dub mode — dub doesn't need them
+    if (audioCategory !== "sub") return;
+    if (!directStream || fetchingBackupSubs || backupAttempted) return;
 
-  useEffect(() => {
-    const primaryTracks = directStream ? directStream.tracks : (streamData?.tracks || []);
-    if (directStream && directStream.provider === "zoro" && primaryTracks.length === 0 && backupTracks.length === 0 && !fetchingBackupSubs && backupAttempted) {
-      setFallbackNotice({
-        type: "warning",
-        message: "Soft subtitles are unavailable for this episode on Zoro. Try switching to the Gogoanime provider (which uses hardcoded subtitles) from the server bar below."
-      });
+    const primaryTracks = directStream.tracks || [];
+    const realSubTracks = getSubtitleOnlyTracks(primaryTracks);
+    const realBackupSubs = getSubtitleOnlyTracks(backupTracks);
+
+    if (realSubTracks.length === 0 && realBackupSubs.length === 0) {
+      // Delay to allow <track> elements to attempt loading first
+      const timer = setTimeout(() => {
+        handleSubtitleError(null);
+      }, 3000);
+      return () => clearTimeout(timer);
     }
-  }, [directStream, streamData, backupTracks, fetchingBackupSubs, backupAttempted]);
+  }, [directStream, backupTracks, fetchingBackupSubs, backupAttempted, audioCategory]);
 
   const handlePlaybackError = (providerName) => {
     console.warn(`[PlayerPage] Playback failed for provider: ${providerName}. Adding to failed list.`);
@@ -398,6 +416,52 @@ export default function PlayerPage() {
             }
           } catch (e) {
             console.warn("Error managing auto-watching status:", e);
+          }
+
+          // Clean up old season history/watchlist entries from the same franchise
+          try {
+            const malId = currentDetail.anime.info.malId;
+            if (malId && malId !== "0") {
+              // Try to get cached seasons data first (DetailPage caches this)
+              let seasons = null;
+              const cached = sessionStorage.getItem(`seasons_v6_${malId}`);
+              if (cached) {
+                const parsed = JSON.parse(cached);
+                seasons = parsed.seasons || parsed;
+              } else {
+                seasons = await getSeasons(malId);
+              }
+
+              if (seasons && seasons.length > 1) {
+                // Get all related animeIds from the franchise (excluding current)
+                const relatedAnimeIds = seasons
+                  .map(s => s.resolvedId)
+                  .filter(id => id && String(id) !== String(animeId));
+
+                for (const oldAnimeId of relatedAnimeIds) {
+                  // Delete old season's history entry
+                  const oldHistRef = doc(db, "users", currentUser.uid, "profiles", activeProfile.id, "history", String(oldAnimeId));
+                  const oldHistSnap = await getDoc(oldHistRef);
+                  if (oldHistSnap.exists()) {
+                    await deleteDoc(oldHistRef);
+                    console.log(`[PlayerPage] Cleaned up old season history for animeId: ${oldAnimeId}`);
+                  }
+
+                  // Delete old season's watchlist entry only if it was "watching" (not "completed")
+                  const oldWatchlistRef = doc(db, "users", currentUser.uid, "profiles", activeProfile.id, "watchlist", String(oldAnimeId));
+                  const oldWatchlistSnap = await getDoc(oldWatchlistRef);
+                  if (oldWatchlistSnap.exists()) {
+                    const oldStatus = oldWatchlistSnap.data()?.status;
+                    if (oldStatus === "watching" || oldStatus === "planning") {
+                      await deleteDoc(oldWatchlistRef);
+                      console.log(`[PlayerPage] Cleaned up old season watchlist (${oldStatus}) for animeId: ${oldAnimeId}`);
+                    }
+                  }
+                }
+              }
+            }
+          } catch (e) {
+            console.warn("Error cleaning up old season entries:", e);
           }
         }
 

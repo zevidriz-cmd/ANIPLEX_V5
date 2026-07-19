@@ -85,6 +85,7 @@ data class HomeData(
 
 data class Season(
     val malId: String,
+    val resolvedId: String? = null,
     val title: String,
     val poster: String = "",
     val episodes: Int = 0,
@@ -98,4 +99,3 @@ data class SeasonalData(
     val totalPages: Int,
     val hasNextPage: Boolean
 )
-

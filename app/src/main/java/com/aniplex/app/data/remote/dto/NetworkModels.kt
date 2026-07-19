@@ -212,6 +212,7 @@ data class SeasonsDataDto(
 
 data class SeasonDto(
     @SerializedName("malId") val malId: String,
+    @SerializedName("resolvedId") val resolvedId: String? = null,
     @SerializedName("title") val title: String,
     @SerializedName("poster") val poster: String?,
     @SerializedName("episodes") val episodes: Int?,

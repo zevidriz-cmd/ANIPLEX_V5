@@ -535,6 +535,7 @@ export async function getSeasons(malId) {
       const sNum = isMain ? tvIndex++ : 0;
       finalSeasonsList.push({
         malId: malIdStr,
+        resolvedId: localId || null,
         title: media.title?.english || media.title?.userPreferred || media.title?.romaji || "Unknown",
         poster: media.coverImage?.large || "",
         episodes: media.episodes || 0,
@@ -561,6 +562,7 @@ export async function getSeasons(malId) {
 
       finalSeasonsList.push({
         malId: malIdStr,
+        resolvedId: localId || null,
         title: media.title?.english || media.title?.userPreferred || media.title?.romaji || "Unknown",
         poster: media.coverImage?.large || "",
         episodes: media.episodes || 0,
