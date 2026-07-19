@@ -862,7 +862,7 @@ class PlayerViewModel @Inject constructor(
                     val nextAnimeId = targetResolvedId ?: return@launch
 
                     var nextEpisodes: List<com.aniplex.app.domain.model.Episode> = emptyList()
-                    repository.getEpisodes(nextAnimeId).collect { result ->
+                    repository.getEpisodes(nextAnimeId, false).collect { result ->
                         if (result is Result.Success) {
                             nextEpisodes = result.data
                         }
