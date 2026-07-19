@@ -3,6 +3,7 @@ package com.aniplex.app.data.repository
 import com.aniplex.app.data.local.dao.CacheDao
 import com.aniplex.app.data.local.entity.CacheEntity
 import com.aniplex.app.data.mapper.toDomain
+import com.aniplex.app.presentation.screens.player.DebugLogManager
 import com.aniplex.app.data.remote.api.HiAnimeApiService
 import com.aniplex.app.data.remote.api.FallbackApiService
 import com.aniplex.app.data.remote.dto.AnimeDetailResponse
@@ -1160,42 +1161,144 @@ class AnimeRepositoryImpl @Inject constructor(
                     val useUncensored = preferenceManager.preferredAnimeVersion == "uncensored"
 
                     var videoUrl = source.url
+                    var isHls = source.type.equals("hls", ignoreCase = true) || videoUrl.contains(".m3u8")
+                    var finalSubtitles = emptyList<SubtitleTrack>()
+                    var introStart = data.intro?.let { it.start * 1000L } ?: 0L
+                    var introEnd = data.intro?.let { it.end * 1000L } ?: 0L
+                    var outroStart = data.outro?.let { it.start * 1000L } ?: 0L
+                    var outroEnd = data.outro?.let { it.end * 1000L } ?: 0L
+
+                    // Try to programmatically extract direct stream link from Zoro iframe to bypass background WebView sniffing
+                    if (!isHls && (videoUrl.contains("embed") || videoUrl.contains("rapid-cloud") || videoUrl.contains("megacloud") || videoUrl.contains("rabbitstream"))) {
+                        try {
+                            val cleanUrl = videoUrl.removePrefix("https://").removePrefix("http://")
+                            val proxyUrl = "$STREAM_PROXY_BASE/$cleanUrl"
+                            val iframeRequest = okhttp3.Request.Builder()
+                                .url(proxyUrl)
+                                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                                .build()
+                            val iframeResponse = okHttpClient.newCall(iframeRequest).execute()
+                            if (iframeResponse.isSuccessful) {
+                                val html = iframeResponse.body?.string() ?: ""
+                                val megaplayRegex = Regex("""src=["'](https://megaplay\.buzz/stream/s-[1-9]/\d+/(?:sub|dub))["']""")
+                                val megaplayMatch = megaplayRegex.find(html)
+                                val megaplayUrl = megaplayMatch?.groupValues?.get(1)
+                                if (megaplayUrl != null) {
+                                    val cleanMegaplayUrl = megaplayUrl.removePrefix("https://").removePrefix("http://")
+                                    val megaplayProxyUrl = "$STREAM_PROXY_BASE/$cleanMegaplayUrl"
+                                    val megaplayRequest = okhttp3.Request.Builder()
+                                        .url(megaplayProxyUrl)
+                                        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                                        .build()
+                                    val megaplayResponse = okHttpClient.newCall(megaplayRequest).execute()
+                                    if (megaplayResponse.isSuccessful) {
+                                        val megaplayHtml = megaplayResponse.body?.string() ?: ""
+                                        val dataIdRegex = Regex("""data-id=["'](\d+)["']""")
+                                        val dataIdMatch = dataIdRegex.find(megaplayHtml)
+                                        val dataId = dataIdMatch?.groupValues?.get(1)
+                                        if (dataId != null) {
+                                            var sourcesJson: MegaplaySourcesResponse? = null
+                                            var resolved = false
+                                            try {
+                                                val sourcesRequest = okhttp3.Request.Builder()
+                                                    .url("$STREAM_PROXY_BASE/megaplay.buzz/stream/getSources?id=$dataId")
+                                                    .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                                                    .header("X-Requested-With", "XMLHttpRequest")
+                                                    .build()
+                                                val sourcesResponse = okHttpClient.newCall(sourcesRequest).execute()
+                                                if (sourcesResponse.isSuccessful) {
+                                                    val body = sourcesResponse.body?.string()
+                                                    if (body != null) {
+                                                        val parsed = gson.fromJson(body, MegaplaySourcesResponse::class.java)
+                                                        if (parsed?.sources?.file != null) {
+                                                            sourcesJson = parsed
+                                                            resolved = true
+                                                        }
+                                                    }
+                                                }
+                                            } catch (_: Exception) {}
+                                            if (!resolved) {
+                                                val sourcesNewRequest = okhttp3.Request.Builder()
+                                                    .url("$STREAM_PROXY_BASE/megaplay.buzz/stream/getSourcesNew?id=$dataId")
+                                                    .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                                                    .header("X-Requested-With", "XMLHttpRequest")
+                                                    .build()
+                                                val sourcesNewResponse = okHttpClient.newCall(sourcesNewRequest).execute()
+                                                if (sourcesNewResponse.isSuccessful) {
+                                                    val body = sourcesNewResponse.body?.string()
+                                                    if (body != null) {
+                                                        sourcesJson = gson.fromJson(body, MegaplaySourcesResponse::class.java)
+                                                    }
+                                                }
+                                            }
+                                            val fileUrl = sourcesJson?.sources?.file
+                                            if (fileUrl != null) {
+                                                val cleanFileUrl = fileUrl.removePrefix("https://").removePrefix("http://")
+                                                videoUrl = "$STREAM_PROXY_BASE/$cleanFileUrl"
+                                                isHls = true
+                                                finalSubtitles = sourcesJson?.tracks?.mapNotNull { track ->
+                                                    if (track.file != null) {
+                                                        val cleanTrackUrl = track.file.removePrefix("https://").removePrefix("http://")
+                                                        val proxiedTrackUrl = "$STREAM_PROXY_BASE/$cleanTrackUrl"
+                                                        SubtitleTrack(
+                                                            url = proxiedTrackUrl,
+                                                            label = track.label ?: "English",
+                                                            isDefault = track.label?.equals("English", ignoreCase = true) == true
+                                                        )
+                                                    } else null
+                                                } ?: emptyList<SubtitleTrack>()
+                                                sourcesJson?.intro?.start?.let { introStart = (it * 1000).toLong() }
+                                                sourcesJson?.intro?.end?.let { introEnd = (it * 1000).toLong() }
+                                                sourcesJson?.outro?.start?.let { outroStart = (it * 1000).toLong() }
+                                                sourcesJson?.outro?.end?.let { outroEnd = (it * 1000).toLong() }
+                                                DebugLogManager.log("ANIPLEX_PLAYER", "Successfully extracted Zoro stream programmatically: $videoUrl")
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        } catch (e: Exception) {
+                            DebugLogManager.log("ANIPLEX_PLAYER", "Programmatic Zoro extraction failed, falling back to iframe WebView: ${e.message}", e)
+                        }
+                    }
+
                     if (useUncensored && isOptionA) {
                         if (videoUrl.contains("/sub")) {
                             videoUrl = videoUrl.replace("/sub", "/sub?version=uncut")
                         } else if (videoUrl.contains("/dub")) {
                             videoUrl = videoUrl.replace("/dub", "/dub?version=uncut")
-                        } else {
+                        } else if (!videoUrl.contains("embed") && !videoUrl.contains("megaplay")) {
                             videoUrl = if (videoUrl.contains("?")) "$videoUrl&version=uncut" else "$videoUrl?version=uncut"
                         }
                     }
 
-                    val originalSubtitles = data.tracks?.filter { it.kind == "captions" || it.kind == "subtitles" }?.map {
-                        SubtitleTrack(
-                            url = it.file,
-                            label = it.label ?: "English",
-                            isDefault = it.label?.equals("english", ignoreCase = true) == true
-                        )
-                    } ?: emptyList()
-
-                    val finalSubtitles = if (useUncensored && isOptionA) {
-                        originalSubtitles + SubtitleTrack(
-                            url = "https://example.com/uncensored_indicator.vtt",
-                            label = "Uncensored Mode ACTIVE 🌟",
-                            isDefault = false
-                        )
-                    } else {
-                        originalSubtitles
+                    if (finalSubtitles.isEmpty()) {
+                        val originalSubtitles = data.tracks?.filter { it.kind == "captions" || it.kind == "subtitles" }?.map {
+                            SubtitleTrack(
+                                url = it.file,
+                                label = it.label ?: "English",
+                                isDefault = it.label?.equals("english", ignoreCase = true) == true
+                            )
+                        } ?: emptyList()
+                        finalSubtitles = if (useUncensored && isOptionA) {
+                            originalSubtitles + SubtitleTrack(
+                                url = "https://example.com/uncensored_indicator.vtt",
+                                label = "Uncensored Mode ACTIVE 🌟",
+                                isDefault = false
+                            )
+                        } else {
+                            originalSubtitles
+                        }
                     }
 
                     val stream = EpisodeStream(
                         videoUrl = videoUrl,
-                        isHls = source.type.equals("hls", ignoreCase = true) || videoUrl.contains(".m3u8"),
+                        isHls = isHls,
                         subtitles = finalSubtitles,
-                        introStart = data.intro?.let { it.start * 1000L } ?: 0L,
-                        introEnd = data.intro?.let { it.end * 1000L } ?: 0L,
-                        outroStart = data.outro?.let { it.start * 1000L } ?: 0L,
-                        outroEnd = data.outro?.let { it.end * 1000L } ?: 0L
+                        introStart = introStart,
+                        introEnd = introEnd,
+                        outroStart = outroStart,
+                        outroEnd = outroEnd
                     )
                     emit(Result.Success(stream))
                 } else {
