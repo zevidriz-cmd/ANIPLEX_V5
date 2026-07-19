@@ -88,7 +88,9 @@ data class Season(
     val title: String,
     val poster: String = "",
     val episodes: Int = 0,
-    val seasonNumber: Int = 0
+    val seasonNumber: Int = 0,
+    val format: String = "TV",
+    val relationType: String = ""
 )
 
 data class SeasonalData(

@@ -1529,6 +1529,14 @@ class AnimeRepositoryImpl @Inject constructor(
                                     day
                                   }
                                   episodes
+                                  relations {
+                                    edges {
+                                      relationType
+                                      node {
+                                        idMal
+                                      }
+                                    }
+                                  }
                                 }
                               }
                             }
@@ -1553,31 +1561,165 @@ class AnimeRepositoryImpl @Inject constructor(
                         if (!alJson.isNullOrEmpty()) {
                             val alResponse = gson.fromJson(alJson, ALSearchResponse::class.java)
                             val mediaList = alResponse.data?.searchPage?.media ?: emptyList()
-                            val sortedMedia = mediaList.sortedWith(compareBy { media ->
-                                val year = media.startDate?.year ?: 0
-                                val month = media.startDate?.month ?: 1
-                                val day = media.startDate?.day ?: 1
-                                year * 10000L + month * 100L + day
-                            })
-
-                            var tvIndex = 0
-                            seasonsList = sortedMedia.map { media ->
-                                val format = media.format ?: "TV"
-                                val isTv = format == "TV" || format == "TV_SHORT"
-                                val sNum = if (isTv) {
-                                    tvIndex++
-                                    tvIndex
-                                } else {
-                                    0
+                            
+                            val mediaMap = mediaList.associateBy { it.idMal }
+                            val startNodeMalId = malId.toIntOrNull()
+                            
+                            if (startNodeMalId != null && mediaMap.containsKey(startNodeMalId)) {
+                                var rootId = startNodeMalId
+                                val visitedPrequels = mutableSetOf<Int>()
+                                while (true) {
+                                    val node = mediaMap[rootId] ?: break
+                                    val prequelEdge = node.relations?.edges?.find { it.relationType == "PREQUEL" }
+                                    val pId = prequelEdge?.node?.idMal
+                                    if (pId != null && pId != rootId && pId in mediaMap && pId !in visitedPrequels) {
+                                        visitedPrequels.add(pId)
+                                        rootId = pId
+                                    } else {
+                                        break
+                                    }
                                 }
-                                
-                                Season(
-                                    malId = (media.idMal ?: 0).toString(),
-                                    title = media.title?.english ?: media.title?.userPreferred ?: media.title?.romaji ?: "Unknown",
-                                    poster = media.coverImage?.large ?: "",
-                                    episodes = media.episodes ?: 0,
-                                    seasonNumber = sNum
-                                )
+
+                                val mainTimeline = mutableListOf<ALSearchMedia>()
+                                var currentId: Int? = rootId
+                                val visitedSequels = mutableSetOf<Int>()
+
+                                while (currentId != null) {
+                                    val node = mediaMap[currentId] ?: break
+                                    if (currentId !in visitedSequels) {
+                                        mainTimeline.add(node)
+                                        visitedSequels.add(currentId)
+                                    }
+                                    val sequelEdge = node.relations?.edges?.find { it.relationType == "SEQUEL" }
+                                    val nextId = sequelEdge?.node?.idMal
+                                    if (nextId != null && nextId != currentId && nextId !in visitedSequels) {
+                                        currentId = nextId
+                                    } else {
+                                        break
+                                    }
+                                }
+
+                                val sideStories = mutableListOf<ALSearchMedia>()
+                                // Omit ALTERNATIVE to hide Burn the Witch and similar spin-offs
+                                val sideStoryTypes = setOf("SIDE_STORY", "SUMMARY")
+                                for (mainNode in mainTimeline) {
+                                    mainNode.relations?.edges?.forEach { edge ->
+                                        if (edge.relationType in sideStoryTypes) {
+                                            val sId = edge.node?.idMal
+                                            if (sId != null && sId !in visitedSequels) {
+                                                val sNode = mediaMap[sId]
+                                                if (sNode != null && sNode !in sideStories) {
+                                                    sideStories.add(sNode)
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                val sortedSideStories = sideStories.sortedWith(compareBy { media ->
+                                    val year = media.startDate?.year ?: 9999
+                                    val month = media.startDate?.month ?: 12
+                                    val day = media.startDate?.day ?: 31
+                                    year * 10000L + month * 100L + day
+                                })
+
+                                fun resolveLocalIdSync(mId: String): String? {
+                                    val override = when (mId) {
+                                        "39535" -> "5694"
+                                        "45576" -> "6675"
+                                        "51179" -> "6537"
+                                        "55818" -> "6537"
+                                        "55888" -> "6159"
+                                        "59193" -> "8800"
+                                        "58752" -> "8800"
+                                        "50360" -> "7045"
+                                        "40456" -> "5870"
+                                        "49926" -> "6871"
+                                        "47778" -> "7024"
+                                        "51019" -> "6905"
+                                        "55701" -> "6054"
+                                        "59192" -> "8138"
+                                        "62546" -> "8847"
+                                        "47398" -> "7019"
+                                        "48861" -> "7032"
+                                        "38524" -> "1585"
+                                        "40052" -> "5687"
+                                        "48583" -> "6694"
+                                        "51535" -> "6476"
+                                        "55639" -> "6476"
+                                        "38000" -> "1551"
+                                        else -> null
+                                    }
+                                    if (override != null) return override
+                                    val mapping = LOCAL_ACCURATE_MAPPINGS.find { it.malId.toString() == mId }
+                                    return mapping?.anikotoId
+                                }
+
+                                var tvIndex = 1
+                                val finalSeasonsList = mutableListOf<Season>()
+                                val seenLocalIds = mutableSetOf<String>()
+
+                                for (media in mainTimeline) {
+                                    val titleLower = (media.title?.english ?: media.title?.userPreferred ?: media.title?.romaji ?: "").lowercase()
+                                    val isMain = media.format == "TV" || 
+                                            media.format == "TV_SHORT" || 
+                                            (media.format == "ONA" && (media.episodes ?: 0) > 2) ||
+                                            (media.format == "SPECIAL" && (
+                                                titleLower.contains("final season") ||
+                                                titleLower.contains("final chapters") ||
+                                                titleLower.contains("kanketsu-hen") ||
+                                                titleLower.contains("kanketsuhen")
+                                            ))
+                                    val malIdStr = (media.idMal ?: 0).toString()
+                                    val localId = resolveLocalIdSync(malIdStr)
+
+                                    if (localId != null) {
+                                        if (seenLocalIds.contains(localId)) {
+                                            continue
+                                        }
+                                        seenLocalIds.add(localId)
+                                    }
+
+                                    val sNum = if (isMain) tvIndex++ else 0
+                                    finalSeasonsList.add(
+                                        Season(
+                                            malId = malIdStr,
+                                            title = media.title?.english ?: media.title?.userPreferred ?: media.title?.romaji ?: "Unknown",
+                                            poster = media.coverImage?.large ?: "",
+                                            episodes = media.episodes ?: 0,
+                                            seasonNumber = sNum,
+                                            format = media.format ?: "TV",
+                                            relationType = if (isMain) "MAIN" else "SIDE_STORY"
+                                        )
+                                    )
+                                }
+
+                                for (media in sortedSideStories) {
+                                    val malIdStr = (media.idMal ?: 0).toString()
+                                    val localId = resolveLocalIdSync(malIdStr)
+
+                                    if (localId != null) {
+                                        if (seenLocalIds.contains(localId)) {
+                                            continue
+                                        }
+                                        seenLocalIds.add(localId)
+                                    }
+
+                                    finalSeasonsList.add(
+                                        Season(
+                                            malId = malIdStr,
+                                            title = media.title?.english ?: media.title?.userPreferred ?: media.title?.romaji ?: "Unknown",
+                                            poster = media.coverImage?.large ?: "",
+                                            episodes = media.episodes ?: 0,
+                                            seasonNumber = 0,
+                                            format = media.format ?: "MOVIE",
+                                            relationType = "SIDE_STORY"
+                                        )
+                                    )
+                                }
+                                seasonsList = finalSeasonsList
+                            } else {
+                                seasonsList = emptyList()
                             }
                         }
                     }
@@ -1746,6 +1888,13 @@ class AnimeRepositoryImpl @Inject constructor(
             "62546" -> "8847"   // Infinity Castle Movie 2
             "47398" -> "7019"   // Valentine School
             "48861" -> "7032"   // Utage Special
+
+            // Attack on Titan
+            "38524" -> "1585"   // Season 3 Part 2 -> Season 3 (merged)
+            "40052" -> "5687"   // Final Season Part 1
+            "48583" -> "6694"   // Final Season Part 2
+            "51535" -> "6476"   // Final Season Part 3
+            "55639" -> "6476"   // Final Season Part 4 -> Part 3 (merged)
             else -> null
         }
         if (overrideId != null) {
@@ -2241,7 +2390,17 @@ private data class ALSearchMedia(
     val duration: Int?,
     val episodes: Int?,
     val averageScore: Double?,
-    val startDate: AniDate?
+    val startDate: AniDate?,
+    val relations: AniRelations?
+)
+
+private data class AniRelations(
+    val edges: List<AniRelationEdge>?
+)
+
+private data class AniRelationEdge(
+    val relationType: String?,
+    val node: ALSearchMedia?
 )
 
 private data class AniDate(

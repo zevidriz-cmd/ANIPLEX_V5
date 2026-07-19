@@ -102,6 +102,8 @@ fun SeasonDto.toDomain(): Season {
         title = title,
         poster = poster ?: "",
         episodes = episodes ?: 0,
-        seasonNumber = seasonNumber
+        seasonNumber = seasonNumber,
+        format = format ?: "TV",
+        relationType = relationType ?: ""
     )
 }

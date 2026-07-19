@@ -20,7 +20,7 @@ import {
 // Seasons cache to prevent redundant fetching and shimmer loading
 const getCachedSeasons = (malId) => {
   try {
-    const cached = sessionStorage.getItem(`seasons_${malId}`);
+    const cached = sessionStorage.getItem(`seasons_v6_${malId}`);
     return cached ? JSON.parse(cached) : null;
   } catch {
     return null;
@@ -29,7 +29,7 @@ const getCachedSeasons = (malId) => {
 
 const setCachedSeasons = (malId, data) => {
   try {
-    sessionStorage.setItem(`seasons_${malId}`, JSON.stringify(data));
+    sessionStorage.setItem(`seasons_v6_${malId}`, JSON.stringify(data));
   } catch (e) {
     console.warn("Error caching seasons:", e);
   }
@@ -137,83 +137,23 @@ const getMediaBadge = (season) => {
 
 const getSeasonDisplayTitle = (season) => {
   if (!season) return "";
-  const title = season.title;
-  const titleLower = title.toLowerCase();
-  
-  const seasonMatch = titleLower.match(/(\d+)(st|nd|rd|th)?\s*season/i) || titleLower.match(/season\s*(\d+)/i);
-  if (seasonMatch) {
-    const num = parseInt(seasonMatch[1]);
-    const partMatch = titleLower.match(/part\s*(\d+)/i);
-    if (partMatch) {
-      return `Season ${num} Part ${partMatch[1]}`;
-    }
-    return `Season ${num}`;
+  if (season.relationType === "MAIN" && season.seasonNumber > 0) {
+    return `Season ${season.seasonNumber}`;
   }
-
-  // Fallback to checking the displaySeasonNumber property if it exists
-  if (season.displaySeasonNumber) {
-    const num = season.displaySeasonNumber;
-    const part = season.displayPartNumber;
-    if (part && part > 1) {
-      return `Season ${num} Part ${part}`;
-    }
-    const partMatch = titleLower.match(/part\s*(\d+)/i);
-    if (partMatch) {
-      return `Season ${num} Part ${partMatch[1]}`;
-    }
-    return `Season ${num}`;
-  }
-  
-  const type = getMediaType(season);
-  if (type !== "TV") return type;
-  
-  return "Season 1";
+  return getMediaBadge(season);
 };
 
 const getShortSeasonBadge = (season) => {
   if (!season) return "";
-  const titleLower = season.title.toLowerCase();
-  const seasonMatch = titleLower.match(/(\d+)(st|nd|rd|th)?\s*season/i) || titleLower.match(/season\s*(\d+)/i);
-  if (seasonMatch) {
-    const num = seasonMatch[1];
-    const partMatch = titleLower.match(/part\s*(\d+)/i);
-    if (partMatch) {
-      return `S${num} P${partMatch[1]}`;
-    }
-    return `S${num}`;
+  if (season.relationType === "MAIN" && season.seasonNumber > 0) {
+    return `S${season.seasonNumber}`;
   }
-  
-  if (season.displaySeasonNumber) {
-    const num = season.displaySeasonNumber;
-    const part = season.displayPartNumber;
-    if (part && part > 1) {
-      return `S${num} P${part}`;
-    }
-    const partMatch = titleLower.match(/part\s*(\d+)/i);
-    if (partMatch) {
-      return `S${num} P${partMatch[1]}`;
-    }
-    return `S${num}`;
-  }
-  
   const type = getMediaType(season);
   if (type !== "TV") return type.substring(0, 3).toUpperCase();
-  
   return "S1";
 };
 
 const checkIsPart = (titleA, titleB) => {
-  const a = titleA.toLowerCase();
-  const b = titleB.toLowerCase();
-  if (b.startsWith(a)) {
-    const diff = b.substring(a.length).trim();
-    if (diff.includes("part") || diff.includes("cour")) {
-      return true;
-    }
-    if (b.substring(a.length).startsWith(" - ") || b.substring(a.length).startsWith(" -")) {
-      return true;
-    }
-  }
   return false;
 };
 
@@ -521,381 +461,18 @@ export default function DetailPage() {
             setSeasonsLoading(true);
             getSeasons(seasonMalId)
               .then(async (seasonData) => {
-                let list = [];
-                const aniListMap = {};
-
-                // 1. Try to fetch the complete franchise tree from Shikimori (MAL mirror)
-                try {
-                  const shikimoriRes = await fetch(`${STREAM_PROXY_BASE}/shikimori.one/api/animes/${seasonMalId}/franchise`);
-                if (shikimoriRes.ok) {
-                  const shikimoriJson = await shikimoriRes.json();
-                  if (shikimoriJson && shikimoriJson.nodes) {
-                    // Extract MAL IDs for anime types (excluding manga, light novels, etc.)
-                    const allowedKinds = [
-                      "tv сериал", "фильм", "спецвыпуск", "tv спецвыпуск", "ova", "ona", 
-                      "tv", "movie", "special", "ova", "ona", "tv_special"
-                    ];
-                    const franchiseIds = shikimoriJson.nodes
-                      .filter(node => {
-                        const kind = (node.kind || "").toLowerCase();
-                        return node.id && allowedKinds.includes(kind);
-                      })
-                      .map(node => parseInt(node.id));
-
-                    if (franchiseIds.length > 0) {
-                      // Bulk query AniList for rich metadata of these specific MAL IDs
-                      const bulkQuery = `
-                        query ($ids: [Int]) {
-                          Page(page: 1, perPage: 50) {
-                            media(idMal_in: $ids, type: ANIME) {
-                              idMal
-                              title {
-                                english
-                                romaji
-                                userPreferred
-                              }
-                              coverImage {
-                                large
-                              }
-                              format
-                              startDate {
-                                year
-                                month
-                                day
-                              }
-                            }
-                          }
-                        }
-                      `;
-                      const alRes = await fetch("https://graphql.anilist.co", {
-                        method: "POST",
-                        headers: {
-                          "Content-Type": "application/json",
-                          "Accept": "application/json"
-                        },
-                        body: JSON.stringify({
-                          query: bulkQuery,
-                          variables: { ids: franchiseIds }
-                        })
-                      });
-                      if (alRes.ok) {
-                        const alJson = await alRes.json();
-                        const mediaList = alJson.data?.Page?.media || [];
-                        mediaList.forEach(node => {
-                          const parsedMalId = String(node.idMal);
-                          aniListMap[parsedMalId] = {
-                            format: node.format,
-                            startDate: node.startDate
-                          };
-                          list.push({
-                            malId: parsedMalId,
-                            title: node.title?.english || node.title?.userPreferred || node.title?.romaji || "Unknown",
-                            poster: node.coverImage?.large || "",
-                            seasonNumber: null,
-                            format: node.format,
-                            startDate: node.startDate
-                          });
-                        });
-                      }
-                    }
-                  }
-                }
-              } catch (shikimoriErr) {
-                console.warn("Shikimori franchise path failed, falling back to AniList 2-hop traversal:", shikimoriErr);
-              }
-
-              // 2. Fallback: AniList 2-hop relations lookup (if Shikimori failed or returned empty)
-              if (list.length === 0) {
-                try {
-                  const graphqlQuery = `
-                    query ($idMal: Int) {
-                      Media(idMal: $idMal, type: ANIME) {
-                        format
-                        startDate {
-                          year
-                          month
-                          day
-                        }
-                        relations {
-                          edges {
-                            relationType
-                            node {
-                              idMal
-                              title {
-                                english
-                                romaji
-                                userPreferred
-                              }
-                              type
-                              format
-                              startDate {
-                                year
-                                month
-                                day
-                              }
-                              coverImage {
-                                large
-                              }
-                              relations {
-                                edges {
-                                  relationType
-                                  node {
-                                    idMal
-                                    title {
-                                      english
-                                      romaji
-                                      userPreferred
-                                    }
-                                    type
-                                    format
-                                    startDate {
-                                      year
-                                      month
-                                      day
-                                    }
-                                    coverImage {
-                                      large
-                                    }
-                                  }
-                                }
-                              }
-                            }
-                          }
-                        }
-                      }
-                    }
-                  `;
-                  const alRes = await fetch("https://graphql.anilist.co", {
-                    method: "POST",
-                    headers: {
-                      "Content-Type": "application/json",
-                      "Accept": "application/json"
-                    },
-                    body: JSON.stringify({
-                      query: graphqlQuery,
-                      variables: { idMal: parseInt(seasonMalId) }
-                    })
-                  });
-                  if (alRes.ok) {
-                    const alJson = await alRes.json();
-                    const currentMedia = alJson.data?.Media;
-                    if (currentMedia) {
-                      aniListMap[String(seasonMalId)] = {
-                        format: currentMedia.format,
-                        startDate: currentMedia.startDate
-                      };
-                    }
-                    const edges = currentMedia?.relations?.edges || [];
-                    const candidates = [];
-                    edges.forEach(edge => {
-                      const node = edge.node;
-                      if (node && node.idMal) {
-                        const isHop1Allowed = ["PREQUEL", "SEQUEL", "ALTERNATIVE", "SIDE_STORY", "SUMMARY"].includes(edge.relationType);
-                        if (node.type === "ANIME" && isHop1Allowed) {
-                          candidates.push(node);
-                        }
-                        
-                        if (isHop1Allowed) {
-                          const wasMainStorylineHop1 = ["PREQUEL", "SEQUEL"].includes(edge.relationType);
-                          const nestedEdges = node.relations?.edges || [];
-                          nestedEdges.forEach(nestedEdge => {
-                            const nestedNode = nestedEdge.node;
-                            if (nestedNode && nestedNode.type === "ANIME" && nestedNode.idMal) {
-                              const isMainStorylineHop2 = ["PREQUEL", "SEQUEL"].includes(nestedEdge.relationType);
-                              if (wasMainStorylineHop1 || isMainStorylineHop2) {
-                                if (["PREQUEL", "SEQUEL", "ALTERNATIVE", "SIDE_STORY", "SUMMARY"].includes(nestedEdge.relationType)) {
-                                  candidates.push(nestedNode);
-                                }
-                              }
-                            }
-                          });
-                        }
-                      }
-                    });
-                    candidates.forEach(node => {
-                      const parsedMalId = String(node.idMal);
-                      aniListMap[parsedMalId] = {
-                        format: node.format,
-                        startDate: node.startDate
-                      };
-                      if (!list.some(s => String(s.malId) === parsedMalId)) {
-                        list.push({
-                          malId: parsedMalId,
-                          title: node.title?.english || node.title?.userPreferred || node.title?.romaji || "Unknown",
-                          poster: node.coverImage?.large || "",
-                          seasonNumber: null,
-                          format: node.format,
-                          startDate: node.startDate
-                        });
-                      }
-                    });
-                  }
-                } catch (err) {
-                  console.warn("AniList relations fallback lookup failed:", err);
-                }
-              }
-
-              const currentMalId = parseInt(malId);
-              const hasCurrent = list.some(s => parseInt(s.malId) === currentMalId);
-              if (!hasCurrent && detailData?.anime?.info) {
-                const currentSeason = {
-                  malId: currentMalId,
-                  title: detailData.anime.info.name,
-                  poster: detailData.anime.info.poster,
-                  seasonNumber: null,
-                  format: aniListMap[String(currentMalId)]?.format || null,
-                  startDate: aniListMap[String(currentMalId)]?.startDate || null
-                };
-                list = [currentSeason, ...list];
-              }
-
-              // Enrich all list elements with AniList format and startDate
-              list = list.map(s => {
-                const aniData = aniListMap[String(s.malId)];
-                return {
-                  ...s,
-                  format: s.format || aniData?.format || null,
-                  startDate: s.startDate || aniData?.startDate || null
-                };
-              });
-
-              // Parallel seasons resolution (no getEpisodes check)
-              const resolvedList = await Promise.all(
-                list.map(async (s) => {
-                  try {
-                    let resolvedId = null;
-                    if (parseInt(s.malId) === currentMalId) {
-                      return { ...s, resolvedId: animeId, isResolvable: true };
-                    }
-
-                    const res = await resolveMAL(s.malId, s.format).catch(() => null);
-                    if (res && res.anikotoId && res.anikotoId !== "") {
-                      resolvedId = res.anikotoId;
-                    } else {
-                      const searchRes = await search(s.title).catch(() => null);
-                      if (searchRes && searchRes.animes && searchRes.animes.length > 0) {
-                        resolvedId = searchRes.animes[0].id;
-                      }
-                    }
-
-                    if (resolvedId) {
-                      return { ...s, resolvedId, isResolvable: true };
-                    }
-                    return { ...s, isResolvable: false };
-                  } catch {
-                    return { ...s, isResolvable: false };
-                  }
-                })
-              );
-
-              // DEDUPLICATE BY RESOLVED ID, prioritizing TV format over other formats
-              const resolvedGroups = {};
-              resolvedList.forEach(s => {
-                if (!s.isResolvable || !s.resolvedId) return;
-                const existing = resolvedGroups[s.resolvedId];
-                if (!existing) {
-                  resolvedGroups[s.resolvedId] = s;
-                } else {
-                  const existingType = getMediaType(existing);
-                  const newType = getMediaType(s);
-                  if (existingType !== "TV" && newType === "TV") {
-                    resolvedGroups[s.resolvedId] = {
-                      ...s,
-                      startDate: s.startDate || existing.startDate,
-                      format: s.format || existing.format
-                    };
-                  } else {
-                    if (!existing.startDate && s.startDate) {
-                      resolvedGroups[s.resolvedId] = {
-                        ...existing,
-                        startDate: s.startDate,
-                        format: s.format || existing.format
-                      };
-                    }
-                  }
-                }
-              });
-              let filteredList = Object.values(resolvedGroups);
-
-              // Helper for chronological sorting
-              const getSeasonSortValue = (sObj) => {
-                if (sObj.startDate && sObj.startDate.year) {
-                  const y = sObj.startDate.year;
-                  const m = sObj.startDate.month || 1;
-                  const d = sObj.startDate.day || 1;
-                  return y * 10000 + m * 100 + d;
-                }
-                return parseInt(sObj.malId) || 0;
-              };
-
-              // Chronologically sort all seasons in the franchise
-              filteredList.sort((a, b) => getSeasonSortValue(a) - getSeasonSortValue(b));
-
-              // Pre-assign sequential displaySeasonNumber and displayPartNumber to TV series in order
-              let tvIndex = 0;
-              const tvSeasonsWithNumbers = [];
-              
-              filteredList.forEach(s => {
-                const type = getMediaType(s);
-                if (type !== "TV") {
-                  tvSeasonsWithNumbers.push(s);
-                  return;
-                }
-                
-                let parentSeason = null;
-                for (let i = tvSeasonsWithNumbers.length - 1; i >= 0; i--) {
-                  const prev = tvSeasonsWithNumbers[i];
-                  if (getMediaType(prev) === "TV" && checkIsPart(prev.title, s.title)) {
-                    parentSeason = prev;
-                    break;
-                  }
-                }
-                
-                if (parentSeason) {
-                  parentSeason.partCount = (parentSeason.partCount || 1) + 1;
-                  tvSeasonsWithNumbers.push({
-                    ...s,
-                    displaySeasonNumber: parentSeason.displaySeasonNumber,
-                    displayPartNumber: parentSeason.partCount
-                  });
-                } else {
-                  tvIndex++;
-                  tvSeasonsWithNumbers.push({
-                    ...s,
-                    displaySeasonNumber: tvIndex,
-                    displayPartNumber: 1
-                  });
-                }
-              });
-
-              let hasAlt = false;
-              if (filteredList.length > 0) {
-                const baseTitle = detailData?.anime?.info?.name
-                  .replace(/\s*\(uncut\)/gi, "")
-                  .replace(/\s*\(uncensored\)/gi, "")
-                  .replace(/\s*\(censored\)/gi, "")
-                  .trim().toLowerCase();
-
-                hasAlt = filteredList.some(s => {
-                  const sTitle = s.title.toLowerCase();
-                  const isSUncut = sTitle.includes("uncut") || sTitle.includes("uncensored");
-                  return sTitle.includes(baseTitle) && (isSUncut !== isUncut);
-                });
-              }
-
-              // Update state and cache if different or if not cached yet
-              const freshData = {
-                seasons: tvSeasonsWithNumbers,
-                hasAltVersion: hasAlt
-              };
-              const isDifferent = !cached || JSON.stringify(cached.seasons) !== JSON.stringify(tvSeasonsWithNumbers) || cached.hasAltVersion !== hasAlt;
-
-              if (isDifferent) {
-                setSeasons(tvSeasonsWithNumbers);
-                setHasAltVersion(hasAlt);
-                
+                let list = seasonData || [];
+                const isDifferent = !cached || JSON.stringify(cached.seasons) !== JSON.stringify(list);
+                if (isDifferent) {
+                  const freshData = {
+                    seasons: list,
+                    hasAltVersion: false
+                  };
+                  setSeasons(list);
+                  setHasAltVersion(false);
+                  
                 // Save to cache for all MAL IDs in this franchise (including redirects)
-                tvSeasonsWithNumbers.forEach(s => {
+                list.forEach(s => {
                   if (s.malId) {
                     setCachedSeasons(s.malId, freshData);
                   }
@@ -1210,11 +787,11 @@ export default function DetailPage() {
   const seasonPrefix = getEpisodeSeasonPrefix();
 
   const tvSeasons = seasons.filter(s => {
-    return getMediaType(s) === "TV";
+    return s.relationType === "MAIN";
   });
   
   const moviesAndSpecials = seasons.filter(s => {
-    return getMediaType(s) !== "TV";
+    return s.relationType !== "MAIN";
   });
   // Determine watch / resume link already calculated at the top-level
 

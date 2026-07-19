@@ -356,8 +356,234 @@ export async function getMegaplayDirectStream(malId, epNumber, audioCategory = "
   }
 }
 
+const GLOBAL_OVERRIDES = {
+  // Mushoku Tensei
+  "39535": "5694",   // Season 1 Part 1
+  "45576": "6675",   // Season 1 Part 2
+  "51179": "6537",   // Season 2 Part 1
+  "55818": "6537",   // Season 2 Episode 0 "Guardian Fitz" -> S2 Part 1
+  "55888": "6159",   // Season 2 Part 2
+  "59193": "8800",   // Season 3 Part 1
+  "58752": "8800",   // Season 3 Alt
+  "50360": "7045",   // Eris Special
+
+  // Demon Slayer
+  "40456": "5870",   // Mugen Train Movie
+  "49926": "6871",   // Mugen Train TV Arc
+  "47778": "7024",   // Entertainment District Arc
+  "51019": "6905",   // Swordsmith Village Arc
+  "55701": "6054",   // Hashira Training Arc
+  "59192": "8138",   // Infinity Castle Movie 1
+  "62546": "8847",   // Infinity Castle Movie 2
+  "47398": "7019",   // Valentine School
+  "48861": "7032",   // Utage Special
+
+  // Attack on Titan
+  "38524": "1585",   // Season 3 Part 2 -> Season 3 (merged)
+  "40052": "5687",   // Final Season Part 1
+  "48583": "6694",   // Final Season Part 2
+  "51535": "6476",   // Final Season Part 3
+  "55639": "6476",   // Final Season Part 4 -> Part 3 (merged)
+};
+
 export async function getSeasons(malId) {
-  return fetchJson(`${BASE_URL}/seasons/${malId}`);
+  if (!malId) return [];
+  try {
+    const startNodeMalId = parseInt(malId);
+    if (isNaN(startNodeMalId)) throw new Error("Invalid id");
+
+    const mediaMap = {};
+    const queue = [startNodeMalId];
+    const fetched = new Set();
+    const validRelations = new Set(["PREQUEL", "SEQUEL", "SIDE_STORY", "SUMMARY"]);
+    
+    let iter = 0;
+    while (queue.length > 0 && iter < 10) {
+      const batchIds = queue.splice(0, 50).filter(id => !fetched.has(id));
+      if (batchIds.length === 0) continue;
+      
+      batchIds.forEach(id => fetched.add(id));
+      
+      const mediaQuery = `
+        query ($ids: [Int]) {
+          Page(page: 1, perPage: 50) {
+            media(idMal_in: $ids, type: ANIME) {
+              idMal
+              title { english romaji userPreferred }
+              coverImage { large }
+              format
+              startDate { year month day }
+              episodes
+              relations { edges { relationType node { idMal } } }
+            }
+          }
+        }
+      `;
+      
+      const alRes = await fetch("https://graphql.anilist.co", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Accept": "application/json" },
+        body: JSON.stringify({ query: mediaQuery, variables: { ids: batchIds } })
+      });
+      if (!alRes.ok) throw new Error("AniList fail");
+      
+      const alData = await alRes.json();
+      const mediaList = alData?.data?.Page?.media || [];
+      
+      for (const m of mediaList) {
+        if (!m.idMal) continue;
+        mediaMap[m.idMal] = m;
+        m.relations?.edges?.forEach(edge => {
+           const id = edge.node?.idMal;
+           if (id && !fetched.has(id) && !queue.includes(id)) {
+              if (validRelations.has(edge.relationType)) {
+                 queue.push(id);
+              }
+           }
+        });
+      }
+      iter++;
+    }
+    
+    if (!mediaMap[startNodeMalId]) throw new Error("Start node missing");
+    
+    let rootId = startNodeMalId;
+    const visitedPrequels = new Set();
+    while (true) {
+      const node = mediaMap[rootId];
+      if (!node) break;
+      const pEdge = node.relations?.edges?.find(e => e.relationType === "PREQUEL");
+      const pId = pEdge?.node?.idMal;
+      if (pId && pId !== rootId && mediaMap[pId] && !visitedPrequels.has(pId)) {
+        visitedPrequels.add(pId);
+        rootId = pId;
+      } else {
+        break;
+      }
+    }
+    
+    const mainTimeline = [];
+    let currentId = rootId;
+    const visitedSequels = new Set();
+    while (currentId) {
+      const node = mediaMap[currentId];
+      if (!node) break;
+      if (!visitedSequels.has(currentId)) {
+        mainTimeline.push(node);
+        visitedSequels.add(currentId);
+      }
+      const sEdge = node.relations?.edges?.find(e => e.relationType === "SEQUEL");
+      const nextId = sEdge?.node?.idMal;
+      if (nextId && nextId !== currentId && !visitedSequels.has(nextId)) {
+        currentId = nextId;
+      } else {
+        break;
+      }
+    }
+    
+    const sideStories = [];
+    // We intentionally omit "ALTERNATIVE", "SPIN_OFF", "CHARACTER" to hide non-canon/unrelated entries like Burn the Witch
+    const sideStoryTypes = new Set(["SIDE_STORY", "SUMMARY"]);
+    for (const mainNode of mainTimeline) {
+      mainNode.relations?.edges?.forEach(edge => {
+        if (sideStoryTypes.has(edge.relationType)) {
+          const sId = edge.node?.idMal;
+          if (sId && !visitedSequels.has(sId)) {
+            const sNode = mediaMap[sId];
+            if (sNode && !sideStories.find(s => s.idMal === sNode.idMal)) {
+              sideStories.push(sNode);
+            }
+          }
+        }
+      });
+    }
+    
+    sideStories.sort((a, b) => {
+      const getDate = (m) => ((m.startDate?.year || 9999) * 10000) + ((m.startDate?.month || 12) * 100) + (m.startDate?.day || 31);
+      return getDate(a) - getDate(b);
+    });
+    
+    let tvIndex = 1;
+    const finalSeasonsList = [];
+    const seenLocalIds = new Set();
+
+    for (const media of mainTimeline) {
+      const titleLower = (media.title?.english || media.title?.userPreferred || media.title?.romaji || "").toLowerCase();
+      const isMain = media.format === "TV" || 
+                     media.format === "TV_SHORT" || 
+                     (media.format === "ONA" && media.episodes > 2) ||
+                     (media.format === "SPECIAL" && (
+                       titleLower.includes("final season") ||
+                       titleLower.includes("final chapters") ||
+                       titleLower.includes("kanketsu-hen") ||
+                       titleLower.includes("kanketsuhen")
+                     ));
+      const malIdStr = String(media.idMal || 0);
+      let localId = anikotoMap[malIdStr] || GLOBAL_OVERRIDES[malIdStr];
+      if (malIdStr === "38000") {
+        localId = "1551";
+      }
+
+      if (localId) {
+        const localIdStr = String(localId);
+        if (seenLocalIds.has(localIdStr)) {
+          continue;
+        }
+        seenLocalIds.add(localIdStr);
+      }
+
+      const sNum = isMain ? tvIndex++ : 0;
+      finalSeasonsList.push({
+        malId: malIdStr,
+        title: media.title?.english || media.title?.userPreferred || media.title?.romaji || "Unknown",
+        poster: media.coverImage?.large || "",
+        episodes: media.episodes || 0,
+        seasonNumber: sNum,
+        format: media.format || "TV",
+        relationType: isMain ? "MAIN" : "SIDE_STORY"
+      });
+    }
+
+    for (const media of sideStories) {
+      const malIdStr = String(media.idMal || 0);
+      let localId = anikotoMap[malIdStr] || GLOBAL_OVERRIDES[malIdStr];
+      if (malIdStr === "38000") {
+        localId = "1551";
+      }
+
+      if (localId) {
+        const localIdStr = String(localId);
+        if (seenLocalIds.has(localIdStr)) {
+          continue;
+        }
+        seenLocalIds.add(localIdStr);
+      }
+
+      finalSeasonsList.push({
+        malId: malIdStr,
+        title: media.title?.english || media.title?.userPreferred || media.title?.romaji || "Unknown",
+        poster: media.coverImage?.large || "",
+        episodes: media.episodes || 0,
+        seasonNumber: 0,
+        format: media.format || "MOVIE",
+        relationType: "SIDE_STORY"
+      });
+    }
+    
+    return finalSeasonsList;
+  } catch (err) {
+    console.warn("AniList season resolve failed, fallback to proxy:", err);
+    try {
+      const fallbackListObj = await fetchJson(`${BASE_URL}/seasons/${malId}`);
+      const seasonsArr = Array.isArray(fallbackListObj) ? fallbackListObj : (fallbackListObj?.seasons || []);
+      return seasonsArr.map(s => ({
+        ...s,
+        relationType: (s.seasonNumber && s.seasonNumber > 0) ? "MAIN" : "SIDE_STORY"
+      }));
+    } catch (fErr) {
+      return [];
+    }
+  }
 }
 
 export async function resolveMAL(malId, format = null) {
@@ -374,33 +600,10 @@ export async function resolveMAL(malId, format = null) {
   // 2. Check local static mapping database from anikoto_map.json
   let localId = anikotoMap[targetId];
 
-  // Specific redirects/overrides to handle duplicates/specials
-  const OVERRIDES = {
-    // Mushoku Tensei
-    "39535": "5694",   // Season 1 Part 1
-    "45576": "6675",   // Season 1 Part 2
-    "51179": "6537",   // Season 2 Part 1
-    "55818": "6537",   // Season 2 Episode 0 "Guardian Fitz" -> S2 Part 1
-    "55888": "6159",   // Season 2 Part 2
-    "59193": "8800",   // Season 3 Part 1
-    "58752": "8800",   // Season 3 Alt
-    "50360": "7045",   // Eris Special
-
-    // Demon Slayer
-    "38000": normalizedFormat === "MOVIE" ? "6780" : "1551", // TV vs Movie for Demon Slayer S1
-    "40456": "5870",   // Mugen Train Movie
-    "49926": "6871",   // Mugen Train TV Arc
-    "47778": "7024",   // Entertainment District Arc
-    "51019": "6905",   // Swordsmith Village Arc
-    "55701": "6054",   // Hashira Training Arc
-    "59192": "8138",   // Infinity Castle Movie 1
-    "62546": "8847",   // Infinity Castle Movie 2
-    "47398": "7019",   // Valentine School
-    "48861": "7032",   // Utage Special
-  };
-
-  if (OVERRIDES[targetId]) {
-    localId = OVERRIDES[targetId];
+  if (targetId === "38000") {
+    localId = normalizedFormat === "MOVIE" ? "6780" : "1551";
+  } else if (GLOBAL_OVERRIDES[targetId]) {
+    localId = GLOBAL_OVERRIDES[targetId];
   }
 
   if (localId) {

@@ -215,7 +215,9 @@ data class SeasonDto(
     @SerializedName("title") val title: String,
     @SerializedName("poster") val poster: String?,
     @SerializedName("episodes") val episodes: Int?,
-    @SerializedName("seasonNumber") val seasonNumber: Int
+    @SerializedName("seasonNumber") val seasonNumber: Int,
+    @SerializedName("format") val format: String? = "TV",
+    @SerializedName("relationType") val relationType: String? = ""
 )
 
 // Resolve MAL -> Anikoto ID
