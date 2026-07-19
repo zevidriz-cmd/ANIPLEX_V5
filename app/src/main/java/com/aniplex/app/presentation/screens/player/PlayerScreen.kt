@@ -291,6 +291,7 @@ fun PlayerScreen(
     val animeDetail by viewModel.animeDetail.collectAsStateWithLifecycle()
     val currentEpisode by viewModel.currentEpisode.collectAsStateWithLifecycle()
     val fallbackStatusMessage by viewModel.fallbackStatusMessage.collectAsStateWithLifecycle()
+    var activeAnimeId by remember(animeId) { mutableStateOf(animeId) }
     var activeEpisodeId by remember(episodeId) { mutableStateOf(episodeId) }
     val currentEpNum = currentEpisode?.number ?: episodeNumber
     val skipTimes by viewModel.skipTimes.collectAsStateWithLifecycle()
@@ -461,10 +462,7 @@ fun PlayerScreen(
                             titleLower.contains("oops")
                     
                     if (isExactError || containsError) {
-                        DebugLogManager.log("ANIPLEX_PLAYER", "Received error in title: '$title'. Triggering server fallback...")
-                        Handler(Looper.getMainLooper()).post {
-                            fallbackToNextServerRef?.invoke()
-                        }
+                        DebugLogManager.log("ANIPLEX_PLAYER", "Received error indicator in web title: '$title'. Waiting for sniffer timeout...")
                     }
                 }
 
@@ -511,15 +509,7 @@ fun PlayerScreen(
                             "WebView load error on: ${request?.url} | Error: $desc (Code: $code)"
                         )
                         if (request?.isForMainFrame == true) {
-                            val curProvider = viewModel.activeProvider.value ?: preferredProvider
-                            if (curProvider == "zoro") {
-                                DebugLogManager.log("ANIPLEX_PLAYER", "Main frame load error: $desc. Triggering fallback...")
-                                Handler(Looper.getMainLooper()).post {
-                                    fallbackToNextServerRef?.invoke()
-                                }
-                            } else {
-                                DebugLogManager.log("ANIPLEX_PLAYER", "Main frame load error ignored since active provider is $curProvider")
-                            }
+                            DebugLogManager.log("ANIPLEX_PLAYER", "Main frame load error: $desc. Waiting for sniffer timeout...")
                         }
                     } else {
                         DebugLogManager.log("ANIPLEX_PLAYER", "WebView load error")
@@ -539,15 +529,7 @@ fun PlayerScreen(
                         "WebView HTTP error response on URL: ${request?.url} | Status: $status | Reason: $phrase"
                     )
                     if (request?.isForMainFrame == true && (status == 404 || status >= 500)) {
-                        val curProvider = viewModel.activeProvider.value ?: preferredProvider
-                        if (curProvider == "zoro") {
-                            DebugLogManager.log("ANIPLEX_PLAYER", "HTTP error $status on main frame. Triggering server fallback...")
-                            Handler(Looper.getMainLooper()).post {
-                                fallbackToNextServerRef?.invoke()
-                            }
-                        } else {
-                            DebugLogManager.log("ANIPLEX_PLAYER", "HTTP error $status ignored since active provider is $curProvider")
-                        }
+                        DebugLogManager.log("ANIPLEX_PLAYER", "HTTP error $status on main frame. Waiting for sniffer timeout...")
                     }
                 }
 
@@ -991,7 +973,7 @@ fun PlayerScreen(
         }
     }
 
-    LaunchedEffect(activeEpisodeId, activeCategory, selectedServer) {
+    LaunchedEffect(activeAnimeId, activeEpisodeId, activeCategory, selectedServer) {
         val initialEmbedUrl = if (preferredProvider == "zoro") {
             getEmbedUrl(selectedServer, activeEpisodeId, activeCategory)
         } else {
@@ -999,7 +981,7 @@ fun PlayerScreen(
         }
         localResumePlayback = resumePlayback
         
-        val isNewEpisode = (activeEpisodeId != lastEpisodeId)
+        val isNewEpisode = (activeEpisodeId != lastEpisodeId || activeAnimeId != animeId)
         val isFirstLoad = lastEpisodeId.isEmpty()
         
         // Caching current position of ExoPlayer if it's a server or category switch
@@ -1023,7 +1005,7 @@ fun PlayerScreen(
                 if (pos > 0 && dur > 0) {
                     val prevEp = episodes.find { it.id == lastEpisodeId }
                     viewModel.saveProgress(
-                        animeId = animeId,
+                        animeId = activeAnimeId,
                         animeTitle = animeTitle,
                         episodeId = prevEp?.id ?: lastEpisodeId,
                         episodeNumber = prevEp?.number ?: episodeNumber,
@@ -1048,7 +1030,7 @@ fun PlayerScreen(
             else -> "hd-1"
         }
         val flowStartProgress = if (isFirstLoad) initialProgressParam else 0L
-        viewModel.initialize(animeId, activeEpisodeId, activeCategory, apiServer, flowStartProgress)
+        viewModel.initialize(activeAnimeId, activeEpisodeId, activeCategory, apiServer, flowStartProgress)
     }
 
     // Timeout sniffer LaunchedEffect
@@ -1200,11 +1182,21 @@ fun PlayerScreen(
 
     val onPlaybackEndedAction by rememberUpdatedState {
         val nextEp = episodes.find { it.number == currentEpNum + 1 }
-        if (viewModel.autoplayNextEpisode && nextEp != null && !isUpNextDismissed) {
-            localResumePlayback = false
-            val defaultServer = availableServers.firstOrNull() ?: "s-1"
-            selectedServer = defaultServer
-            activeEpisodeId = nextEp.id
+        if (viewModel.autoplayNextEpisode && !isUpNextDismissed) {
+            if (nextEp != null) {
+                localResumePlayback = false
+                val defaultServer = availableServers.firstOrNull() ?: "s-1"
+                selectedServer = defaultServer
+                activeEpisodeId = nextEp.id
+            } else {
+                viewModel.getNextSeasonFirstEpisode(activeAnimeId) { nextAnimeId, nextEpId ->
+                    localResumePlayback = false
+                    val defaultServer = availableServers.firstOrNull() ?: "s-1"
+                    selectedServer = defaultServer
+                    activeAnimeId = nextAnimeId
+                    activeEpisodeId = nextEpId
+                }
+            }
         }
     }
 
@@ -1341,16 +1333,8 @@ fun PlayerScreen(
                         // Trigger reload with backup subtitles
                         retryPlaybackKey++
                     } else {
-                        if (isTv) {
-                            // On TV the user can't manually switch providers,
-                            // so auto-swap to Gogoanime for hardcoded subtitles.
-                            DebugLogManager.log("ANIPLEX_SUBS", "TV mode: No soft subtitles found. Auto-swapping to Gogoanime for hardcoded subs...")
-                            viewModel.runFallbackChain(activeCategory)
-                        } else {
-                            // On phone/tablet the user can switch from the server options.
-                            DebugLogManager.log("ANIPLEX_SUBS", "No soft subtitles found from any provider.")
-                            viewModel.setFallbackStatusMessage("Subtitles unavailable for this episode. Try switching to Gogoanime from the server options.")
-                        }
+                        DebugLogManager.log("ANIPLEX_SUBS", "No soft subtitles found from any provider.")
+                        viewModel.setFallbackStatusMessage("Soft subtitles not detected for this episode. Playing video stream directly.")
                     }
                 }
             }

@@ -181,6 +181,7 @@ export default function DetailPage() {
   const [watchlistStatus, setWatchlistStatus] = useState("");
   const [showWatchlistMenu, setShowWatchlistMenu] = useState(false);
   const [historyItem, setHistoryItem] = useState(null);
+  const [isPrequelCompleted, setIsPrequelCompleted] = useState(false);
   const [userRating, setUserRating] = useState(0);
   
   // Versions
@@ -194,15 +195,35 @@ export default function DetailPage() {
   const [showMoreDetails, setShowMoreDetails] = useState(false);
   const [shareSuccess, setShareSuccess] = useState(false);
 
-  // Determine watch / resume link
-  let playEpisodeId = episodes && episodes[0]?.episodeId;
-  let playEpisodeNumber = 1;
-  let isResume = false;
+  // Determine next season in franchise if available
+  const nextFranchiseSeason = useMemo(() => {
+    if (!seasons || seasons.length <= 1) return null;
+    const mainSeasons = seasons.filter(s => s.relationType === "MAIN" || (s.seasonNumber && s.seasonNumber > 0));
+    const currentIndex = mainSeasons.findIndex(s => String(s.resolvedId) === String(animeId) || String(s.malId) === String(detail?.anime?.info?.malId));
+    if (currentIndex !== -1 && currentIndex < mainSeasons.length - 1) {
+      return mainSeasons[currentIndex + 1];
+    }
+    return null;
+  }, [seasons, animeId, detail]);
 
-  if (historyItem && historyItem.episodeId) {
-    playEpisodeId = historyItem.episodeId;
-    playEpisodeNumber = historyItem.episodeNumber;
-    isResume = true;
+  // Determine watch / resume / next season link
+  const isSeasonCompleted = isPrequelCompleted || (historyItem && historyItem.episodeNumber >= (episodes?.length || 0) && (historyItem.progressPosition / (historyItem.totalDuration || 1)) >= 0.90);
+  const playEpisodeNumber = historyItem?.episodeNumber || 1;
+
+  let playButtonText = "Start Watching E1";
+  let playTargetUrl = episodes && episodes[0] ? `/watch/${animeId}/${episodes[0].episodeId}?audio=${audioPreference}` : `/anime/${animeId}`;
+
+  if (isSeasonCompleted) {
+    if (nextFranchiseSeason && nextFranchiseSeason.resolvedId) {
+      const sNum = nextFranchiseSeason.seasonNumber ? `Season ${nextFranchiseSeason.seasonNumber}` : "Next Season";
+      playButtonText = `Watch ${sNum}`;
+      playTargetUrl = `/anime/${nextFranchiseSeason.resolvedId}`;
+    } else {
+      playButtonText = "Rewatch E1";
+    }
+  } else if (historyItem && historyItem.episodeId) {
+    playButtonText = `Resume E${historyItem.episodeNumber}`;
+    playTargetUrl = `/watch/${animeId}/${historyItem.episodeId}?audio=${audioPreference}`;
   }
 
   // Batching & Arc logic
@@ -520,6 +541,42 @@ export default function DetailPage() {
     }
     loadData();
   }, [animeId, currentUser, activeProfile]);
+
+  // Check if current season is a completed prequel of a later season in the franchise
+  useEffect(() => {
+    if (!currentUser || !activeProfile || !seasons || seasons.length <= 1) {
+      setIsPrequelCompleted(false);
+      return;
+    }
+
+    async function checkPrequelCompleted() {
+      try {
+        const mainSeasons = seasons.filter(s => s.relationType === "MAIN" || (s.seasonNumber && s.seasonNumber > 0));
+        const currentSeasonIndex = mainSeasons.findIndex(s => String(s.resolvedId) === String(animeId) || String(s.malId) === String(detail?.anime?.info?.malId));
+
+        if (currentSeasonIndex !== -1 && currentSeasonIndex < mainSeasons.length - 1) {
+          const laterSeasons = mainSeasons.slice(currentSeasonIndex + 1);
+          for (const s of laterSeasons) {
+            const idToCheck = s.resolvedId;
+            if (idToCheck) {
+              const hRef = doc(db, "users", currentUser.uid, "profiles", activeProfile.id, "history", String(idToCheck));
+              const hSnap = await getDoc(hRef);
+              if (hSnap.exists()) {
+                setIsPrequelCompleted(true);
+                return;
+              }
+            }
+          }
+        }
+        setIsPrequelCompleted(false);
+      } catch (e) {
+        console.warn("Error checking prequel completion state:", e);
+        setIsPrequelCompleted(false);
+      }
+    }
+
+    checkPrequelCompleted();
+  }, [currentUser, activeProfile, seasons, animeId, detail]);
 
   const handleUpdateWatchlistStatus = async (status) => {
     if (!currentUser || !activeProfile) {
@@ -874,8 +931,8 @@ export default function DetailPage() {
             {/* Primary Action Buttons */}
             <div className="actions-row" style={{ marginTop: "24px", display: "flex", alignItems: "center", gap: "1rem", flexWrap: "wrap" }}>
               {episodes.length > 0 ? (
-                <Link to={`/watch/${animeId}/${playEpisodeId}?audio=${audioPreference}`} className="btn btn-primary watch-now-btn" style={{ padding: "0.85rem 2.2rem", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-                  <Play size={18} fill="white" /> {isResume ? `Resume S1 E${playEpisodeNumber}` : "Start Watching E1"}
+                <Link to={playTargetUrl} className="btn btn-primary watch-now-btn" style={{ padding: "0.85rem 2.2rem", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                  <Play size={18} fill="white" /> {playButtonText}
                 </Link>
               ) : (
                 <button className="btn btn-primary watch-now-btn" disabled>No Episodes Available</button>
@@ -1271,10 +1328,10 @@ export default function DetailPage() {
                 {activeEpisodes.map((ep) => {
                   // Determine episode watch state: completed, in-progress, or unwatched
                   let progressPercent = 0;
-                  let isCompleted = false;
+                  let isCompleted = isPrequelCompleted;
                   let isInProgress = false;
 
-                  if (historyItem) {
+                  if (!isCompleted && historyItem) {
                     if (historyItem.episodeId === ep.episodeId) {
                       // This is the episode the user is currently on
                       if (historyItem.totalDuration > 0) {
@@ -1287,6 +1344,8 @@ export default function DetailPage() {
                       isCompleted = true;
                       progressPercent = 100;
                     }
+                  } else if (isCompleted) {
+                    progressPercent = 100;
                   }
 
                   return (

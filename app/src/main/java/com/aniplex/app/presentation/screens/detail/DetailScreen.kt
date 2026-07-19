@@ -579,7 +579,14 @@ fun DetailContent(
 
                     // Action Buttons (Play, Bookmark, Download)
                     val episodes = (episodesState as? DetailState.Success)?.data ?: emptyList()
+                    val seasons = (seasonsState as? DetailState.Success)?.data ?: emptyList()
+                    val mainSeasons = seasons.filter { it.relationType == "MAIN" || it.seasonNumber > 0 }
+                    val currentSeasonIdx = mainSeasons.indexOfFirst { it.resolvedId == animeDetail.id || it.malId == animeDetail.malId }
+                    val nextSeason = if (currentSeasonIdx != -1 && currentSeasonIdx < mainSeasons.size - 1) mainSeasons[currentSeasonIdx + 1] else null
+
                     val hasHistory = watchHistory != null
+                    val isSeasonFinished = watchHistory != null && episodes.isNotEmpty() && watchHistory.episodeNumber >= episodes.size
+
                     Row(
                         modifier = Modifier.fillMaxWidth().height(48.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -587,7 +594,14 @@ fun DetailContent(
                     ) {
                         Button(
                             onClick = {
-                                if (hasHistory && watchHistory != null) {
+                                if (isSeasonFinished && nextSeason != null) {
+                                    onSeasonSelected(nextSeason.malId)
+                                } else if (isSeasonFinished) {
+                                    if (episodes.isNotEmpty()) {
+                                        val firstEp = episodes.first()
+                                        onPlayClick(firstEp.id, animeDetail.id, animeDetail.name, firstEp.number, selectedAudioType.lowercase())
+                                    }
+                                } else if (hasHistory && watchHistory != null) {
                                     onPlayClick(watchHistory.episodeId, animeDetail.id, animeDetail.name, watchHistory.episodeNumber, selectedAudioType.lowercase())
                                 } else if (episodes.isNotEmpty()) {
                                     val firstEpisode = episodes.first()
@@ -597,7 +611,7 @@ fun DetailContent(
                             modifier = Modifier.weight(1f).fillMaxHeight(),
                             shape = CircleShape,
                             colors = ButtonDefaults.buttonColors(containerColor = CrunchyrollOrange),
-                            enabled = episodes.isNotEmpty()
+                            enabled = episodes.isNotEmpty() || (isSeasonFinished && nextSeason != null)
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
                                 Icon(
@@ -608,7 +622,12 @@ fun DetailContent(
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(
                                     text = buildString {
-                                        if (hasHistory) {
+                                        if (isSeasonFinished && nextSeason != null) {
+                                            val sNum = if (nextSeason.seasonNumber > 0) "SEASON ${nextSeason.seasonNumber}" else "NEXT SEASON"
+                                            append("WATCH $sNum")
+                                        } else if (isSeasonFinished) {
+                                            append("REWATCH E1")
+                                        } else if (hasHistory) {
                                             append("RESUME E${watchHistory?.episodeNumber}")
                                         } else {
                                             append("START WATCHING E1")

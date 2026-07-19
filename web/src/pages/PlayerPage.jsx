@@ -781,7 +781,7 @@ export default function PlayerPage() {
     }
   };
 
-  const handleEpisodeEnded = (endedEpId) => {
+  const handleEpisodeEnded = async (endedEpId) => {
     if (!endedEpId || endedEpId !== episodeId) {
       console.log(`[PlayerPage] Guarded handleEpisodeEnded: endedEpId (${endedEpId}) !== route episodeId (${episodeId})`);
       return;
@@ -789,9 +789,6 @@ export default function PlayerPage() {
 
     const currentIndex = episodes.findIndex(e => e.episodeId === episodeId);
     const isLastEpisode = currentIndex !== -1 && currentIndex === episodes.length - 1;
-    if (isLastEpisode) {
-      markAsCompleted();
-    }
 
     const autoplaySetting = localStorage.getItem("anistream_autoplay") !== "false";
     if (autoplaySetting) {
@@ -800,6 +797,55 @@ export default function PlayerPage() {
         navigate(`/watch/${animeId}/${nextEp.episodeId}?audio=${audioCategory}`);
         return;
       }
+
+      // Cross-season autoplay when reaching the end of a season
+      if (isLastEpisode && animeDetail?.anime?.info?.malId) {
+        try {
+          const malId = animeDetail.anime.info.malId;
+          let seasons = null;
+          const cached = sessionStorage.getItem(`seasons_v6_${malId}`);
+          if (cached) {
+            const parsed = JSON.parse(cached);
+            seasons = parsed.seasons || parsed;
+          } else {
+            seasons = await getSeasons(malId);
+          }
+
+          if (seasons && seasons.length > 0) {
+            // Filter main timeline TV seasons (ordered chronologically S1, S2, S3...)
+            const mainSeasons = seasons.filter(s => s.relationType === "MAIN" || (s.seasonNumber && s.seasonNumber > 0));
+            
+            // Find current season in mainSeasons list
+            const currentSeasonIndex = mainSeasons.findIndex(s => String(s.resolvedId) === String(animeId) || String(s.malId) === String(malId));
+            
+            if (currentSeasonIndex !== -1 && currentSeasonIndex < mainSeasons.length - 1) {
+              const nextSeason = mainSeasons[currentSeasonIndex + 1];
+              let targetResolvedId = nextSeason?.resolvedId;
+              if (!targetResolvedId && nextSeason?.malId) {
+                const resolved = await resolveMAL(nextSeason.malId);
+                targetResolvedId = resolved?.anikotoId;
+              }
+
+              if (targetResolvedId) {
+                const nextEpData = await getEpisodes(targetResolvedId);
+                const nextEps = nextEpData?.episodes || [];
+                if (nextEps.length > 0) {
+                  const firstEp = nextEps[0];
+                  console.log(`[PlayerPage] Cross-season autoplay to next season: ${nextSeason.title} (animeId: ${targetResolvedId})`);
+                  navigate(`/watch/${targetResolvedId}/${firstEp.episodeId}?audio=${audioCategory}`);
+                  return;
+                }
+              }
+            }
+          }
+        } catch (e) {
+          console.warn("[PlayerPage] Cross-season autoplay check failed:", e);
+        }
+      }
+    }
+
+    if (isLastEpisode) {
+      markAsCompleted();
     }
     navigate(`/anime/${animeId}`);
   };
@@ -931,6 +977,20 @@ export default function PlayerPage() {
           />
         )}
       </div>
+
+      {/* Show Title & Current Episode Bar under player */}
+      {!initialLoading && !error && animeDetail && (
+        <div className="container player-show-title-bar">
+          <Link to={`/anime/${animeId}`} className="player-show-title-link">
+            <h2>{animeDetail?.anime?.info?.name}</h2>
+          </Link>
+          {currentEpisode && (
+            <p className="player-show-ep-subtitle">
+              Episode {currentEpisode.number} {currentEpisode.title ? `• ${currentEpisode.title}` : ""}
+            </p>
+          )}
+        </div>
+      )}
 
       {/* Server Selector Bar */}
       {!initialLoading && !error && (
@@ -1368,6 +1428,31 @@ export default function PlayerPage() {
             height: 36px;
             font-size: 0.8rem;
           }
+        }
+        .player-show-title-bar {
+          margin-top: 1.2rem;
+          margin-bottom: 0.8rem;
+        }
+        .player-show-title-link {
+          text-decoration: none;
+          color: #ffffff;
+          display: inline-block;
+          transition: color 0.2s ease, transform 0.2s ease;
+        }
+        .player-show-title-link:hover {
+          color: var(--primary, #e50914);
+          transform: translateX(2px);
+        }
+        .player-show-title-link h2 {
+          font-size: 1.4rem;
+          font-weight: 700;
+          margin: 0;
+          line-height: 1.3;
+        }
+        .player-show-ep-subtitle {
+          color: var(--text-muted, #a3a3a3);
+          font-size: 0.95rem;
+          margin: 4px 0 0 0;
         }
       `}</style>
     </div>

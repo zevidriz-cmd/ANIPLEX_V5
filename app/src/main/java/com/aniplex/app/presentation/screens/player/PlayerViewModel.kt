@@ -828,6 +828,58 @@ class PlayerViewModel @Inject constructor(
         }
     }
 
+    fun getNextSeasonFirstEpisode(
+        currentAnimeId: String,
+        onNextSeasonFound: (nextAnimeId: String, nextEpId: String) -> Unit
+    ) {
+        viewModelScope.launch {
+            try {
+                val malId = awaitMetadataAndGetMalId() ?: return@launch
+                var seasons: List<com.aniplex.app.domain.model.Season> = emptyList()
+                repository.getSeasons(malId).collect { result ->
+                    if (result is Result.Success) {
+                        seasons = result.data
+                    }
+                }
+
+                if (seasons.isEmpty()) return@launch
+
+                val mainSeasons = seasons.filter { it.relationType == "MAIN" || it.seasonNumber > 0 }
+                val currentSeasonIndex = mainSeasons.indexOfFirst { 
+                    it.resolvedId == currentAnimeId || it.malId == malId 
+                }
+
+                if (currentSeasonIndex != -1 && currentSeasonIndex < mainSeasons.size - 1) {
+                    val nextSeason = mainSeasons[currentSeasonIndex + 1]
+                    var targetResolvedId = nextSeason.resolvedId
+                    if (targetResolvedId.isNullOrBlank() && nextSeason.malId.isNotBlank()) {
+                        repository.resolveMAL(nextSeason.malId).collect { res ->
+                            if (res is Result.Success) {
+                                targetResolvedId = res.data
+                            }
+                        }
+                    }
+                    val nextAnimeId = targetResolvedId ?: return@launch
+
+                    var nextEpisodes: List<com.aniplex.app.domain.model.Episode> = emptyList()
+                    repository.getEpisodes(nextAnimeId).collect { result ->
+                        if (result is Result.Success) {
+                            nextEpisodes = result.data
+                        }
+                    }
+
+                    if (nextEpisodes.isNotEmpty()) {
+                        val firstEpId = nextEpisodes.first().id
+                        DebugLogManager.log("ANIPLEX_PLAYER", "Cross-season autoplay to next season: ${nextSeason.title} (animeId: $nextAnimeId)")
+                        onNextSeasonFound(nextAnimeId, firstEpId)
+                    }
+                }
+            } catch (e: Exception) {
+                DebugLogManager.log("ANIPLEX_PLAYER", "Error in getNextSeasonFirstEpisode: $e")
+            }
+        }
+    }
+
     override fun onCleared() {
         super.onCleared()
         stopPeriodicProgressSaving()
