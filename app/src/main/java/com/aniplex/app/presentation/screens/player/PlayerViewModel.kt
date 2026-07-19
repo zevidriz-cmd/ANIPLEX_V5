@@ -386,7 +386,31 @@ class PlayerViewModel @Inject constructor(
         }
 
         viewModelScope.launch {
-            // 3. Fetch Watch History (to resume playback)
+            // 1. Try local cache first for zero-latency resume
+            try {
+                val localItem = preferenceManager.getLocalHistoryItem(animeId)
+                if (localItem != null) {
+                    val epNum = if (episodeNumber > 0) episodeNumber else (_currentEpisode.value?.number ?: 0)
+                    val matchesEpisode = (localItem.episodeId == episodeId) || (localItem.episodeNumber > 0 && epNum > 0 && localItem.episodeNumber == epNum)
+                    if (matchesEpisode && _initialProgress.value <= 0L) {
+                        _initialProgress.value = localItem.progressPosition
+                        DebugLogManager.log("ANIPLEX_PROGRESS", "Successfully resolved and loaded initialProgress from local history cache: ${localItem.progressPosition}")
+                    }
+                }
+                
+                // If not matched or still 0, try specific local progress by ID/Number
+                if (_initialProgress.value <= 0L) {
+                    val localProgress = preferenceManager.getLocalWatchProgress(animeId, episodeId, episodeNumber)
+                    if (localProgress > 0L) {
+                        _initialProgress.value = localProgress
+                        DebugLogManager.log("ANIPLEX_PROGRESS", "Successfully resolved and loaded initialProgress from local progress cache: $localProgress")
+                    }
+                }
+            } catch (e: Exception) {
+                DebugLogManager.log("ANIPLEX_PROGRESS", "Error checking local watch history cache: ${e.message}")
+            }
+
+            // 2. Fetch Watch History from Firestore (to sync with other devices)
             val userId = auth.currentUser?.uid
             val profileId = profileManager.activeProfile.value?.id
             if (userId != null) {
@@ -405,19 +429,39 @@ class PlayerViewModel @Inject constructor(
                         val savedEpisodeNum = doc.getLong("episodeNumber")?.toInt() ?: 0
                         val epNum = if (episodeNumber > 0) episodeNumber else (_currentEpisode.value?.number ?: 0)
                         val matchesEpisode = (savedEpisodeId == episodeId) || (savedEpisodeNum > 0 && epNum > 0 && savedEpisodeNum == epNum)
-                        DebugLogManager.log("ANIPLEX_PROGRESS", "History doc found. savedEpisodeId: $savedEpisodeId, savedEpisodeNum: $savedEpisodeNum, epNum: $epNum, matches: $matchesEpisode")
+                        DebugLogManager.log("ANIPLEX_PROGRESS", "Firestore History doc found. savedEpisodeId: $savedEpisodeId, savedEpisodeNum: $savedEpisodeNum, epNum: $epNum, matches: $matchesEpisode")
                         if (matchesEpisode) {
                             val dbProgress = doc.getLong("progressPosition") ?: 0L
                             if (_initialProgress.value <= 0L) {
                                 _initialProgress.value = dbProgress
-                                DebugLogManager.log("ANIPLEX_PROGRESS", "Successfully resolved and loaded initialProgress: $dbProgress")
+                                DebugLogManager.log("ANIPLEX_PROGRESS", "Successfully resolved and loaded initialProgress from Firestore: $dbProgress")
+                            }
+                            
+                            // Keep local cache synced if db has a newer/different value
+                            val localProgress = preferenceManager.getLocalWatchProgress(animeId, episodeId, episodeNumber)
+                            if (dbProgress > 0L && dbProgress != localProgress) {
+                                val animeTitle = doc.getString("animeTitle") ?: ""
+                                val poster = doc.getString("poster") ?: ""
+                                val episodeTitle = doc.getString("episodeTitle") ?: ""
+                                val item = com.aniplex.app.domain.model.HistoryItem(
+                                    animeId = animeId,
+                                    animeTitle = animeTitle,
+                                    poster = poster,
+                                    episodeId = savedEpisodeId ?: episodeId,
+                                    episodeNumber = savedEpisodeNum,
+                                    episodeTitle = episodeTitle,
+                                    progressPosition = dbProgress,
+                                    totalDuration = doc.getLong("totalDuration") ?: 0L,
+                                    updatedAt = doc.getLong("updatedAt") ?: System.currentTimeMillis()
+                                )
+                                preferenceManager.saveLocalHistoryItem(item)
                             }
                         }
                     } else {
-                        DebugLogManager.log("ANIPLEX_PROGRESS", "No watch history document exists for animeId: $animeId")
+                        DebugLogManager.log("ANIPLEX_PROGRESS", "No watch history document exists in Firestore for animeId: $animeId")
                     }
                 } catch (e: Exception) {
-                    DebugLogManager.log("ANIPLEX_PROGRESS", "Error fetching watch history: ${e.message}", e)
+                    DebugLogManager.log("ANIPLEX_PROGRESS", "Error fetching watch history from Firestore: ${e.message}", e)
                 }
             }
         }
@@ -750,10 +794,24 @@ class PlayerViewModel @Inject constructor(
                     finalDuration = 0L // clean resume state for the next episode
                 }
 
+                val historyItem = com.aniplex.app.domain.model.HistoryItem(
+                    animeId = animeId,
+                    animeTitle = animeTitle,
+                    poster = posterUrl ?: "",
+                    episodeId = finalEpisodeId,
+                    episodeNumber = finalEpisodeNumber,
+                    episodeTitle = finalEpisodeTitle,
+                    progressPosition = finalProgress,
+                    totalDuration = finalDuration,
+                    updatedAt = System.currentTimeMillis()
+                )
+                preferenceManager.saveLocalHistoryItem(historyItem)
+                DebugLogManager.log("ANIPLEX_PROGRESS", "Saved progress locally: $finalProgress / $finalDuration")
+
                 val data = hashMapOf(
                     "animeId" to animeId,
                     "animeTitle" to animeTitle,
-                    "poster" to posterUrl,
+                    "poster" to (posterUrl ?: ""),
                     "episodeId" to finalEpisodeId,
                     "episodeNumber" to finalEpisodeNumber,
                     "episodeTitle" to finalEpisodeTitle,
@@ -770,7 +828,7 @@ class PlayerViewModel @Inject constructor(
                         .collection("history").document(animeId)
                 }
                 
-                DebugLogManager.log("ANIPLEX_PROGRESS", "Saving progress to doc: ${docRef.path}. progress: $finalProgress / $finalDuration")
+                DebugLogManager.log("ANIPLEX_PROGRESS", "Saving progress to Firestore doc: ${docRef.path}. progress: $finalProgress / $finalDuration")
                 docRef.set(data).await()
 
                 // Also update/sync Watchlist status in Firestore

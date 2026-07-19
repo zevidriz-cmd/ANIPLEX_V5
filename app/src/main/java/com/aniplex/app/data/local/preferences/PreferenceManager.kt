@@ -221,4 +221,58 @@ class PreferenceManager @Inject constructor(
         val joined = searches.joinToString("||")
         prefs.edit().putString("recent_searches", joined).apply()
     }
+
+    fun getLocalWatchProgress(animeId: String, episodeId: String, episodeNumber: Int): Long {
+        val progressById = prefs.getLong("watch_progress_${animeId}_${episodeId}", -1L)
+        if (progressById != -1L) return progressById
+        if (episodeNumber > 0) {
+            val progressByNum = prefs.getLong("watch_progress_${animeId}_ep_${episodeNumber}", -1L)
+            if (progressByNum != -1L) return progressByNum
+        }
+        return 0L
+    }
+
+    fun getLocalHistoryItem(animeId: String): com.aniplex.app.domain.model.HistoryItem? {
+        val episodeId = prefs.getString("last_ep_id_$animeId", null) ?: return null
+        val episodeNumber = prefs.getInt("last_ep_num_$animeId", 1)
+        val episodeTitle = prefs.getString("last_ep_title_$animeId", "") ?: ""
+        val progressPosition = prefs.getLong("last_ep_progress_$animeId", 0L)
+        val totalDuration = prefs.getLong("last_ep_duration_$animeId", 0L)
+        val animeTitle = prefs.getString("last_anime_title_$animeId", "") ?: ""
+        val poster = prefs.getString("last_anime_poster_$animeId", "") ?: ""
+        val updatedAt = prefs.getLong("last_updated_$animeId", System.currentTimeMillis())
+        return com.aniplex.app.domain.model.HistoryItem(
+            animeId = animeId,
+            animeTitle = animeTitle,
+            poster = poster,
+            episodeId = episodeId,
+            episodeNumber = episodeNumber,
+            episodeTitle = episodeTitle,
+            progressPosition = progressPosition,
+            totalDuration = totalDuration,
+            updatedAt = updatedAt
+        )
+    }
+
+    fun saveLocalHistoryItem(item: com.aniplex.app.domain.model.HistoryItem) {
+        prefs.edit()
+            .putString("last_ep_id_${item.animeId}", item.episodeId)
+            .putInt("last_ep_num_${item.animeId}", item.episodeNumber)
+            .putString("last_ep_title_${item.animeId}", item.episodeTitle)
+            .putLong("last_ep_progress_${item.animeId}", item.progressPosition)
+            .putLong("last_ep_duration_${item.animeId}", item.totalDuration)
+            .putString("last_anime_title_${item.animeId}", item.animeTitle)
+            .putString("last_anime_poster_${item.animeId}", item.poster)
+            .putLong("last_updated_${item.animeId}", item.updatedAt)
+            .apply()
+        
+        prefs.edit()
+            .putLong("watch_progress_${item.animeId}_${item.episodeId}", item.progressPosition)
+            .apply()
+        if (item.episodeNumber > 0) {
+            prefs.edit()
+                .putLong("watch_progress_${item.animeId}_ep_${item.episodeNumber}", item.progressPosition)
+                .apply()
+        }
+    }
 }

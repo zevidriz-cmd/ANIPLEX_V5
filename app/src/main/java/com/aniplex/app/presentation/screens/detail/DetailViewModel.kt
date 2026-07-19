@@ -663,6 +663,13 @@ class DetailViewModel @Inject constructor(
     }
 
     fun refreshWatchHistory(animeId: String) {
+        // 1. Try local cache first for instant UI response
+        val localItem = preferenceManager.getLocalHistoryItem(animeId)
+        if (localItem != null) {
+            _watchHistory.value = localItem
+        }
+
+        // 2. Fetch from Firestore in the background to sync
         val userId = auth.currentUser?.uid ?: return
         val profileId = profileManager.activeProfile.value?.id
         viewModelScope.launch {
@@ -677,7 +684,7 @@ class DetailViewModel @Inject constructor(
                 }
                 val histDoc = docRef.get().await()
                 if (histDoc.exists()) {
-                    _watchHistory.value = HistoryItem(
+                    val dbItem = HistoryItem(
                         animeId = animeId,
                         animeTitle = histDoc.getString("animeTitle") ?: "",
                         poster = histDoc.getString("poster") ?: "",
@@ -688,11 +695,22 @@ class DetailViewModel @Inject constructor(
                         totalDuration = histDoc.getLong("totalDuration") ?: 0L,
                         updatedAt = histDoc.getLong("updatedAt") ?: System.currentTimeMillis()
                     )
+                    
+                    // Only update UI if Firestore has a newer update or local cache is empty
+                    if (localItem == null || dbItem.updatedAt > localItem.updatedAt) {
+                        _watchHistory.value = dbItem
+                        preferenceManager.saveLocalHistoryItem(dbItem)
+                    }
                 } else {
-                    _watchHistory.value = null
+                    if (localItem == null) {
+                        _watchHistory.value = null
+                    }
                 }
             } catch (e: Exception) {
-                _watchHistory.value = null
+                // If offline or network fails, keep the local item
+                if (localItem == null) {
+                    _watchHistory.value = null
+                }
             }
         }
     }

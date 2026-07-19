@@ -1269,6 +1269,13 @@ fun PlayerScreen(
                         pendingPlayWhenReady.value = false
                         DebugLogManager.log("ANIPLEX_PLAYER", "Deferred playWhenReady consumed on STATE_READY")
                     }
+                    
+                    if (!hasSeekedToInitialProgress && localResumePlayback && initialProgress > 0L) {
+                        exoPlayer.seekTo(initialProgress)
+                        hasSeekedToInitialProgress = true
+                        DebugLogManager.log("ANIPLEX_PLAYER", "ExoPlayer successfully seeked to initialProgress on STATE_READY: $initialProgress")
+                    }
+
                     val pos = serverSwitchPosition
                     if (pos != null && pos > 0) {
                         serverSwitchPosition = null
