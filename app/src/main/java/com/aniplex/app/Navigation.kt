@@ -80,23 +80,23 @@ fun MobileMainNavigation() {
         onBack = { backStack.removeLastOrNull() },
         transitionSpec = {
             slideInHorizontally(
-                initialOffsetX = { it },
-                animationSpec = tween(380, easing = EaseOutCubic)
-            ) + fadeIn(animationSpec = tween(380, easing = EaseOutCubic)) togetherWith
+                initialOffsetX = { it / 6 },
+                animationSpec = tween(240, easing = EaseOutCubic)
+            ) + fadeIn(animationSpec = tween(240, easing = EaseOutCubic)) togetherWith
             slideOutHorizontally(
-                targetOffsetX = { -it / 4 },
-                animationSpec = tween(380, easing = EaseOutCubic)
-            ) + fadeOut(animationSpec = tween(250, easing = EaseOutCubic))
+                targetOffsetX = { -it / 24 },
+                animationSpec = tween(240, easing = EaseOutCubic)
+            ) + fadeOut(animationSpec = tween(160, easing = EaseOutCubic))
         },
         popTransitionSpec = {
             slideInHorizontally(
-                initialOffsetX = { -it / 4 },
-                animationSpec = tween(380, easing = EaseOutCubic)
-            ) + fadeIn(animationSpec = tween(380, easing = EaseOutCubic)) togetherWith
+                initialOffsetX = { -it / 24 },
+                animationSpec = tween(240, easing = EaseOutCubic)
+            ) + fadeIn(animationSpec = tween(240, easing = EaseOutCubic)) togetherWith
             slideOutHorizontally(
-                targetOffsetX = { it },
-                animationSpec = tween(380, easing = EaseOutCubic)
-            ) + fadeOut(animationSpec = tween(250, easing = EaseOutCubic))
+                targetOffsetX = { it / 6 },
+                animationSpec = tween(240, easing = EaseOutCubic)
+            ) + fadeOut(animationSpec = tween(160, easing = EaseOutCubic))
         },
         entryProvider = entryProvider {
             entry<Splash> {
@@ -492,23 +492,23 @@ fun TvMainNavigation() {
         onBack = { backStack.removeLastOrNull() },
         transitionSpec = {
             slideInHorizontally(
-                initialOffsetX = { it },
-                animationSpec = tween(400, easing = EaseOutCubic)
-            ) + fadeIn(animationSpec = tween(400, easing = EaseOutCubic)) togetherWith
+                initialOffsetX = { it / 6 },
+                animationSpec = tween(240, easing = EaseOutCubic)
+            ) + fadeIn(animationSpec = tween(240, easing = EaseOutCubic)) togetherWith
             slideOutHorizontally(
-                targetOffsetX = { -it / 4 },
-                animationSpec = tween(400, easing = EaseOutCubic)
-            ) + fadeOut(animationSpec = tween(260, easing = EaseOutCubic))
+                targetOffsetX = { -it / 24 },
+                animationSpec = tween(240, easing = EaseOutCubic)
+            ) + fadeOut(animationSpec = tween(160, easing = EaseOutCubic))
         },
         popTransitionSpec = {
             slideInHorizontally(
-                initialOffsetX = { -it / 4 },
-                animationSpec = tween(400, easing = EaseOutCubic)
-            ) + fadeIn(animationSpec = tween(400, easing = EaseOutCubic)) togetherWith
+                initialOffsetX = { -it / 24 },
+                animationSpec = tween(240, easing = EaseOutCubic)
+            ) + fadeIn(animationSpec = tween(240, easing = EaseOutCubic)) togetherWith
             slideOutHorizontally(
-                targetOffsetX = { it },
-                animationSpec = tween(400, easing = EaseOutCubic)
-            ) + fadeOut(animationSpec = tween(260, easing = EaseOutCubic))
+                targetOffsetX = { it / 6 },
+                animationSpec = tween(240, easing = EaseOutCubic)
+            ) + fadeOut(animationSpec = tween(160, easing = EaseOutCubic))
         },
         entryProvider = entryProvider {
             entry<Splash> {

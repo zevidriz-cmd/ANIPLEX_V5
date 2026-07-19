@@ -14,6 +14,16 @@ import java.io.File
 import java.io.FileOutputStream
 import java.net.URI
 import java.util.concurrent.TimeUnit
+import dagger.hilt.EntryPoint
+import dagger.hilt.InstallIn
+import dagger.hilt.components.SingletonComponent
+import dagger.hilt.android.EntryPointAccessors
+
+@EntryPoint
+@InstallIn(SingletonComponent::class)
+interface DownloadEntryPoint {
+    fun downloadDao(): com.aniplex.app.data.local.dao.DownloadDao
+}
 
 enum class DownloadStatus {
     QUEUED, DOWNLOADING, PAUSED, COMPLETED, FAILED
@@ -65,13 +75,12 @@ object DownloadManager {
         val applicationContext = context.applicationContext
         appContext = applicationContext
 
-        // Initialize Room DB
-        val db = androidx.room.Room.databaseBuilder(
+        // Retrieve Room DB DownloadDao via Hilt EntryPoint
+        val entryPoint = EntryPointAccessors.fromApplication(
             applicationContext,
-            com.aniplex.app.data.local.database.AppDatabase::class.java,
-            "aniplex_db"
-        ).fallbackToDestructiveMigration().build()
-        downloadDao = db.downloadDao()
+            DownloadEntryPoint::class.java
+        )
+        downloadDao = entryPoint.downloadDao()
 
         restartDatabaseObservation()
     }

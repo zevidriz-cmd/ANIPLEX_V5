@@ -26,6 +26,8 @@ import java.io.FileOutputStream
 import java.net.URI
 import java.util.concurrent.TimeUnit
 
+import dagger.hilt.android.EntryPointAccessors
+
 class DownloadWorker(
     context: Context,
     params: WorkerParameters
@@ -44,13 +46,12 @@ class DownloadWorker(
     override suspend fun doWork(): Result {
         val episodeId = inputData.getString("episodeId") ?: return Result.failure()
         
-        // Initialize Room Dao
-        val db = Room.databaseBuilder(
+        // Retrieve Room DB DownloadDao via Hilt EntryPoint
+        val entryPoint = EntryPointAccessors.fromApplication(
             applicationContext,
-            AppDatabase::class.java,
-            "aniplex_db"
-        ).fallbackToDestructiveMigration().build()
-        downloadDao = db.downloadDao()
+            DownloadEntryPoint::class.java
+        )
+        downloadDao = entryPoint.downloadDao()
 
         val task = downloadDao?.getDownload(episodeId) ?: return Result.failure()
         
