@@ -1442,6 +1442,11 @@ fun PlayerScreen(
             val isInitialized = exoPlayer.playbackState != Player.STATE_IDLE
             val currentPos = if (isInitialized) exoPlayer.currentPosition else -1L
             val playWhenReadyState = if (isInitialized) exoPlayer.playWhenReady else false
+            val effectiveResumePos = when {
+                currentPos > 0L -> currentPos
+                localResumePlayback && initialProgress > 0L -> initialProgress
+                else -> -1L
+            }
 
             exoPlayer.setMediaSource(mediaSource)
 
@@ -1452,20 +1457,15 @@ fun PlayerScreen(
                 .setPreferredTextLanguage(if (currentSubtitleSelection == "off") "en" else currentSubtitleSelection)
                 .build()
 
-            if (currentPos > 0L) {
-                exoPlayer.seekTo(currentPos)
+            if (effectiveResumePos > 0L) {
+                exoPlayer.seekTo(effectiveResumePos)
                 exoPlayer.prepare()
-                exoPlayer.playWhenReady = playWhenReadyState
-                DebugLogManager.log("ANIPLEX_PLAYER", "ExoPlayer updated media source and restored position to: $currentPos")
+                exoPlayer.playWhenReady = if (isInitialized) playWhenReadyState else false
+                if (!isInitialized) pendingPlayWhenReady.value = localResumePlayback
+                hasSeekedToInitialProgress = true
+                DebugLogManager.log("ANIPLEX_PLAYER", "ExoPlayer updated media source and restored position to: $effectiveResumePos")
             } else {
-                if (!hasSeekedToInitialProgress && localResumePlayback && initialProgress > 0L) {
-                    exoPlayer.seekTo(initialProgress)
-                    hasSeekedToInitialProgress = true
-                    DebugLogManager.log("ANIPLEX_PLAYER", "Successfully seeked inside stream LaunchedEffect to saved progress: $initialProgress")
-                }
                 exoPlayer.prepare()
-                // Don't start playback immediately — defer until STATE_READY
-                // so audio doesn't leak while the video surface is still attaching.
                 exoPlayer.playWhenReady = false
                 pendingPlayWhenReady.value = localResumePlayback
             }
