@@ -115,6 +115,7 @@ export default function VideoPlayer({
   const [subOpacity, setSubOpacity] = useState(60);
 
   const [activeTrackIndex, setActiveTrackIndex] = useState(-1);
+  const userSelectedTrackLabelRef = useRef(null);
   const [activeCues, setActiveCues] = useState([]);
   const [containerWidth, setContainerWidth] = useState(800);
   const [showNotice, setShowNotice] = useState(false);
@@ -194,15 +195,31 @@ export default function VideoPlayer({
     return () => resizeObserver.disconnect();
   }, []);
 
-  // Set default active track
+  // Reset user manual subtitle selection when video stream source changes
+  useEffect(() => {
+    userSelectedTrackLabelRef.current = null;
+  }, [src]);
+
+  // Set active track based on user preference or default
   useEffect(() => {
     const subsEnabled = localStorage.getItem("anistream_subtitles_enabled") !== "false";
-    if (!subsEnabled) {
+    if (!subsEnabled || userSelectedTrackLabelRef.current === "OFF") {
       setActiveTrackIndex(-1);
       return;
     }
 
     if (tracks && tracks.length > 0) {
+      const savedLang = localStorage.getItem("anistream_selected_subtitle_lang");
+      const targetLabel = userSelectedTrackLabelRef.current || savedLang;
+
+      if (targetLabel && targetLabel !== "OFF") {
+        const userMatchedIndex = tracks.findIndex(t => t.label && t.label.toLowerCase().includes(targetLabel.toLowerCase()));
+        if (userMatchedIndex !== -1) {
+          setActiveTrackIndex(userMatchedIndex);
+          return;
+        }
+      }
+
       const englishIndex = tracks.findIndex(t => t.label?.toLowerCase() === "english");
       const defaultIndex = tracks.findIndex(t => t.default || t.isDefault);
 
@@ -216,7 +233,7 @@ export default function VideoPlayer({
     } else {
       setActiveTrackIndex(-1);
     }
-  }, [tracks]);
+  }, [tracks, src]);
 
   // Handle track modes (set selected track hidden, others disabled)
   useEffect(() => {
@@ -1838,14 +1855,13 @@ export default function VideoPlayer({
         {tracks.map((track, i) => (
           <track
             key={i}
-            src={track.file}
+            src={track.file || track.url || track.src}
             kind={track.kind || "subtitles"}
             label={track.label}
             srcLang={track.label?.substring(0, 2).toLowerCase() || "en"}
             default={track.label?.toLowerCase() === "english" || i === 0}
             onError={(e) => {
-              console.warn(`[VideoPlayer] Subtitle track failed to load: ${track.label} (${track.file})`);
-              if (onSubtitleError) onSubtitleError(track);
+              console.warn(`[VideoPlayer] Subtitle track failed to load: ${track.label} (${track.file || track.url || track.src})`);
             }}
           />
         ))}
@@ -2154,8 +2170,10 @@ export default function VideoPlayer({
                         <div className="settings-options scrollable">
                           <button
                             onClick={() => {
-                              setActiveTrackIndex(-1);
+                              userSelectedTrackLabelRef.current = "OFF";
                               localStorage.setItem("anistream_subtitles_enabled", "false");
+                              localStorage.setItem("anistream_selected_subtitle_lang", "OFF");
+                              setActiveTrackIndex(-1);
                               saveSettings();
                               setShowSettings(false);
                             }}
@@ -2167,8 +2185,10 @@ export default function VideoPlayer({
                             <button
                               key={idx}
                               onClick={() => {
-                                setActiveTrackIndex(idx);
+                                userSelectedTrackLabelRef.current = track.label;
+                                localStorage.setItem("anistream_selected_subtitle_lang", track.label);
                                 localStorage.setItem("anistream_subtitles_enabled", "true");
+                                setActiveTrackIndex(idx);
                                 saveSettings();
                                 setShowSettings(false);
                               }}

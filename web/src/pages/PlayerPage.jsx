@@ -598,7 +598,13 @@ export default function PlayerPage() {
           });
         }
 
-        // 4. Fetch AniSkip times if MAL ID is available
+        // Stream extraction complete: dismiss loading spinner overlay immediately so video plays smoothly
+        if (isMounted) {
+          setInitialLoading(false);
+          setScraping(false);
+        }
+
+        // 4. Fetch AniSkip times in background if MAL ID is available
         if (malId && malId !== "0" && ep) {
           try {
             const skip = await getSkipTimes(malId, ep.number);

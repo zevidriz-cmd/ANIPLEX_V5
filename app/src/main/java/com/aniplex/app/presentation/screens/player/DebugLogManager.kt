@@ -16,17 +16,17 @@ object DebugLogManager {
     var isLoggingEnabled: Boolean = true
 
     fun log(tag: String, msg: String, tr: Throwable? = null) {
-        if (!isLoggingEnabled) return
-        
-        val timestamp = dateFormat.format(Date())
-        val formattedMsg = "[$timestamp] [$tag] $msg" + (tr?.let { "\n${Log.getStackTraceString(it)}" } ?: "")
-        
-        // Print to logcat so it's still available there
+        // Print to logcat so it's still available there for debugging and ADB capture
         if (tr != null) {
             Log.e(tag, msg, tr)
         } else {
             Log.d(tag, msg)
         }
+
+        if (!isLoggingEnabled) return
+        
+        val timestamp = dateFormat.format(Date())
+        val formattedMsg = "[$timestamp] [$tag] $msg" + (tr?.let { "\n${Log.getStackTraceString(it)}" } ?: "")
 
         logQueue.add(formattedMsg)
         while (logQueue.size > MAX_LOGS) {

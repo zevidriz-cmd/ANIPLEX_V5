@@ -558,17 +558,11 @@ fun PlayerScreen(
                     }
 
                     if (subtitleMime != null) {
-                        val langCode = when {
-                            urlLower.contains("eng") || urlLower.contains("english") || urlLower.contains("-en") || urlLower.contains("_en") -> "en"
-                            urlLower.contains("ara") || urlLower.contains("-ar") -> "ar"
-                            urlLower.contains("spa") || urlLower.contains("-es") -> "es"
-                            urlLower.contains("fre") || urlLower.contains("-fr") -> "fr"
-                            else -> "en" // Automatically default to en instead of und so ExoPlayer auto-selects it
-                        }
+                        val (langCode, label) = parseLanguageCodeAndLabel(url, null)
                         Handler(Looper.getMainLooper()).post {
                             if (capturedSubtitles.none { it.url == url }) {
-                                capturedSubtitles.add(SniffedSubtitle(url, subtitleMime, langCode))
-                                DebugLogManager.log("ANIPLEX_SUBS", "Collected Subtitle: $langCode | $url")
+                                capturedSubtitles.add(SniffedSubtitle(url, subtitleMime, langCode, label))
+                                DebugLogManager.log("ANIPLEX_SUBS", "Collected Subtitle: $langCode ($label) | $url")
                             }
                         }
                     }
@@ -845,18 +839,13 @@ fun PlayerScreen(
                 extractionState = ExtractionState.READY
                 // Populate subtitles from the programmatic extraction result
                 if (state.stream.subtitles.isNotEmpty()) {
-                    val sniffed = state.stream.subtitles.map { sub ->
+                    DebugLogManager.log("ANIPLEX_SUBS", "Extracting stream subtitles from Success state. Order:")
+                    val sniffed = state.stream.subtitles.mapIndexed { idx, sub ->
                         val urlLower = sub.url.lowercase()
-                        val labelLower = sub.label.lowercase()
                         val mimeType = if (urlLower.endsWith(".ass") || urlLower.endsWith(".ssa")) "text/x-ass" else androidx.media3.common.MimeTypes.TEXT_VTT
-                        val lang = when {
-                            urlLower.contains("eng") || urlLower.contains("english") || labelLower.contains("eng") || labelLower.contains("english") -> "en"
-                            urlLower.contains("ara") || labelLower.contains("ara") || urlLower.contains("-ar") -> "ar"
-                            urlLower.contains("spa") || labelLower.contains("spa") || urlLower.contains("-es") -> "es"
-                            urlLower.contains("fre") || labelLower.contains("fre") || urlLower.contains("-fr") -> "fr"
-                            else -> "en"
-                        }
-                        SniffedSubtitle(url = sub.url, mime = mimeType, langCode = lang)
+                        val (lang, label) = parseLanguageCodeAndLabel(sub.url, sub.label)
+                        DebugLogManager.log("ANIPLEX_SUBS", "  [$idx]: Original Label='${sub.label}', Mapped LangCode='$lang', Label='$label', isDefault=${sub.isDefault}, URL='${sub.url}'")
+                        SniffedSubtitle(url = sub.url, mime = mimeType, langCode = lang, label = label)
                     }
                     sniffed.forEach { item ->
                         if (capturedSubtitles.none { it.url == item.url }) {
@@ -871,18 +860,13 @@ fun PlayerScreen(
                     extractionState = ExtractionState.EXTRACTING
                 }
                 if (state.subtitles.isNotEmpty()) {
-                    val sniffed = state.subtitles.map { sub ->
+                    DebugLogManager.log("ANIPLEX_SUBS", "Extracting stream subtitles from WebViewFallback state. Order:")
+                    val sniffed = state.subtitles.mapIndexed { idx, sub ->
                         val urlLower = sub.url.lowercase()
-                        val labelLower = sub.label.lowercase()
                         val mimeType = if (urlLower.endsWith(".ass") || urlLower.endsWith(".ssa")) "text/x-ass" else androidx.media3.common.MimeTypes.TEXT_VTT
-                        val lang = when {
-                            urlLower.contains("eng") || urlLower.contains("english") || labelLower.contains("eng") || labelLower.contains("english") -> "en"
-                            urlLower.contains("ara") || labelLower.contains("ara") || urlLower.contains("-ar") -> "ar"
-                            urlLower.contains("spa") || labelLower.contains("spa") || urlLower.contains("-es") -> "es"
-                            urlLower.contains("fre") || labelLower.contains("fre") || urlLower.contains("-fr") -> "fr"
-                            else -> "en"
-                        }
-                        SniffedSubtitle(url = sub.url, mime = mimeType, langCode = lang)
+                        val (lang, label) = parseLanguageCodeAndLabel(sub.url, sub.label)
+                        DebugLogManager.log("ANIPLEX_SUBS", "  [$idx]: Original Label='${sub.label}', Mapped LangCode='$lang', Label='$label', isDefault=${sub.isDefault}, URL='${sub.url}'")
+                        SniffedSubtitle(url = sub.url, mime = mimeType, langCode = lang, label = label)
                     }
                     sniffed.forEach { item ->
                         if (capturedSubtitles.none { it.url == item.url }) {
@@ -1282,6 +1266,21 @@ fun PlayerScreen(
                         exoPlayer.seekTo(pos)
                         DebugLogManager.log("ANIPLEX_PLAYER", "ExoPlayer successfully seeked to serverSwitchPosition: $pos")
                     }
+
+                    // Log current text tracks state
+                    val textTracksInfo = mutableListOf<String>()
+                    exoPlayer.currentTracks.groups.forEachIndexed { groupIndex, group ->
+                        if (group.type == androidx.media3.common.C.TRACK_TYPE_TEXT) {
+                            for (trackIndex in 0 until group.length) {
+                                val format = group.getTrackFormat(trackIndex)
+                                val isSelected = group.isTrackSelected(trackIndex)
+                                textTracksInfo.add(
+                                    "Group $groupIndex, Track $trackIndex: Language=${format.language}, Label=${format.label}, selected=$isSelected"
+                                )
+                            }
+                        }
+                    }
+                    DebugLogManager.log("ANIPLEX_EXOPLAYER", "Player READY. Active text tracks: $textTracksInfo")
                 }
 
                 if (playbackState == Player.STATE_ENDED) {
@@ -1296,7 +1295,20 @@ fun PlayerScreen(
 
             override fun onTracksChanged(tracks: androidx.media3.common.Tracks) {
                 super.onTracksChanged(tracks)
-                DebugLogManager.log("ANIPLEX_EXOPLAYER", "Stream tracks changed (video/audio/text paths updated)")
+                val textTracksInfo = mutableListOf<String>()
+                tracks.groups.forEachIndexed { groupIndex, group ->
+                    if (group.type == androidx.media3.common.C.TRACK_TYPE_TEXT) {
+                        for (trackIndex in 0 until group.length) {
+                            val format = group.getTrackFormat(trackIndex)
+                            val isSelected = group.isTrackSelected(trackIndex)
+                            val isSupported = group.isTrackSupported(trackIndex)
+                            textTracksInfo.add(
+                                "Group $groupIndex, Track $trackIndex: Language=${format.language}, Label=${format.label}, mime=${format.sampleMimeType}, selected=$isSelected, supported=$isSupported"
+                            )
+                        }
+                    }
+                }
+                DebugLogManager.log("ANIPLEX_EXOPLAYER", "Stream tracks changed (video/audio/text paths updated). Text tracks: $textTracksInfo")
             }
 
             override fun onPlayerError(error: PlaybackException) {
@@ -1351,11 +1363,15 @@ fun PlayerScreen(
                 DebugLogManager.log("ANIPLEX_SUBS", "Zoro subtitles empty. Fetching backup subtitles from Gogo/AnimePahe fallback API...")
                 viewModel.getBackupSubtitles { backupSubs ->
                     if (backupSubs.isNotEmpty()) {
-                        val sniffed = backupSubs.map { sub ->
+                        DebugLogManager.log("ANIPLEX_SUBS", "Extracting backup subtitles. Order:")
+                        val sniffed = backupSubs.mapIndexed { idx, sub ->
+                            val (lang, label) = parseLanguageCodeAndLabel(sub.url, sub.label)
+                            DebugLogManager.log("ANIPLEX_SUBS", "  [$idx]: Original Label='${sub.label}', Mapped LangCode='$lang', Label='$label', URL='${sub.url}'")
                             SniffedSubtitle(
                                 url = sub.url,
                                 mime = if (sub.url.endsWith(".ass")) "text/x-ass" else androidx.media3.common.MimeTypes.TEXT_VTT,
-                                langCode = "en"
+                                langCode = lang,
+                                label = label
                             )
                         }
                         capturedSubtitles.addAll(sniffed)
@@ -1421,14 +1437,17 @@ fun PlayerScreen(
                 .setUserAgent(userAgentHeader)
                 .setDefaultRequestProperties(requestProperties)
 
-            val subtitleConfigs = capturedSubtitles.map { sub ->
-                MediaItem.SubtitleConfiguration.Builder(android.net.Uri.parse(sub.url))
+            DebugLogManager.log("ANIPLEX_SUBS", "Building SubtitleConfigurations for MediaItem (retryPlaybackKey=$retryPlaybackKey). Total tracks: ${capturedSubtitles.size}")
+            val subtitleConfigs = capturedSubtitles.mapIndexed { idx, sub ->
+                val config = MediaItem.SubtitleConfiguration.Builder(android.net.Uri.parse(sub.url))
                     .setMimeType(sub.mime)
                     .setLanguage(sub.langCode)
-                    .setLabel(if (sub.langCode == "en") "English" else "Language: ${sub.langCode}")
+                    .setLabel(sub.label)
                     .setSelectionFlags(if (sub.langCode == "en") C.SELECTION_FLAG_DEFAULT else 0)
                     .setRoleFlags(C.ROLE_FLAG_SUBTITLE)
                     .build()
+                DebugLogManager.log("ANIPLEX_SUBS", "  [$idx]: config Language='${config.language}', Label='${config.label}', selectionFlags=${config.selectionFlags}, URL='${config.uri}'")
+                config
             }
 
             val mediaItem = MediaItem.Builder()
@@ -1491,12 +1510,15 @@ fun PlayerScreen(
     LaunchedEffect(currentSubtitleSelection, exoPlayer) {
         val player = exoPlayer ?: return@LaunchedEffect
         val disabled = currentSubtitleSelection == "off"
+        DebugLogManager.log("ANIPLEX_SUBS_SELECTION", "LaunchedEffect triggered. currentSubtitleSelection='$currentSubtitleSelection', player.preferredTextLanguages=${player.trackSelectionParameters.preferredTextLanguages}")
         val builder = player.trackSelectionParameters.buildUpon()
             .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, disabled)
         if (!disabled) {
             builder.setPreferredTextLanguage(currentSubtitleSelection)
         }
-        player.trackSelectionParameters = builder.build()
+        val params = builder.build()
+        DebugLogManager.log("ANIPLEX_SUBS_SELECTION", "Applying TrackSelectionParameters: disabled=$disabled, preferredTextLanguage='${if (disabled) "none" else currentSubtitleSelection}'")
+        player.trackSelectionParameters = params
     }
 
     LaunchedEffect(qualityOption, activeCategory, exoPlayer) {
@@ -2630,7 +2652,64 @@ private fun formatCount(count: Int): String {
     }
 }
 
-data class SniffedSubtitle(val url: String, val mime: String, val langCode: String)
+data class SniffedSubtitle(val url: String, val mime: String, val langCode: String, val label: String)
+
+private fun parseLanguageCodeAndLabel(url: String, originalLabel: String?): Pair<String, String> {
+    val urlLower = url.lowercase()
+    val labelLower = originalLabel?.lowercase() ?: ""
+    
+    return when {
+        urlLower.contains("eng") || urlLower.contains("english") || labelLower.contains("eng") || labelLower.contains("english") -> 
+            Pair("en", if (!originalLabel.isNullOrBlank()) originalLabel else "English")
+            
+        urlLower.contains("chi") || urlLower.contains("zho") || urlLower.contains("chinese") || labelLower.contains("chi") || labelLower.contains("zho") || labelLower.contains("chinese") -> 
+            Pair("zh", if (!originalLabel.isNullOrBlank()) originalLabel else "Chinese")
+            
+        urlLower.contains("ind") || urlLower.contains("indonesian") || labelLower.contains("ind") || labelLower.contains("indonesian") -> 
+            Pair("id", if (!originalLabel.isNullOrBlank()) originalLabel else "Indonesian")
+            
+        urlLower.contains("tha") || urlLower.contains("thai") || labelLower.contains("tha") || labelLower.contains("thai") -> 
+            Pair("th", if (!originalLabel.isNullOrBlank()) originalLabel else "Thai")
+            
+        urlLower.contains("spa") || urlLower.contains("spanish") || labelLower.contains("spa") || labelLower.contains("spanish") -> 
+            Pair("es", if (!originalLabel.isNullOrBlank()) originalLabel else "Spanish")
+            
+        urlLower.contains("fre") || urlLower.contains("fra") || urlLower.contains("french") || labelLower.contains("fre") || labelLower.contains("fra") || labelLower.contains("french") -> 
+            Pair("fr", if (!originalLabel.isNullOrBlank()) originalLabel else "French")
+            
+        urlLower.contains("ara") || urlLower.contains("arabic") || labelLower.contains("ara") || labelLower.contains("arabic") -> 
+            Pair("ar", if (!originalLabel.isNullOrBlank()) originalLabel else "Arabic")
+            
+        urlLower.contains("por") || urlLower.contains("portuguese") || labelLower.contains("por") || labelLower.contains("portuguese") -> 
+            Pair("pt", if (!originalLabel.isNullOrBlank()) originalLabel else "Portuguese")
+            
+        urlLower.contains("vie") || urlLower.contains("vietnamese") || labelLower.contains("vie") || labelLower.contains("vietnamese") -> 
+            Pair("vi", if (!originalLabel.isNullOrBlank()) originalLabel else "Vietnamese")
+            
+        urlLower.contains("jpn") || urlLower.contains("japanese") || labelLower.contains("jpn") || labelLower.contains("japanese") -> 
+            Pair("ja", if (!originalLabel.isNullOrBlank()) originalLabel else "Japanese")
+            
+        urlLower.contains("rus") || urlLower.contains("russian") || labelLower.contains("rus") || labelLower.contains("russian") -> 
+            Pair("ru", if (!originalLabel.isNullOrBlank()) originalLabel else "Russian")
+            
+        urlLower.contains("kor") || urlLower.contains("korean") || labelLower.contains("kor") || labelLower.contains("korean") -> 
+            Pair("ko", if (!originalLabel.isNullOrBlank()) originalLabel else "Korean")
+            
+        else -> {
+            val fileName = url.split("?")[0].split("/").lastOrNull()?.lowercase() ?: ""
+            val match = Regex("([a-z]{2,3})[-_][0-9]+").find(fileName)
+            if (match != null) {
+                val matchedCode = match.groupValues[1]
+                val resolvedLabel = if (!originalLabel.isNullOrBlank()) originalLabel else matchedCode.replaceFirstChar { it.uppercase() }
+                Pair(matchedCode, resolvedLabel)
+            } else {
+                val code = if (!originalLabel.isNullOrBlank()) originalLabel.take(2).lowercase() else "und"
+                val resolvedLabel = if (!originalLabel.isNullOrBlank()) originalLabel else "Unknown Track"
+                Pair(code, resolvedLabel)
+            }
+        }
+    }
+}
 
 enum class ExtractionState {
     EXTRACTING,
@@ -4305,15 +4384,7 @@ fun PlaybackSettingsOverlay(
                 // Subtitles selection
                 SettingsSectionHeader("SUBTITLES/CC")
                 val subtitleTracks = state.capturedSubtitles.map { it.langCode } + "off"
-                val subtitleLabels = state.capturedSubtitles.map { 
-                    when (it.langCode) {
-                        "en" -> "English"
-                        "ar" -> "Arabic"
-                        "es" -> "Spanish"
-                        "fr" -> "French"
-                        else -> "Track: ${it.langCode}"
-                    }
-                } + "Off"
+                val subtitleLabels = state.capturedSubtitles.map { it.label } + "Off"
                 val currentSubIndex = subtitleTracks.indexOf(state.currentSubtitleSelection).coerceAtLeast(0)
                 SettingsButtonGroup(
                     items = subtitleLabels,
