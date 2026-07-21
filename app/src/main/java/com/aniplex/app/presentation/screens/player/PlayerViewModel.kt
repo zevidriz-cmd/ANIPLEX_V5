@@ -302,8 +302,64 @@ class PlayerViewModel @Inject constructor(
     private val _fallbackStatusMessage = MutableStateFlow<String?>(null)
     val fallbackStatusMessage: StateFlow<String?> = _fallbackStatusMessage.asStateFlow()
 
+    private val _aniNekoTree = MutableStateFlow<com.aniplex.app.data.remote.dto.AniNekoServersResponse?>(null)
+    val aniNekoTree: StateFlow<com.aniplex.app.data.remote.dto.AniNekoServersResponse?> = _aniNekoTree.asStateFlow()
+
+    private val _isEnumeratingAniNeko = MutableStateFlow(false)
+    val isEnumeratingAniNeko: StateFlow<Boolean> = _isEnumeratingAniNeko.asStateFlow()
+
     fun setFallbackStatusMessage(message: String?) {
         _fallbackStatusMessage.value = message
+    }
+
+    fun fetchAniNekoServers() {
+        val title = _animeDetail.value?.name
+        val epNum = _currentEpisode.value?.number ?: 1
+        if (title.isNullOrBlank()) return
+
+        viewModelScope.launch {
+            _isEnumeratingAniNeko.value = true
+            repository.getAniNekoServers(title, epNum).collect { result ->
+                if (result is Result.Success) {
+                    _aniNekoTree.value = result.data
+                }
+                _isEnumeratingAniNeko.value = false
+            }
+        }
+    }
+
+    fun selectManualServer(provider: String, mode: String? = null, serverId: String? = null) {
+        val epId = _currentEpisodeId.value
+        val malId = _animeDetail.value?.malId
+        val epNum = _currentEpisode.value?.number ?: 1
+        val title = _animeDetail.value?.name
+        val srv = serverId ?: "hd-1"
+        val cat = mode ?: defaultAudioCategory
+
+        // Persist user's mode choice globally across app restarts and auto-advance
+        if (mode != null) {
+            preferenceManager.defaultAudioCategory = mode
+        }
+
+        streamJob?.cancel()
+        _uiState.value = PlayerUiState.Loading
+        _fallbackStatusMessage.value = "Loading ${mode ?: serverId ?: provider}..."
+
+        streamJob = viewModelScope.launch {
+            val (malId, title) = awaitMetadataAndGetDetails()
+            if (provider == "zoro") {
+                _activeProvider.value = "zoro"
+                val zoroCat = if (cat == "hsub") "sub" else cat
+                repository.getEpisodeStream(epId, srv, zoroCat).collect { result ->
+                    handleStreamResult(result, "zoro", epId, srv, zoroCat)
+                }
+            } else {
+                _activeProvider.value = "gogoanime"
+                repository.getFallbackStream(malId, epNum, title, "gogoanime", cat, srv).collect { result ->
+                    handleStreamResult(result, "gogoanime", epId, srv, cat)
+                }
+            }
+        }
     }
 
     private val failedProviders = mutableSetOf<String>()
@@ -573,8 +629,9 @@ class PlayerViewModel @Inject constructor(
                     "Gogoanime failed. Switching to Zoro..."
                 }
                 streamJob = viewModelScope.launch {
-                    repository.getEpisodeStream(episodeId, server, category).collect { result ->
-                        handleStreamResult(result, provider, episodeId, server, category)
+                    val zoroCat = if (category == "hsub") "sub" else category
+                    repository.getEpisodeStream(episodeId, server, zoroCat).collect { result ->
+                        handleStreamResult(result, provider, episodeId, server, zoroCat)
                     }
                 }
             }
@@ -585,18 +642,17 @@ class PlayerViewModel @Inject constructor(
                     "Gogoanime failed. Fetching AnimePahe backup..."
                 }
                 streamJob = viewModelScope.launch {
-                    val malId = awaitMetadataAndGetMalId()
-                    val title = _animeDetail.value?.name
+                    val (malId, title) = awaitMetadataAndGetDetails()
                     val epNum = _currentEpisode.value?.number ?: 1
 
-                    if (malId == null) {
+                    if (malId == null && title.isNullOrEmpty()) {
                         DebugLogManager.log("ANIPLEX_PLAYER", "MAL metadata unavailable for provider $provider, skipping...")
                         failedProviders.add(provider)
                         loadPlaybackStream(episodeId, server, category)
                         return@launch
                     }
 
-                    repository.getFallbackStream(malId, epNum, title, provider).collect { result ->
+                    repository.getFallbackStream(malId, epNum, title, provider, category, server).collect { result ->
                         handleStreamResult(result, provider, episodeId, server, category)
                     }
                 }
@@ -604,7 +660,7 @@ class PlayerViewModel @Inject constructor(
             "megaplay-direct" -> {
                 _fallbackStatusMessage.value = "Extracting MegaPlay direct stream..."
                 streamJob = viewModelScope.launch {
-                    val malId = awaitMetadataAndGetMalId()
+                    val (malId, _) = awaitMetadataAndGetDetails()
                     val epNum = _currentEpisode.value?.number ?: 1
 
                     if (malId == null) {
@@ -622,18 +678,19 @@ class PlayerViewModel @Inject constructor(
         }
     }
 
-    private suspend fun awaitMetadataAndGetMalId(): String? {
+    private suspend fun awaitMetadataAndGetDetails(): Pair<String?, String?> {
         var count = 0
-        while (_animeDetail.value == null || _currentEpisode.value == null) {
+        while ((_animeDetail.value == null || _animeDetail.value?.name.isNullOrEmpty() || _currentEpisode.value == null) && count < 50) {
             delay(200)
             count++
-            if (count > 50) { // 10 seconds timeout
-                return null
-            }
         }
-        val malId = _animeDetail.value?.malId
-        return if (!malId.isNullOrEmpty() && malId != "0") malId else null
+        val detail = _animeDetail.value
+        val malId = detail?.malId?.takeIf { it.isNotEmpty() && it != "0" }
+        val title = detail?.name?.takeIf { it.isNotEmpty() }
+        return Pair(malId, title)
     }
+
+    private suspend fun awaitMetadataAndGetMalId(): String? = awaitMetadataAndGetDetails().first
 
     private fun handleStreamResult(
         result: Result<EpisodeStream>,

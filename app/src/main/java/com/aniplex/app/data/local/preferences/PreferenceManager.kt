@@ -14,13 +14,13 @@ class PreferenceManager @Inject constructor(
     private val prefs = context.getSharedPreferences("aniplex_prefs", Context.MODE_PRIVATE)
 
     var defaultAudioCategory: String
-        get() = prefs.getString("default_audio", "sub") ?: "sub"
+        get() = prefs.getString("default_audio", "hsub") ?: "hsub"
         set(value) {
             prefs.edit().putString("default_audio", value).apply()
             _defaultAudioCategoryFlow.value = value
         }
 
-    private val _defaultAudioCategoryFlow = kotlinx.coroutines.flow.MutableStateFlow(prefs.getString("default_audio", "sub") ?: "sub")
+    private val _defaultAudioCategoryFlow = kotlinx.coroutines.flow.MutableStateFlow(prefs.getString("default_audio", "hsub") ?: "hsub")
     val defaultAudioCategoryFlow = _defaultAudioCategoryFlow.asStateFlow()
 
     var autoplayNextEpisode: Boolean

@@ -1,8 +1,8 @@
-import anikotoMap from "./anikoto_map.json";
+import anikotoMap from "./anikoto_map.json" with { type: "json" };
 
 const BASE_URL = "https://aniplex-proxy.f1886391.workers.dev/api/v2";
 
-export const STREAM_PROXY_BASE = import.meta.env.VITE_STREAM_PROXY_URL || "/stream-proxy";
+export const STREAM_PROXY_BASE = (typeof import.meta !== "undefined" && import.meta.env && import.meta.env.VITE_STREAM_PROXY_URL) ? import.meta.env.VITE_STREAM_PROXY_URL : "/stream-proxy";
 
 async function fetchJson(url) {
   try {
@@ -210,16 +210,31 @@ export async function getBackupStream(malId, epNumber, title, onStatusUpdate = n
   }
 }
 
-export async function getSingleBackupStream(malId, epNumber, title, provider) {
-  return await fetchBackupFromApi(malId, epNumber, title, provider);
+export async function getSingleBackupStream(malId, epNumber, title, provider, mode = "sub") {
+  return await fetchBackupFromApi(malId, epNumber, title, provider, mode);
 }
 
-async function fetchBackupFromApi(malId, epNumber, title, provider) {
+export async function getAniNekoServers(title, epNumber) {
+  const params = new URLSearchParams();
+  if (title) params.append("title", title);
+  if (epNumber) params.append("episodeNumber", epNumber);
+  params.append("action", "servers");
+
+  const netlifyBase = "https://anistream-web.netlify.app";
+  const res = await fetch(`${netlifyBase}/.netlify/functions/fallback-stream?${params.toString()}`);
+  if (!res.ok) {
+    throw new Error(`AniNeko servers API failed with status ${res.status}`);
+  }
+  return await res.json();
+}
+
+async function fetchBackupFromApi(malId, epNumber, title, provider, mode = "sub") {
   const params = new URLSearchParams();
   if (malId) params.append("malId", malId);
   if (epNumber) params.append("episodeNumber", epNumber);
   if (title) params.append("title", title);
   params.append("provider", provider);
+  if (mode) params.append("mode", mode);
 
   const netlifyBase = "https://anistream-web.netlify.app";
   const res = await fetch(`${netlifyBase}/.netlify/functions/fallback-stream?${params.toString()}`);

@@ -1375,19 +1375,24 @@ class AnimeRepositoryImpl @Inject constructor(
         malId: String?,
         episodeNumber: Int,
         title: String?,
-        provider: String
+        provider: String,
+        mode: String?,
+        server: String?
     ): Flow<Result<EpisodeStream>> = flow {
         emit(Result.Loading)
         try {
-            val response = fallbackApiService.getFallbackStream(malId, episodeNumber, title, provider)
+            android.util.Log.d("ANIPLEX_FALLBACK", "Requesting fallback stream: malId=$malId, epNum=$episodeNumber, title=$title, provider=$provider, mode=$mode, server=$server")
+            val response = fallbackApiService.getFallbackStream(malId, episodeNumber, title, provider, mode, server)
+            android.util.Log.d("ANIPLEX_FALLBACK", "Fallback response success=${response.success}, error=${response.error}, sources=${response.sources?.size}")
             if (response.success && !response.sources.isNullOrEmpty()) {
                 // Find the HLS source
                 val hlsSource = response.sources.find {
                     it.type.equals("hls", ignoreCase = true) || it.url.contains(".m3u8")
                 } ?: response.sources.first()
+                android.util.Log.d("ANIPLEX_FALLBACK", "Selected source URL for server '$server': ${hlsSource.url}")
 
                 // Proxy the HLS URL through our Cloudflare worker (same as website)
-                val cleanHlsUrl = hlsSource.url.removePrefix("https://")
+                val cleanHlsUrl = hlsSource.url.removePrefix("https://").removePrefix("http://")
                 val proxiedHlsUrl = "$STREAM_PROXY_BASE/$cleanHlsUrl"
 
                 // Map subtitles
@@ -1418,6 +1423,23 @@ class AnimeRepositoryImpl @Inject constructor(
             }
         } catch (e: Exception) {
             emit(Result.Error(e.localizedMessage ?: "Fallback stream fetch failed"))
+        }
+    }.flowOn(Dispatchers.IO)
+
+    override fun getAniNekoServers(
+        title: String,
+        episodeNumber: Int
+    ): Flow<Result<com.aniplex.app.data.remote.dto.AniNekoServersResponse>> = flow {
+        emit(Result.Loading)
+        try {
+            val response = fallbackApiService.getAniNekoServers(title, episodeNumber)
+            if (response.success) {
+                emit(Result.Success(response))
+            } else {
+                emit(Result.Error(response.error ?: "Failed to enumerate AniNeko servers"))
+            }
+        } catch (e: Exception) {
+            emit(Result.Error(e.localizedMessage ?: "AniNeko server enumeration failed"))
         }
     }.flowOn(Dispatchers.IO)
 

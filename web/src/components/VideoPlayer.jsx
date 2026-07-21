@@ -1,11 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
-import Hls from "hls.js";
-import {
-  Play, Pause, RotateCcw, RotateCw, Volume2, VolumeX,
-  Maximize, Minimize, Settings, Subtitles, SkipForward,
-  Lock, LockOpen, ArrowLeft, Loader2, X, PictureInPicture2
-} from "lucide-react";
-import { useProfile } from "../context/ProfileContext";
+import { getAniNekoServers } from "../services/api";
 
 export default function VideoPlayer({
   src,
@@ -32,7 +25,9 @@ export default function VideoPlayer({
   provider = "zoro",
   availableAudioCategories = [],
   onAudioCategoryChange,
-  onSubtitleError
+  onSubtitleError,
+  selectedServer = "hd-1",
+  onServerSelect
 }) {
   const videoRef = useRef(null);
   const { saveSettings } = useProfile();
@@ -82,6 +77,32 @@ export default function VideoPlayer({
   const [activeQualityHeight, setActiveQualityHeight] = useState(null);
   const [audioTracks, setAudioTracks] = useState([]);
   const [currentAudioTrack, setCurrentAudioTrack] = useState(-1);
+
+  // AniNeko Server Enumeration State
+  const [aniNekoTree, setAniNekoTree] = useState(null);
+  const [aniNekoLoading, setAniNekoLoading] = useState(false);
+  const [selectedAniNekoMode, setSelectedAniNekoMode] = useState("sub");
+
+  useEffect(() => {
+    if (showSettings && (provider === "gogoanime" || provider === "anineko") && animeTitle && episodeNumber && !aniNekoTree && !aniNekoLoading) {
+      let isMounted = true;
+      setAniNekoLoading(true);
+      getAniNekoServers(animeTitle, episodeNumber)
+        .then(data => {
+          if (isMounted && data?.success) {
+            setAniNekoTree(data);
+            if (data.modes && data.modes.length > 0 && !data.modes.includes(selectedAniNekoMode)) {
+              setSelectedAniNekoMode(data.modes[0]);
+            }
+          }
+        })
+        .catch(err => console.warn("[VideoPlayer] Failed to load AniNeko servers:", err))
+        .finally(() => {
+          if (isMounted) setAniNekoLoading(false);
+        });
+      return () => { isMounted = false; };
+    }
+  }, [showSettings, provider, animeTitle, episodeNumber, aniNekoTree, aniNekoLoading, selectedAniNekoMode]);
 
   // Safe arrays to prevent settings crash on null/undefined bindings
   const safeTracks = Array.isArray(tracks) ? tracks : [];
@@ -2131,36 +2152,125 @@ export default function VideoPlayer({
                         ))}
                       </div>
                     </div>
-                    {(safeAudioTracks.length > 0 || (safeAudioCategories && safeAudioCategories.length > 1)) && (
-                      <div className="settings-section">
-                        <h4>Audio</h4>
-                        <div className="settings-options scrollable full-width">
-                          {safeAudioTracks.length > 0 ? (
-                            safeAudioTracks.map((track) => (
-                              <button
-                                key={track.id}
-                                onClick={() => changeAudioTrack(track.id)}
-                                className={currentAudioTrack === track.id ? "active" : ""}
-                              >
-                                {track.name}
-                              </button>
-                            ))
+                    {/* Provider-Aware Server & Audio Mode Picker */}
+                    <div className="settings-section">
+                      <h4>Server & Audio</h4>
+                      {provider === "gogoanime" || provider === "anineko" ? (
+                        <div className="anineko-server-picker">
+                          {aniNekoLoading ? (
+                            <div className="flex-center p-2 text-muted" style={{ gap: "6px", fontSize: "0.8rem" }}>
+                              <Loader2 size={14} className="spin-icon" /> Reading servers...
+                            </div>
+                          ) : aniNekoTree ? (
+                            <>
+                              <div className="mode-tabs flex gap-1 mb-2" style={{ display: "flex", gap: "4px", marginBottom: "8px" }}>
+                                {(aniNekoTree.modes || ["sub", "hsub", "dub"]).map(m => (
+                                  <button
+                                    key={m}
+                                    type="button"
+                                    className={`tab-btn ${selectedAniNekoMode === m ? "active" : ""}`}
+                                    style={{
+                                      padding: "4px 8px",
+                                      fontSize: "0.75rem",
+                                      borderRadius: "4px",
+                                      border: "1px solid rgba(255,255,255,0.15)",
+                                      background: selectedAniNekoMode === m ? "var(--primary)" : "rgba(255,255,255,0.05)",
+                                      color: "white",
+                                      cursor: "pointer"
+                                    }}
+                                    onClick={() => setSelectedAniNekoMode(m)}
+                                  >
+                                    {m === "hsub" ? "Hard Sub" : m === "sub" ? "Soft Sub" : "DUB"}
+                                  </button>
+                                ))}
+                              </div>
+                              <div className="settings-options scrollable full-width">
+                                {(aniNekoTree.servers?.[selectedAniNekoMode] || []).map((srv, idx) => (
+                                  <button
+                                    key={idx}
+                                    type="button"
+                                    onClick={() => {
+                                      if (onServerSelect) {
+                                        onServerSelect({ provider: "gogoanime", mode: selectedAniNekoMode, name: srv.name });
+                                      }
+                                      setShowSettings(false);
+                                    }}
+                                  >
+                                    {srv.name}
+                                  </button>
+                                ))}
+                              </div>
+                            </>
                           ) : (
-                            safeAudioCategories.map((cat) => (
+                            <p className="text-muted" style={{ fontSize: "0.8rem" }}>AniNeko Fallback Active</p>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="zoro-server-picker">
+                          {safeAudioCategories.length > 1 && (
+                            <div className="mode-tabs flex gap-1 mb-2" style={{ display: "flex", gap: "4px", marginBottom: "8px" }}>
+                              {safeAudioCategories.map(cat => (
+                                <button
+                                  key={cat}
+                                  type="button"
+                                  className={`tab-btn ${audioCategory === cat ? "active" : ""}`}
+                                  style={{
+                                    padding: "4px 8px",
+                                    fontSize: "0.75rem",
+                                    borderRadius: "4px",
+                                    border: "1px solid rgba(255,255,255,0.15)",
+                                    background: audioCategory === cat ? "var(--primary)" : "rgba(255,255,255,0.05)",
+                                    color: "white",
+                                    cursor: "pointer"
+                                  }}
+                                  onClick={() => {
+                                    if (cat !== audioCategory && onAudioCategoryChange) {
+                                      onAudioCategoryChange(cat);
+                                    }
+                                  }}
+                                >
+                                  {cat === "sub" ? "Subbed" : "Dubbed"}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                          <div className="settings-options scrollable full-width">
+                            {[
+                              { id: "hd-1", name: "Server 1 (Primary)" },
+                              { id: "hd-2", name: "Server 2 (Secondary)" }
+                            ].map(srv => (
                               <button
-                                key={cat}
+                                key={srv.id}
+                                type="button"
+                                className={selectedServer === srv.id ? "active" : ""}
                                 onClick={() => {
-                                  if (cat !== audioCategory && onAudioCategoryChange) {
-                                    onAudioCategoryChange(cat);
+                                  if (onServerSelect) {
+                                    onServerSelect({ provider: "zoro", serverId: srv.id, mode: audioCategory });
                                   }
                                   setShowSettings(false);
                                 }}
-                                className={audioCategory === cat ? "active" : ""}
                               >
-                                {cat === "sub" ? "Subbed (Japanese)" : "Dubbed (English)"}
+                                {srv.name}
                               </button>
-                            ))
-                          )}
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {(safeAudioTracks.length > 0) && (
+                      <div className="settings-section">
+                        <h4>Audio Tracks</h4>
+                        <div className="settings-options scrollable full-width">
+                          {safeAudioTracks.map((track) => (
+                            <button
+                              key={track.id}
+                              onClick={() => changeAudioTrack(track.id)}
+                              className={currentAudioTrack === track.id ? "active" : ""}
+                            >
+                              {track.name}
+                            </button>
+                          ))}
                         </div>
                       </div>
                     )}

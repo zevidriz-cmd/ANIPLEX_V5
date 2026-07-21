@@ -1,0 +1,8 @@
+[build]
+  command = "cd web && npm run build"
+  publish = "web/dist"
+  functions = "web/netlify/functions"
+
+[functions]
+  node_bundler = "esbuild"
+  external_node_modules = ["@consumet/extensions", "got-scraping", "got"]

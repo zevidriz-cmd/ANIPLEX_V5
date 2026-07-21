@@ -97,6 +97,8 @@ import androidx.compose.ui.graphics.asImageBitmap
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
 import com.aniplex.app.data.download.DownloadManager
 import com.aniplex.app.data.download.DownloadStatus
 import com.aniplex.app.theme.CrunchyrollOrange
@@ -190,6 +192,9 @@ data class PlayerScreenState(
     val showEpisodesSelector: Boolean,
     val selectedServer: String = "s-1",
     val preferredProvider: String = "zoro",
+    val activeProvider: String = "zoro",
+    val aniNekoTree: com.aniplex.app.data.remote.dto.AniNekoServersResponse? = null,
+    val isEnumeratingAniNeko: Boolean = false,
     val showServerDialog: Boolean = false,
     val isDiagnosticsEnabled: Boolean = false,
     val subtitleColor: String = "White",
@@ -260,6 +265,8 @@ data class PlayerCallbacks(
     val onDiagnosticsChange: (Boolean) -> Unit,
     val onScreenFitChange: (String) -> Unit = {},
     val onDismissUpNext: () -> Unit = {},
+    val onFetchAniNekoServers: () -> Unit = {},
+    val onSelectManualServer: (provider: String, mode: String?, serverId: String?) -> Unit = { _, _, _ -> },
     val onIframeServerSwitch: (String) -> Unit = {}
 )
 
@@ -293,7 +300,7 @@ fun PlayerScreen(
     val fallbackStatusMessage by viewModel.fallbackStatusMessage.collectAsStateWithLifecycle()
     var activeAnimeId by remember(animeId) { mutableStateOf(animeId) }
     var activeEpisodeId by remember(episodeId) { mutableStateOf(episodeId) }
-    val currentEpNum = currentEpisode?.number ?: episodeNumber
+    val currentEpNum = episodes.find { it.id == activeEpisodeId }?.number ?: currentEpisode?.number ?: episodeNumber
     val skipTimes by viewModel.skipTimes.collectAsStateWithLifecycle()
     
     val likeCount by viewModel.likeCount.collectAsStateWithLifecycle()
@@ -301,7 +308,7 @@ fun PlayerScreen(
     val dislikeCount by viewModel.dislikeCount.collectAsStateWithLifecycle()
     val isDisliked by viewModel.isDisliked.collectAsStateWithLifecycle()
 
-    val (activeCategory, setActiveCategory) = remember { mutableStateOf(viewModel.defaultAudioCategory) }
+    val (activeCategory, setActiveCategory) = remember(viewModel.defaultAudioCategory) { mutableStateOf(viewModel.defaultAudioCategory) }
     
     // Playback Settings States
     var playbackSpeed by remember { mutableStateOf(viewModel.playbackSpeed) }
@@ -343,6 +350,7 @@ fun PlayerScreen(
     var lastCategory by remember { mutableStateOf("") }
     var lastServer by remember { mutableStateOf("") }
     var sniffingEpisodeId by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
 
     // Additional player states lifted from ExoVideoPlayer
     var retryPlaybackKey by remember { mutableStateOf(0) }
@@ -712,6 +720,11 @@ fun PlayerScreen(
                     }
                 }
             }
+            player.playWhenReady = false
+            player.stop()
+            player.clearMediaItems()
+            player.seekTo(0, 0L)
+            DebugLogManager.log("ANIPLEX_PLAYER", "ExoPlayer instance reset: playWhenReady=false, stop(), clearMediaItems(), seekTo(0, 0L) applied.")
         }
 
         capturedStreamUrl = null
@@ -742,59 +755,41 @@ fun PlayerScreen(
         hasAttemptedBackupSubtitles = false
         viewModel.setFallbackStatusMessage(null)
 
-        fun loadNewUrlAfterReset(url: String) {
+        scope.launch(Dispatchers.Main) {
             try {
-                exoPlayerRef?.stop()
-                exoPlayerRef?.clearMediaItems()
-                
                 webView.apply {
                     stopLoading()
                     clearHistory()
                     onPause()
                     loadUrl("about:blank")
                 }
-                
-                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                    try {
-                        webView.onResume()
-                        sniffingEpisodeId = activeEpisodeId
-                        webView.loadUrl(url)
-                        DebugLogManager.log("ANIPLEX_PLAYER", "WebView loadUrl triggered for: $url after flush delay")
-                    } catch (e: Exception) {
-                        sniffingEpisodeId = null
-                        DebugLogManager.log("ANIPLEX_PLAYER", "Error loading embed URL after delay: ${e.message}")
-                    }
-                }, 200)
             } catch (e: Exception) {
-                DebugLogManager.log("ANIPLEX_PLAYER", "Error resetting player WebView state: ${e.message}")
+                DebugLogManager.log("ANIPLEX_PLAYER", "Error resetting WebView to about:blank: ${e.message}")
             }
-        }
 
-        if (isNewEpisode) {
-            val prefs = context.getSharedPreferences("aniplex_saved_cookies", Context.MODE_PRIVATE)
-            prefs.edit().clear().apply()
-            
-            try {
-                // Wipe cache and storage to prevent Cloudflare/Zoro error leak across shows/episodes
-                webView.clearCache(true)
-                webView.clearFormData()
-                android.webkit.WebStorage.getInstance().deleteAllData()
+            if (isNewEpisode) {
+                val prefs = context.getSharedPreferences("aniplex_saved_cookies", Context.MODE_PRIVATE)
+                prefs.edit().clear().apply()
                 
-                val cookieManager = android.webkit.CookieManager.getInstance()
-                cookieManager.removeAllCookies {
-                    android.os.Handler(android.os.Looper.getMainLooper()).post {
-                        loadNewUrlAfterReset(newEpisodeEmbedUrl)
+                try {
+                    webView.clearCache(true)
+                    webView.clearFormData()
+                    android.webkit.WebStorage.getInstance().deleteAllData()
+                    
+                    suspendCancellableCoroutine<Unit> { cont ->
+                        val cookieManager = android.webkit.CookieManager.getInstance()
+                        cookieManager.removeAllCookies {
+                            cookieManager.flush()
+                            if (cont.isActive) {
+                                cont.resume(Unit)
+                            }
+                        }
                     }
+                    DebugLogManager.log("ANIPLEX_PLAYER", "Cleaned WebView cache, storage, and persistent/session cookies synchronously for new episode.")
+                } catch (e: Exception) {
+                    DebugLogManager.log("ANIPLEX_PLAYER", "Error cleaning WebView cache: ${e.message}")
                 }
-                cookieManager.flush()
-                
-                DebugLogManager.log("ANIPLEX_PLAYER", "Cleaned WebView cache, storage, and persistent/session cookies for new episode.")
-            } catch (e: Exception) {
-                DebugLogManager.log("ANIPLEX_PLAYER", "Error cleaning WebView cache: ${e.message}")
-                loadNewUrlAfterReset(newEpisodeEmbedUrl)
             }
-        } else {
-            loadNewUrlAfterReset(newEpisodeEmbedUrl)
         }
     }
 
@@ -1683,6 +1678,9 @@ fun PlayerScreen(
         showEpisodesSelector = showEpisodesSelector,
         selectedServer = selectedServer,
         preferredProvider = preferredProvider,
+        activeProvider = viewModel.activeProvider.collectAsState().value,
+        aniNekoTree = viewModel.aniNekoTree.collectAsState().value,
+        isEnumeratingAniNeko = viewModel.isEnumeratingAniNeko.collectAsState().value,
         showServerDialog = showServerDialog,
         isDiagnosticsEnabled = isDiagnosticsEnabled,
         subtitleColor = subtitleColor,
@@ -1754,6 +1752,8 @@ fun PlayerScreen(
         },
         onAudioChange = {
             DebugLogManager.log("USER_ACTION", "Selected Audio/Category: $it")
+            capturedSubtitles.clear()
+            hasAttemptedBackupSubtitles = false
             viewModel.defaultAudioCategory = it
             setActiveCategory(it)
         },
@@ -1925,7 +1925,17 @@ fun PlayerScreen(
         },
         onScreenFitChange = { screenFitMode = it },
         onDismissUpNext = { isUpNextDismissed = true },
-        onIframeServerSwitch = { viewModel.switchIframeServer(it) }
+        onFetchAniNekoServers = { viewModel.fetchAniNekoServers() },
+        onSelectManualServer = { provider, mode, serverId ->
+            capturedSubtitles.clear()
+            hasAttemptedBackupSubtitles = false
+            viewModel.selectManualServer(provider, mode, serverId)
+        },
+        onIframeServerSwitch = {
+            capturedSubtitles.clear()
+            hasAttemptedBackupSubtitles = false
+            viewModel.switchIframeServer(it)
+        }
     )
 
     if (showDownloadServerDialog) {
@@ -3122,6 +3132,7 @@ fun ExoVideoPlayer(
     
     var scrubbingPositionMs by remember { mutableStateOf<Long?>(null) }
     var showChaptersSelector by remember { mutableStateOf(false) }
+    val currentScreenState by rememberUpdatedState(state)
     val exoPlayer = state.exoPlayerRef
 
     Box(
@@ -3296,15 +3307,17 @@ fun ExoVideoPlayer(
                                 callbacks.onControlsVisibilityToggle()
                             },
                             onDoubleTap = { offset ->
-                                if (exoPlayer != null) {
+                                val player = currentScreenState.exoPlayerRef
+                                val duration = currentScreenState.durationMs
+                                if (player != null) {
                                     val halfWidth = size.width / 2
                                     if (offset.x < halfWidth) {
-                                        val targetPos = (exoPlayer.currentPosition - 10000).coerceAtLeast(0)
-                                        exoPlayer.seekTo(targetPos)
+                                        val targetPos = (player.currentPosition - 10000).coerceAtLeast(0)
+                                        player.seekTo(targetPos)
                                         callbacks.onPositionChanged(targetPos)
                                     } else {
-                                        val targetPos = (exoPlayer.currentPosition + 10000).coerceAtMost(state.durationMs)
-                                        exoPlayer.seekTo(targetPos)
+                                        val targetPos = (player.currentPosition + 10000).coerceAtMost(duration)
+                                        player.seekTo(targetPos)
                                         callbacks.onPositionChanged(targetPos)
                                     }
                                     callbacks.onControlsInteraction()
@@ -4350,21 +4363,81 @@ fun PlaybackSettingsOverlay(
                     onDownPressed = { audioFocusRequester.requestFocus() }
                 )
 
-                // Audio
-                SettingsSectionHeader("AUDIO")
-                val audioModes = listOf("sub", "dub")
-                val audioLabels = listOf("Subbed", "Dubbed")
-                val currentAudioIndex = audioModes.indexOf(state.activeCategory).coerceAtLeast(0)
-                SettingsButtonGroup(
-                    items = audioLabels,
-                    selectedIndex = currentAudioIndex,
-                    onItemSelected = { index ->
-                        callbacks.onAudioChange(audioModes[index])
-                    },
-                    focusRequester = audioFocusRequester,
-                    onUpPressed = { fitFocusRequester.requestFocus() },
-                    onDownPressed = { qualityFocusRequester.requestFocus() }
-                )
+                // Server & Audio Mode Section
+                SettingsSectionHeader("SERVER & AUDIO")
+                if (state.activeProvider == "gogoanime" || state.activeProvider == "anineko") {
+                    val aniTree = state.aniNekoTree
+                    val isEnumerating = state.isEnumeratingAniNeko
+
+                    LaunchedEffect(Unit) {
+                        if (aniTree == null && !isEnumerating) {
+                            callbacks.onFetchAniNekoServers()
+                        }
+                    }
+
+                    var selectedMode by remember(state.activeCategory) { mutableStateOf(state.activeCategory) }
+                    val modes = aniTree?.modes ?: listOf("hsub", "sub", "dub")
+                    val modeLabels = modes.map { m ->
+                        when (m) {
+                            "hsub" -> "Hard Sub"
+                            "sub" -> "Soft Sub"
+                            else -> "DUB"
+                        }
+                    }
+                    val currentModeIdx = modes.indexOf(selectedMode).coerceAtLeast(0)
+
+                    SettingsButtonGroup(
+                        items = modeLabels,
+                        selectedIndex = currentModeIdx,
+                        onItemSelected = { index ->
+                            val newMode = modes[index]
+                            selectedMode = newMode
+                            val defaultSrv = aniTree?.servers?.get(newMode)?.firstOrNull()?.name ?: "hd-1"
+                            callbacks.onSelectManualServer("gogoanime", newMode, defaultSrv)
+                        }
+                    )
+
+                    val serversForMode = aniTree?.servers?.get(selectedMode) ?: emptyList()
+                    if (serversForMode.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            serversForMode.forEach { srv ->
+                                Button(
+                                    onClick = {
+                                        callbacks.onSelectManualServer("gogoanime", selectedMode, srv.name)
+                                        callbacks.onSettingsBackClick()
+                                    },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = Color(0xFF222222),
+                                        contentColor = Color.White
+                                    ),
+                                    shape = RoundedCornerShape(6.dp),
+                                    modifier = Modifier.weight(1f).height(36.dp)
+                                ) {
+                                    Text(text = srv.name, fontSize = 11.sp)
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    val audioModes = listOf("sub", "dub")
+                    val audioLabels = listOf("Subbed", "Dubbed")
+                    val activeZoroCat = if (state.activeCategory == "hsub") "sub" else state.activeCategory
+                    val currentAudioIndex = audioModes.indexOf(activeZoroCat).coerceAtLeast(0)
+                    SettingsButtonGroup(
+                        items = audioLabels,
+                        selectedIndex = currentAudioIndex,
+                        onItemSelected = { index ->
+                            callbacks.onAudioChange(audioModes[index])
+                        },
+                        focusRequester = audioFocusRequester,
+                        onUpPressed = { fitFocusRequester.requestFocus() },
+                        onDownPressed = { qualityFocusRequester.requestFocus() }
+                    )
+                }
 
                 // Quality
                 SettingsSectionHeader("QUALITY")
@@ -4382,20 +4455,22 @@ fun PlaybackSettingsOverlay(
                 )
 
                 // Subtitles selection
-                SettingsSectionHeader("SUBTITLES/CC")
-                val subtitleTracks = state.capturedSubtitles.map { it.langCode } + "off"
-                val subtitleLabels = state.capturedSubtitles.map { it.label } + "Off"
-                val currentSubIndex = subtitleTracks.indexOf(state.currentSubtitleSelection).coerceAtLeast(0)
-                SettingsButtonGroup(
-                    items = subtitleLabels,
-                    selectedIndex = currentSubIndex,
-                    onItemSelected = { index ->
-                        callbacks.onSubtitleSelectionChange(subtitleTracks[index])
-                    },
-                    focusRequester = subtitleFocusRequester,
-                    onUpPressed = { qualityFocusRequester.requestFocus() },
-                    onDownPressed = { speedFocusRequester.requestFocus() }
-                )
+                if (state.capturedSubtitles.isNotEmpty()) {
+                    SettingsSectionHeader("SUBTITLES/CC")
+                    val subtitleTracks = state.capturedSubtitles.map { it.langCode } + "off"
+                    val subtitleLabels = state.capturedSubtitles.map { it.label } + "Off"
+                    val currentSubIndex = subtitleTracks.indexOf(state.currentSubtitleSelection).coerceAtLeast(0)
+                    SettingsButtonGroup(
+                        items = subtitleLabels,
+                        selectedIndex = currentSubIndex,
+                        onItemSelected = { index ->
+                            callbacks.onSubtitleSelectionChange(subtitleTracks[index])
+                        },
+                        focusRequester = subtitleFocusRequester,
+                        onUpPressed = { qualityFocusRequester.requestFocus() },
+                        onDownPressed = { speedFocusRequester.requestFocus() }
+                    )
+                }
 
             }
         }

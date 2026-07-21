@@ -786,8 +786,12 @@ fun TvSettingsContent(
         // 1. Audio Option Settings
         TvSettingsRow(title = "Default Audio Language") {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                listOf("SUB", "DUB").forEach { option ->
-                    val isSelected = audioCategory == option
+                listOf("hsub" to "SUB", "dub" to "DUB").forEach { (option, label) ->
+                    val isSelected = if (option == "hsub") {
+                        audioCategory == "hsub" || audioCategory == "sub"
+                    } else {
+                        audioCategory == "dub"
+                    }
                     var isFocused by remember { mutableStateOf(false) }
                     Box(
                         modifier = Modifier
@@ -805,7 +809,7 @@ fun TvSettingsContent(
                             .padding(horizontal = 16.dp, vertical = 8.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(option, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text(label, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }

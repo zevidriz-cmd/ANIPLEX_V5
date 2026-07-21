@@ -772,9 +772,15 @@ fun ProfileScreen(
             // Audio Language Toggle
             SettingsRow(
                 title = "Default Audio Broadcast",
-                valueText = defaultAudio.uppercase(),
+                valueText = when (defaultAudio) {
+                    "hsub", "sub" -> "SUB"
+                    else -> "DUB"
+                },
                 onClick = {
-                    val nextVal = if (defaultAudio == "sub") "dub" else "sub"
+                    val nextVal = when (defaultAudio) {
+                        "hsub", "sub" -> "dub"
+                        else -> "hsub"
+                    }
                     viewModel.setDefaultAudioCategory(nextVal)
                 }
             )

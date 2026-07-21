@@ -325,6 +325,45 @@ export default function PlayerPage() {
     setSearchParams(params);
   };
 
+  const handleManualServerSelect = async (serverObj) => {
+    console.log(`[PlayerPage] Manual server selection triggered:`, serverObj);
+    const { provider, serverId, mode, name } = serverObj;
+
+    setScraping(true);
+    setLoadingStatus(`Loading ${name || serverId || mode}...`);
+
+    const malId = animeDetail?.anime?.info?.malId;
+    const animeTitle = animeDetail?.anime?.info?.name;
+    const epNum = currentEpisode?.number || 1;
+
+    try {
+      let stream = null;
+      if (provider === "zoro") {
+        setSelectedServer(serverId);
+        stream = await getDirectStream(episodeId, serverId, mode || audioCategory, malId, epNum, animeTitle);
+      } else {
+        // AniNeko / Gogoanime
+        stream = await getSingleBackupStream(malId, epNum, animeTitle, "gogoanime", mode || "sub");
+      }
+
+      if (stream) {
+        setDirectStream(stream);
+        setFallbackNotice({
+          type: "info",
+          message: `Manual server: playing via ${name || serverId || provider}.`
+        });
+      }
+    } catch (err) {
+      console.warn(`[PlayerPage] Manual server selection failed:`, err);
+      setFallbackNotice({
+        type: "warning",
+        message: `Failed to load selected server (${name || serverId || mode}).`
+      });
+    } finally {
+      setScraping(false);
+    }
+  };
+
   useEffect(() => {
     let isMounted = true;
     async function loadPlayer() {
@@ -986,6 +1025,8 @@ export default function PlayerPage() {
             provider={directStream ? directStream.provider || "zoro" : "zoro"}
             availableAudioCategories={availableAudioCategories}
             onAudioCategoryChange={handleAudioCategoryChange}
+            selectedServer={selectedServer}
+            onServerSelect={handleManualServerSelect}
           />
         )}
       </div>

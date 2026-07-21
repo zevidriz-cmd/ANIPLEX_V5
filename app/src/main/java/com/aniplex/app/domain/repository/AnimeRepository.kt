@@ -15,7 +15,8 @@ interface AnimeRepository {
     fun getSchedules(date: String?): Flow<Result<List<ScheduleItem>>>
     fun getCharacters(id: String): Flow<Result<List<Character>>>
     fun getEpisodeStream(episodeId: String, server: String, category: String): Flow<Result<EpisodeStream>>
-    fun getFallbackStream(malId: String?, episodeNumber: Int, title: String?, provider: String): Flow<Result<EpisodeStream>>
+    fun getFallbackStream(malId: String?, episodeNumber: Int, title: String?, provider: String, mode: String? = null, server: String? = null): Flow<Result<EpisodeStream>>
+    fun getAniNekoServers(title: String, episodeNumber: Int): Flow<Result<com.aniplex.app.data.remote.dto.AniNekoServersResponse>>
     fun getMegaplayDirectStream(malId: String, episodeNumber: Int, audioCategory: String = "sub"): Flow<Result<EpisodeStream>>
     fun filterAnime(
         type: String?,

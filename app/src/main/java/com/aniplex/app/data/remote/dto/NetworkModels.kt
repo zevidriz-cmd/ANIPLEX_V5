@@ -277,3 +277,19 @@ data class MegaplayTrackDto(
     @SerializedName("kind") val kind: String?,
     @SerializedName("default") val default_: Boolean?
 )
+
+// AniNeko Server Enumeration Response DTOs
+data class AniNekoServersResponse(
+    @SerializedName("success") val success: Boolean,
+    @SerializedName("provider") val provider: String?,
+    @SerializedName("title") val title: String?,
+    @SerializedName("episodeNumber") val episodeNumber: Int?,
+    @SerializedName("modes") val modes: List<String>?,
+    @SerializedName("servers") val servers: Map<String, List<AniNekoServerItemDto>>?,
+    @SerializedName("error") val error: String?
+)
+
+data class AniNekoServerItemDto(
+    @SerializedName("name") val name: String,
+    @SerializedName("embedUrl") val embedUrl: String?
+)
