@@ -26,22 +26,43 @@ export function unpackDeanEdwards(code) {
 
 async function scrapeAniNeko(title, episodeNumber, mode = "sub", targetServer = null) {
   const base = "https://anineko.to";
-  const searchUrl = `${base}/browser?keyword=${encodeURIComponent(title)}`;
-  console.log(`[AniNeko Scraper] Searching for "${title}" (mode: ${mode})...`);
-  
-  // 1. Search Phase (Heuristic Match)
-  const searchRes = await fetch(searchUrl, {
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'
+  let epHtml = null;
+  const targetEp = parseInt(episodeNumber, 10);
+  const slug = title.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  let epUrl = `${base}/watch/${slug}/ep-${targetEp}`;
+
+  try {
+    const directRes = await fetch(epUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'
+      }
+    });
+    if (directRes.ok) {
+      const text = await directRes.text();
+      if (text.includes('server-items')) {
+        console.log(`[AniNeko Scraper] Direct episode URL match: ${epUrl}`);
+        epHtml = text;
+      }
     }
-  });
-  if (!searchRes.ok) throw new Error(`Search failed: ${searchRes.status}`);
-  const searchHtml = await searchRes.text();
-  const $ = cheerio.load(searchHtml);
-  
-  let watchPath = null;
-  const targetTitleLower = title.toLowerCase().trim();
-  const cleanTitleLower = targetTitleLower.replace(/[^a-z0-9]/g, "");
+  } catch (e) {}
+
+  if (!epHtml) {
+    const searchUrl = `${base}/browser?keyword=${encodeURIComponent(title)}`;
+    console.log(`[AniNeko Scraper] Searching for "${title}" (mode: ${mode})...`);
+    
+    // 1. Search Phase (Heuristic Match)
+    const searchRes = await fetch(searchUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'
+      }
+    });
+    if (!searchRes.ok) throw new Error(`Search failed: ${searchRes.status}`);
+    const searchHtml = await searchRes.text();
+    const $ = cheerio.load(searchHtml);
+    
+    let watchPath = null;
+    const targetTitleLower = title.toLowerCase().trim();
+    const cleanTitleLower = targetTitleLower.replace(/[^a-z0-9]/g, "");
   
   $('a').each((i, el) => {
     const href = $(el).attr('href') || '';
@@ -145,16 +166,20 @@ async function scrapeAniNeko(title, episodeNumber, mode = "sub", targetServer = 
     throw new Error(`Episode ${episodeNumber} not found on watch page`);
   }
   
-  // 3. Fetch episode page & target mode container
-  const epUrl = `${base}${epPath}`;
-  console.log(`[AniNeko Scraper] Fetching episode page: ${epUrl}`);
-  const epRes = await fetch(epUrl, {
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'
-    }
-  });
-  if (!epRes.ok) throw new Error(`Episode page failed: ${epRes.status}`);
-  const epHtml = await epRes.text();
+  }
+
+  if (!epHtml) {
+    const epUrl = `${base}${epPath}`;
+    console.log(`[AniNeko Scraper] Fetching episode page: ${epUrl}`);
+    const epRes = await fetch(epUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'
+      }
+    });
+    if (!epRes.ok) throw new Error(`Episode page failed: ${epRes.status}`);
+    epHtml = await epRes.text();
+  }
+
   const $$$ = cheerio.load(epHtml);
 
   // Target specific mode container (sub, hsub, dub)
