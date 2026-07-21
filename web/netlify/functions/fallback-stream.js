@@ -232,11 +232,17 @@ async function scrapeAniNeko(title, episodeNumber, mode = "sub", targetServer = 
   let resolvedStreamUrl = null;
   let activeServerName = null;
 
-  for (const server of serverList) {
-    if (targetServer && server.name.toLowerCase() !== targetServer.toLowerCase()) {
-      console.log(`[AniNeko Scraper] Skipping server ${server.name} (doesn't match requested target: ${targetServer})`);
-      continue;
+  let matchedServers = serverList;
+  if (targetServer) {
+    const matched = serverList.filter(s => s.name.toLowerCase().includes(targetServer.toLowerCase()) || targetServer.toLowerCase().includes(s.name.toLowerCase()));
+    if (matched.length > 0) {
+      matchedServers = matched;
+    } else {
+      console.log(`[AniNeko Scraper] Target server "${targetServer}" not found in candidate list. Trying all available servers.`);
     }
+  }
+
+  for (const server of matchedServers) {
     try {
       console.log(`[AniNeko Scraper] Attempting server: ${server.name} (${server.dataVideo})...`);
       const embedRes = await fetch(server.dataVideo, {
@@ -580,18 +586,17 @@ export async function handler(event, context) {
         console.warn(`[Fallback API] AniList Meta mapping failed:`, err.message);
       }
     }
-
     // 3. Fallback to Title-based search if AniList failed or wasn't tried
-    if ((!sources || !sources.sources || sources.sources.length === 0) && title) {
+    if ((!sources || !sources.sources || sources.sources.length === 0) && targetTitle) {
       try {
-        console.log(`[Fallback API] Searching title "${title}" on provider ${selectedProvider}...`);
+        console.log(`[Fallback API] Searching title "${targetTitle}" on provider ${selectedProvider}...`);
         
         const resolveTitleSearch = async () => {
           const providerInstance = selectedProvider === "animepahe" ? new ANIME.AnimePahe() : new ANIME.Hianime();
           if (selectedProvider === "animepahe") {
             providerInstance.baseUrl = "https://animepahe.ru";
           }
-          const searchResults = await providerInstance.search(title);
+          const searchResults = await providerInstance.search(targetTitle);
           
           if (searchResults && searchResults.results && searchResults.results.length > 0) {
             const bestMatch = searchResults.results[0];
@@ -608,7 +613,7 @@ export async function handler(event, context) {
           }
           return null;
         };
-
+ 
         sources = await withTimeout(resolveTitleSearch(), 8000);
       } catch (err) {
         console.warn(`[Fallback API] Title search fallback failed:`, err.message);
