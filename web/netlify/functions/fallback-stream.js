@@ -1,10 +1,33 @@
 import { ANIME, META } from "@consumet/extensions";
 import * as cheerio from "cheerio";
 
-async function scrapeAniNeko(title, episodeNumber) {
+export function unpackDeanEdwards(code) {
+  const match = code.match(/eval\(function\(p,a,c,k,e,d\)[\s\S]*?return p\}\('([\s\S]*?)',(\d+),(\d+),'([\s\S]*?)'\.split\('\|'\)/);
+  if (!match) return null;
+  let [_, p, a, c, k] = match;
+  a = parseInt(a, 10);
+  c = parseInt(c, 10);
+  const keywords = k.split('|');
+  const getWord = (num, rad) => {
+    let prefix = num >= rad ? getWord(Math.floor(num / rad), rad) : '';
+    let rem = num % rad;
+    let char = rem > 35 ? String.fromCharCode(rem + 29) : rem.toString(36);
+    return prefix + char;
+  };
+  while (c--) {
+    if (keywords[c]) {
+      const word = getWord(c, a);
+      const reg = new RegExp('\\b' + word + '\\b', 'g');
+      p = p.replace(reg, keywords[c]);
+    }
+  }
+  return p;
+}
+
+async function scrapeAniNeko(title, episodeNumber, mode = "sub", targetServer = null) {
   const base = "https://anineko.to";
   const searchUrl = `${base}/browser?keyword=${encodeURIComponent(title)}`;
-  console.log(`[Scraper] Searching for "${title}"...`);
+  console.log(`[AniNeko Scraper] Searching for "${title}" (mode: ${mode})...`);
   
   // 1. Search Phase (Heuristic Match)
   const searchRes = await fetch(searchUrl, {
@@ -18,7 +41,7 @@ async function scrapeAniNeko(title, episodeNumber) {
   
   let watchPath = null;
   const targetTitleLower = title.toLowerCase().trim();
-  const cleanTitleLower = targetTitleLower.replace(/[^a-z0-9]/g, ""); // e.g. "onepiece"
+  const cleanTitleLower = targetTitleLower.replace(/[^a-z0-9]/g, "");
   
   $('a').each((i, el) => {
     const href = $(el).attr('href') || '';
@@ -26,10 +49,8 @@ async function scrapeAniNeko(title, episodeNumber) {
     
     const hrefSlug = href.split('/').pop().toLowerCase();
     const cleanHrefSlug = hrefSlug.replace(/[^a-z0-9]/g, "");
-    
     const linkTextLower = $(el).text().toLowerCase().trim();
     const cleanLinkText = linkTextLower.replace(/[^a-z0-9]/g, "");
-    
     const imgAltLower = ($(el).find('img').attr('alt') || '').toLowerCase().trim();
     const cleanImgAlt = imgAltLower.replace(/[^a-z0-9]/g, "");
 
@@ -39,7 +60,7 @@ async function scrapeAniNeko(title, episodeNumber) {
       cleanImgAlt === cleanTitleLower
     ) {
       watchPath = href;
-      return false; // Break loop
+      return false;
     }
   });
 
@@ -47,7 +68,6 @@ async function scrapeAniNeko(title, episodeNumber) {
     $('a').each((i, el) => {
       const href = $(el).attr('href') || '';
       if (!href.includes('/watch/')) return;
-
       const linkTextLower = $(el).text().toLowerCase().trim();
       const imgAltLower = ($(el).find('img').attr('alt') || '').toLowerCase().trim();
 
@@ -72,9 +92,9 @@ async function scrapeAniNeko(title, episodeNumber) {
     throw new Error(`No watch link found for "${title}"`);
   }
   
-  // 2. Fetch watch page (Episode Link Heuristic Match)
+  // 2. Fetch watch page (Episode Link Match)
   const watchUrl = `${base}${watchPath}`;
-  console.log(`[Scraper] Fetching watch page: ${watchUrl}`);
+  console.log(`[AniNeko Scraper] Fetching watch page: ${watchUrl}`);
   const watchRes = await fetch(watchUrl, {
     headers: {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'
@@ -125,9 +145,9 @@ async function scrapeAniNeko(title, episodeNumber) {
     throw new Error(`Episode ${episodeNumber} not found on watch page`);
   }
   
-  // 3. Fetch episode page (Player Iframe Heuristic Match)
+  // 3. Fetch episode page & target mode container
   const epUrl = `${base}${epPath}`;
-  console.log(`[Scraper] Fetching episode page: ${epUrl}`);
+  console.log(`[AniNeko Scraper] Fetching episode page: ${epUrl}`);
   const epRes = await fetch(epUrl, {
     headers: {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'
@@ -136,67 +156,254 @@ async function scrapeAniNeko(title, episodeNumber) {
   if (!epRes.ok) throw new Error(`Episode page failed: ${epRes.status}`);
   const epHtml = await epRes.text();
   const $$$ = cheerio.load(epHtml);
-  
-  let iframeUrl = null;
-  $$$('[data-video], [data-src], [data-href], iframe, button, a').each((i, el) => {
-    if (iframeUrl) return;
-    
-    const dataVideo = $$$ (el).attr('data-video');
-    const dataSrc = $$$ (el).attr('data-src');
-    const dataHref = $$$ (el).attr('data-href');
-    const src = $$$ (el).attr('src');
-    const href = $$$ (el).attr('href');
-    
-    const val = dataVideo || dataSrc || dataHref || src || href || '';
-    if (val.startsWith('http://') || val.startsWith('https://') || val.startsWith('//')) {
-      const valLower = val.toLowerCase();
-      const isStreamHost = valLower.includes('embed') || valLower.includes('player') || valLower.includes('stream') || valLower.includes('video') || valLower.includes('.site') || valLower.includes('.buzz');
-      if (isStreamHost) {
-        iframeUrl = val.startsWith('//') ? `https:${val}` : val;
-      }
+
+  // Target specific mode container (sub, hsub, dub)
+  let targetMode = mode.toLowerCase();
+  let serverContainer = $$$(`.server-items[data-id="${targetMode}"]`);
+  if (!serverContainer || serverContainer.length === 0 || serverContainer.find('button.server-video, button.server').length === 0) {
+    console.warn(`[AniNeko Scraper] Requested mode "${mode}" container not found or empty. Falling back to "sub" container.`);
+    targetMode = "sub";
+    serverContainer = $$$(`.server-items[data-id="sub"]`);
+    if (!serverContainer || serverContainer.length === 0 || serverContainer.find('button.server-video, button.server').length === 0) {
+      serverContainer = $$$('.server-items.lang-group').first();
+    }
+  }
+
+  // Parse server buttons and subtitle URL
+  const serverList = [];
+  let extractedSubtitleUrl = null;
+
+  serverContainer.find('button.server-video, button.server').each((i, el) => {
+    const dataVideo = $$$(el).attr('data-video');
+    if (!dataVideo) return;
+    const name = $$$(el).text().trim().replace(/\s+/g, ' ');
+
+    // Exclude Doodstream (HTTP 403 anti-bot)
+    if (dataVideo.includes('playmogo.com') || name.toLowerCase().includes('doodstream')) {
+      return;
+    }
+
+    serverList.push({ name, dataVideo });
+
+    // Parse VTT subtitle URL if available
+    if (!extractedSubtitleUrl) {
+      try {
+        const u = new URL(dataVideo);
+        const vtt = u.searchParams.get('sub') || u.searchParams.get('caption_1') || u.searchParams.get('c1_file');
+        if (vtt && vtt.startsWith('http')) {
+          extractedSubtitleUrl = vtt;
+        }
+      } catch (e) {}
     }
   });
 
-  if (!iframeUrl) {
-    $$$('[data-video], [data-src]').each((i, el) => {
-      const val = $$$ (el).attr('data-video') || $$$ (el).attr('data-src');
-      if (val) {
-        iframeUrl = val.startsWith('//') ? `https:${val}` : val;
-        return false;
+  if (serverList.length === 0) {
+    throw new Error(`No compatible streaming servers found for mode "${targetMode}"`);
+  }
+
+  console.log(`[AniNeko Scraper] Found ${serverList.length} candidate servers for mode "${targetMode}". Subtitle URL: ${extractedSubtitleUrl || 'None'}`);
+
+  // 4. Try servers in sequence (HD-1 -> StreamHG -> Earnvids)
+  let resolvedStreamUrl = null;
+  let activeServerName = null;
+
+  for (const server of serverList) {
+    if (targetServer && server.name.toLowerCase() !== targetServer.toLowerCase()) {
+      console.log(`[AniNeko Scraper] Skipping server ${server.name} (doesn't match requested target: ${targetServer})`);
+      continue;
+    }
+    try {
+      console.log(`[AniNeko Scraper] Attempting server: ${server.name} (${server.dataVideo})...`);
+      const embedRes = await fetch(server.dataVideo, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+          'Referer': epUrl
+        }
+      });
+
+      if (!embedRes.ok) {
+        console.warn(`[AniNeko Scraper] Server ${server.name} returned HTTP ${embedRes.status}`);
+        continue;
       }
-    });
+
+      const embedHtml = await embedRes.text();
+
+      // Method A: Direct Regex (HD-1 / vivibebe.site)
+      let m3u8Match = embedHtml.match(/const\s+src\s*=\s*["'](https?:\/\/[^"'\s\\]+?\.m3u8[^"'\s\\]*)["']/i) ||
+                      embedHtml.match(/(https?:\/\/[^"'\s\\]+?\.m3u8[^"'\s\\]*)/i);
+
+      if (m3u8Match) {
+        resolvedStreamUrl = m3u8Match[1];
+      }
+
+      // Method B: Dean Edwards Unpacker (StreamHG / Earnvids)
+      if (!resolvedStreamUrl) {
+        const unpackedHtml = unpackDeanEdwards(embedHtml);
+        if (unpackedHtml) {
+          const unpackedMatch = unpackedHtml.match(/https?:\/\/[^"'\s\\]+?\.(?:m3u8|mp4)[^"'\s\\]*/i);
+          if (unpackedMatch) {
+            resolvedStreamUrl = unpackedMatch[0];
+          }
+        }
+      }
+
+      if (resolvedStreamUrl) {
+        activeServerName = server.name;
+        console.log(`[AniNeko Scraper] Successfully extracted stream from ${server.name}: ${resolvedStreamUrl}`);
+        break; // Early exit on success!
+      }
+    } catch (err) {
+      console.warn(`[AniNeko Scraper] Error fetching server ${server.name}:`, err.message);
+    }
   }
-  
-  if (!iframeUrl) {
-    throw new Error("No player server links found on page");
+
+  if (!resolvedStreamUrl) {
+    throw new Error(`Failed to extract playable stream from all available servers for mode "${targetMode}"`);
   }
-  
-  console.log(`[Scraper] Found iframe URL: ${iframeUrl}`);
-  
-  // 4. Fetch player iframe page to extract m3u8 source
-  const playerRes = await fetch(iframeUrl, {
+
+  const subtitlesList = extractedSubtitleUrl
+    ? [{ url: extractedSubtitleUrl, lang: "English" }]
+    : [];
+
+  return {
+    sources: [{
+      url: resolvedStreamUrl,
+      isM3U8: resolvedStreamUrl.includes('.m3u8'),
+      quality: "default",
+      server: activeServerName
+    }],
+    subtitles: subtitlesList,
+    intro: { start: 0, end: 0 },
+    outro: { start: 0, end: 0 }
+  };
+}
+
+export async function enumerateAniNekoServers(title, episodeNumber) {
+  const base = "https://anineko.to";
+  const searchUrl = `${base}/browser?keyword=${encodeURIComponent(title)}`;
+  console.log(`[AniNeko Enumerator] Searching for "${title}"...`);
+
+  const searchRes = await fetch(searchUrl, {
     headers: {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'
     }
   });
-  if (!playerRes.ok) throw new Error(`Player page failed: ${playerRes.status}`);
-  const playerHtml = await playerRes.text();
-  
-  const srcMatch = playerHtml.match(/const\s+src\s*=\s*["'](https:\/\/.*\.m3u8)["']/);
-  const hlsUrl = srcMatch ? srcMatch[1] : null;
-  if (!hlsUrl) {
-    throw new Error("Could not find master.m3u8 URL in iframe player page script");
+  if (!searchRes.ok) throw new Error(`Search failed: ${searchRes.status}`);
+  const searchHtml = await searchRes.text();
+  const $ = cheerio.load(searchHtml);
+
+  let watchPath = null;
+  const targetTitleLower = title.toLowerCase().trim();
+  const cleanTitleLower = targetTitleLower.replace(/[^a-z0-9]/g, "");
+
+  // Pass 1: Exact equality match
+  $('a').each((i, el) => {
+    const href = $(el).attr('href') || '';
+    if (!href.includes('/watch/')) return;
+
+    const hrefSlug = href.split('/').pop().toLowerCase();
+    const cleanHrefSlug = hrefSlug.replace(/[^a-z0-9]/g, "");
+    const linkTextLower = $(el).text().toLowerCase().trim();
+    const cleanLinkText = linkTextLower.replace(/[^a-z0-9]/g, "");
+    const imgAltLower = ($(el).find('img').attr('alt') || '').toLowerCase().trim();
+    const cleanImgAlt = imgAltLower.replace(/[^a-z0-9]/g, "");
+
+    if (
+      cleanLinkText === cleanTitleLower ||
+      cleanHrefSlug === cleanTitleLower ||
+      cleanImgAlt === cleanTitleLower
+    ) {
+      watchPath = href;
+      return false;
+    }
+  });
+
+  // Pass 2: Substring match fallback
+  if (!watchPath) {
+    $('a').each((i, el) => {
+      const href = $(el).attr('href') || '';
+      if (!href.includes('/watch/')) return;
+      const linkTextLower = $(el).text().toLowerCase().trim();
+      const imgAltLower = ($(el).find('img').attr('alt') || '').toLowerCase().trim();
+
+      if (linkTextLower.includes(targetTitleLower) || imgAltLower.includes(targetTitleLower)) {
+        watchPath = href;
+        return false;
+      }
+    });
   }
-  
+
+  // Pass 3: Fallback first result
+  if (!watchPath) {
+    $('a').each((i, el) => {
+      const href = $(el).attr('href') || '';
+      if (href.includes('/watch/') && href !== '/watch/' && !href.includes('search') && !href.includes('browser')) {
+        watchPath = href;
+        return false;
+      }
+    });
+  }
+
+  if (!watchPath) throw new Error(`Anime not found on AniNeko for search: "${title}"`);
+
+  const watchUrl = `${base}${watchPath}`;
+  console.log(`[AniNeko Enumerator] Fetching watch page: ${watchUrl}`);
+  const watchRes = await fetch(watchUrl, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'
+    }
+  });
+  if (!watchRes.ok) throw new Error(`Watch page fetch failed: ${watchRes.status}`);
+  const watchHtml = await watchRes.text();
+  const $watch = cheerio.load(watchHtml);
+
+  let targetEpPath = null;
+  $watch('a[href*="/watch/"]').each((i, el) => {
+    const href = $(el).attr('href') || '';
+    const text = $(el).text().trim().toLowerCase();
+    if (href.includes(`/ep-${episodeNumber}`) || text === `ep ${episodeNumber}` || text === `episode ${episodeNumber}` || text === `${episodeNumber}`) {
+      targetEpPath = href;
+      return false;
+    }
+  });
+
+  if (!targetEpPath) throw new Error(`Episode ${episodeNumber} path not found`);
+
+  const epUrl = `${base}${targetEpPath}`;
+  console.log(`[AniNeko Enumerator] Fetching episode page: ${epUrl}`);
+  const epRes = await fetch(epUrl, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'
+    }
+  });
+  if (!epRes.ok) throw new Error(`Episode page fetch failed: ${epRes.status}`);
+  const epHtml = await epRes.text();
+  const $ep = cheerio.load(epHtml);
+
+  const modes = [];
+  const servers = {};
+
+  $ep('.server-items.lang-group').each((i, group) => {
+    const modeId = $ep(group).attr('data-id');
+    if (!modeId) return;
+    if (!modes.includes(modeId)) modes.push(modeId);
+    servers[modeId] = [];
+
+    $ep(group).find('button.server-video, button.server').each((j, btn) => {
+      const rawName = $ep(btn).text().trim().replace(/\s+/g, ' ');
+      const dataVideo = $ep(btn).attr('data-video') || '';
+      if (dataVideo && !dataVideo.includes('playmogo.com') && !rawName.toLowerCase().includes('doodstream')) {
+        servers[modeId].push({
+          name: rawName,
+          embedUrl: dataVideo
+        });
+      }
+    });
+  });
+
   return {
-    sources: [{
-      url: hlsUrl,
-      isM3U8: true,
-      quality: "default"
-    }],
-    subtitles: [],
-    intro: { start: 0, end: 0 },
-    outro: { start: 0, end: 0 }
+    modes,
+    servers
   };
 }
 
@@ -223,8 +430,41 @@ export async function handler(event, context) {
     };
   }
 
-  const { malId, episodeNumber, title, provider } = event.queryStringParameters || {};
-  
+  const { malId, episodeNumber, title, provider, mode, server, action } = event.queryStringParameters || {};
+
+  // Action: servers — Cheap Mode & Server Enumeration
+  if (action === "servers") {
+    if (!title) {
+      return {
+        statusCode: 400,
+        headers: responseHeaders,
+        body: JSON.stringify({ success: false, error: "Missing title parameter for action=servers" }),
+      };
+    }
+    const epNum = parseInt(episodeNumber || "1", 10);
+    try {
+      const serverTree = await enumerateAniNekoServers(title, epNum);
+      return {
+        statusCode: 200,
+        headers: responseHeaders,
+        body: JSON.stringify({
+          success: true,
+          provider: "anineko",
+          title,
+          episodeNumber: epNum,
+          modes: serverTree.modes,
+          servers: serverTree.servers
+        }),
+      };
+    } catch (err) {
+      return {
+        statusCode: 500,
+        headers: responseHeaders,
+        body: JSON.stringify({ success: false, error: err.message }),
+      };
+    }
+  }
+
   if (!episodeNumber) {
     return {
       statusCode: 400,
@@ -242,8 +482,8 @@ export async function handler(event, context) {
     // 1. Check if custom scraper should handle Gogoanime
     if (selectedProvider === "gogoanime" && title) {
       try {
-        console.log(`[Fallback API] Invoking custom AniNeko scraper for title: "${title}"...`);
-        sources = await scrapeAniNeko(title, epNum);
+        console.log(`[Fallback API] Invoking custom AniNeko scraper for title: "${title}" (mode: ${mode || "sub"})...`);
+        sources = await scrapeAniNeko(title, epNum, mode || "sub", server);
       } catch (err) {
         console.warn("[Fallback API] Custom AniNeko scraper failed:", err.message);
       }
