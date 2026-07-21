@@ -430,11 +430,12 @@ export async function handler(event, context) {
     };
   }
 
-  const { malId, episodeNumber, title, provider, mode, server, action } = event.queryStringParameters || {};
+  let { malId, episodeNumber, title: rawTitle, provider, mode, server, action } = event.queryStringParameters || {};
+  let targetTitle = rawTitle;
 
   // Action: servers — Cheap Mode & Server Enumeration
   if (action === "servers") {
-    if (!title) {
+    if (!targetTitle) {
       return {
         statusCode: 400,
         headers: responseHeaders,
@@ -443,14 +444,14 @@ export async function handler(event, context) {
     }
     const epNum = parseInt(episodeNumber || "1", 10);
     try {
-      const serverTree = await enumerateAniNekoServers(title, epNum);
+      const serverTree = await enumerateAniNekoServers(targetTitle, epNum);
       return {
         statusCode: 200,
         headers: responseHeaders,
         body: JSON.stringify({
           success: true,
           provider: "anineko",
-          title,
+          title: targetTitle,
           episodeNumber: epNum,
           modes: serverTree.modes,
           servers: serverTree.servers
@@ -479,11 +480,25 @@ export async function handler(event, context) {
   try {
     let sources = null;
 
-    // 1. Check if custom scraper should handle Gogoanime
-    if (selectedProvider === "gogoanime" && title) {
+    if (!targetTitle && malId && malId !== "0" && malId !== "") {
       try {
-        console.log(`[Fallback API] Invoking custom AniNeko scraper for title: "${title}" (mode: ${mode || "sub"})...`);
-        sources = await scrapeAniNeko(title, epNum, mode || "sub", server);
+        console.log(`[Fallback API] Title missing. Resolving MAL ID ${malId} via Jikan API...`);
+        const jikanRes = await fetch(`https://api.jikan.moe/v4/anime/${malId}`);
+        if (jikanRes.ok) {
+          const jikanJson = await jikanRes.json();
+          targetTitle = jikanJson?.data?.title || jikanJson?.data?.title_english;
+          console.log(`[Fallback API] Jikan API resolved title: "${targetTitle}"`);
+        }
+      } catch (e) {
+        console.warn(`[Fallback API] Jikan API title resolution failed: ${e.message}`);
+      }
+    }
+
+    // 1. Check if custom scraper should handle Gogoanime
+    if (selectedProvider === "gogoanime" && targetTitle) {
+      try {
+        console.log(`[Fallback API] Invoking custom AniNeko scraper for title: "${targetTitle}" (mode: ${mode || "sub"})...`);
+        sources = await scrapeAniNeko(targetTitle, epNum, mode || "sub", server);
       } catch (err) {
         console.warn("[Fallback API] Custom AniNeko scraper failed:", err.message);
       }
