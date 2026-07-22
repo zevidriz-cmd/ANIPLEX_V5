@@ -1,8 +1,10 @@
 [build]
-  base = "."
   command = "npm run build --prefix web"
   publish = "web/dist"
   functions = "web/netlify/functions"
+
+[build.environment]
+  CACHE_BUST = "1"
 
 [functions]
   node_bundler = "esbuild"
