@@ -467,7 +467,15 @@ export async function handler(event, context) {
   const reqAction = qs.action || (rawQ.match(/action=([^&]+)/) || [])[1];
 
   if (reqAction === "health-check" || reqAction === "healthcheck" || rawQ.includes("health-check")) {
-    return await runHealthCheck(event, context);
+    try {
+      return await runHealthCheck(event, context);
+    } catch (e) {
+      return {
+        statusCode: 500,
+        headers: responseHeaders,
+        body: JSON.stringify({ success: false, error: `Health check execution error: ${e.message}` }),
+      };
+    }
   }
 
   let { malId, episodeNumber, title: rawTitle, provider, mode, server, action } = qs;
