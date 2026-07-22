@@ -462,26 +462,16 @@ export async function handler(event, context) {
     };
   }
 
-  const rawUrl = event.rawUrl || `https://anistream-web.netlify.app${event.path || ''}`;
-  let searchParams = {};
-  try {
-    const parsedUrl = new URL(rawUrl);
-    searchParams = Object.fromEntries(parsedUrl.searchParams.entries());
-  } catch (e) {}
+  const qs = event.queryStringParameters || {};
+  const rawQ = event.rawQuery || event.rawUrl || "";
+  const reqAction = qs.action || (rawQ.match(/action=([^&]+)/) || [])[1];
 
-  const query = { ...(event.queryStringParameters || {}), ...searchParams };
-  let { malId, episodeNumber, title: rawTitle, provider, mode, server, action } = query;
-  let targetTitle = rawTitle;
-
-  const isHealthCheck = (action === "health-check") || 
-                        (query && query.action === "health-check") ||
-                        (event.queryStringParameters && event.queryStringParameters.action === "health-check") ||
-                        (event.rawQuery && event.rawQuery.includes("health-check"));
-
-  // Action: health-check — Scraper Monitoring & Telegram Alert Test
-  if (isHealthCheck) {
+  if (reqAction === "health-check" || reqAction === "healthcheck" || rawQ.includes("health-check")) {
     return await runHealthCheck(event, context);
   }
+
+  let { malId, episodeNumber, title: rawTitle, provider, mode, server, action } = qs;
+  let targetTitle = rawTitle;
 
   // Action: servers — Cheap Mode & Server Enumeration
   if (action === "servers") {
