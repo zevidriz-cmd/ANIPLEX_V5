@@ -466,6 +466,14 @@ export async function handler(event, context) {
   const rawQ = event.rawQuery || event.rawUrl || "";
   const reqAction = qs.action || (rawQ.match(/action=([^&]+)/) || [])[1];
 
+  if (qs.diag === "true" || rawQ.includes("diag=true")) {
+    return {
+      statusCode: 200,
+      headers: responseHeaders,
+      body: JSON.stringify({ qs, rawQ, reqAction, rawUrl: event.rawUrl })
+    };
+  }
+
   if (reqAction === "health-check" || reqAction === "healthcheck" || rawQ.includes("health-check")) {
     try {
       return await runHealthCheck(event, context);
