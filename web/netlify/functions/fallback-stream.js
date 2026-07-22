@@ -24,7 +24,7 @@ export function unpackDeanEdwards(code) {
   return p;
 }
 
-async function scrapeAniNeko(title, episodeNumber, mode = "sub", targetServer = null) {
+export async function scrapeAniNeko(title, episodeNumber, mode = "sub", targetServer = null) {
   const base = "https://anineko.to";
   let epHtml = null;
   const targetEp = parseInt(episodeNumber, 10);

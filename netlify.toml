@@ -6,3 +6,7 @@
 [functions]
   node_bundler = "esbuild"
   external_node_modules = ["@consumet/extensions", "got-scraping", "got"]
+
+[functions."anineko-health-check"]
+  schedule = "0 */6 * * *"
+
