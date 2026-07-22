@@ -113,8 +113,23 @@ async function validateStreamUrl(streamUrl) {
   }
 }
 
-export const handler = async (event) => {
+export async function handler(event, context) {
   console.log(`[Health Check] Invoked at ${new Date().toISOString()}`);
+
+  const responseHeaders = {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': '*',
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Content-Type': 'application/json',
+  };
+
+  if (event.httpMethod === 'OPTIONS') {
+    return {
+      statusCode: 200,
+      headers: responseHeaders,
+      body: '',
+    };
+  }
 
   const queryParams = event.queryStringParameters || {};
   const secretKey = process.env.HEALTH_CHECK_SECRET;
@@ -214,7 +229,7 @@ export const handler = async (event) => {
 
   return {
     statusCode: 200,
-    headers: { "Content-Type": "application/json" },
+    headers: responseHeaders,
     body: JSON.stringify({
       status: newState.lastStatus,
       consecutiveFailures: newState.consecutiveFailures,
@@ -226,4 +241,5 @@ export const handler = async (event) => {
       timestamp: new Date().toISOString()
     })
   };
-};
+}
+
