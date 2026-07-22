@@ -75,7 +75,13 @@ const fetchJikanFillers = async (malId, totalEps) => {
 export default function PlayerPage() {
   const { animeId, episodeId } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
-  const audioCategory = searchParams.get("audio") || localStorage.getItem("anistream_audio_preference") || "sub"; // 'sub' or 'dub'
+  const getSavedModePreference = () => {
+    const saved = localStorage.getItem("anistream_preferred_mode") || localStorage.getItem("anistream_audio_preference");
+    return (saved && ["sub", "hsub", "dub"].includes(saved)) ? saved : "hsub";
+  };
+  const preferredMode = getSavedModePreference();
+  const searchAudio = searchParams.get("audio");
+  const audioCategory = (searchAudio && searchAudio !== "sub" && ["hsub", "dub"].includes(searchAudio)) ? searchAudio : preferredMode;
 
   const { currentUser } = useAuth();
   const { activeProfile } = useProfile();
@@ -320,6 +326,8 @@ export default function PlayerPage() {
 
   const handleAudioCategoryChange = (newCategory) => {
     console.log(`[PlayerPage] Switching audio category to: ${newCategory}`);
+    localStorage.setItem("anistream_preferred_mode", newCategory);
+    localStorage.setItem("anistream_audio_preference", newCategory);
     const params = new URLSearchParams(searchParams);
     params.set("audio", newCategory);
     setSearchParams(params);
@@ -328,9 +336,15 @@ export default function PlayerPage() {
   const handleManualServerSelect = async (serverObj) => {
     console.log(`[PlayerPage] Manual server selection triggered:`, serverObj);
     const { provider, serverId, mode, name } = serverObj;
+    if (mode) {
+      localStorage.setItem("anistream_preferred_mode", mode);
+      localStorage.setItem("anistream_audio_preference", mode);
+    }
 
     setScraping(true);
     setLoadingStatus(`Loading ${name || serverId || mode}...`);
+    setBackupTracks([]);
+    setBackupAttempted(false);
 
     const malId = animeDetail?.anime?.info?.malId;
     const animeTitle = animeDetail?.anime?.info?.name;
@@ -340,18 +354,28 @@ export default function PlayerPage() {
       let stream = null;
       if (provider === "zoro") {
         setSelectedServer(serverId);
-        stream = await getDirectStream(episodeId, serverId, mode || audioCategory, malId, epNum, animeTitle);
+        // Provider Isolation: Zoro only supports 'sub' and 'dub'. Map 'hsub' -> 'sub'.
+        const targetMode = (mode || audioCategory);
+        const zoroMode = targetMode === "hsub" ? "sub" : targetMode;
+        stream = await getDirectStream(episodeId, serverId, zoroMode, malId, epNum, animeTitle);
       } else {
         // AniNeko / Gogoanime
-        stream = await getSingleBackupStream(malId, epNum, animeTitle, "gogoanime", mode || "sub");
+        stream = await getSingleBackupStream(malId, epNum, animeTitle, "gogoanime", mode || audioCategory || "hsub");
       }
 
       if (stream) {
         setDirectStream(stream);
-        setFallbackNotice({
-          type: "info",
-          message: `Manual server: playing via ${name || serverId || provider}.`
-        });
+        if (mode === "hsub" && stream.mode && stream.mode !== "hsub") {
+          setFallbackNotice({
+            type: "warning",
+            message: `Hard Sub is unavailable for this episode. Playing via ${stream.mode === "sub" ? "Soft Sub" : stream.mode.toUpperCase()}. (Your Hard Sub preference remains saved).`
+          });
+        } else {
+          setFallbackNotice({
+            type: "info",
+            message: `Manual server: playing via ${name || serverId || provider}.`
+          });
+        }
       }
     } catch (err) {
       console.warn(`[PlayerPage] Manual server selection failed:`, err);
@@ -544,7 +568,8 @@ export default function PlayerPage() {
 
         const tryGogoanime = async () => {
           if (isMounted) setLoadingStatus("Connecting to Gogoanime backup server...");
-          const res = await getSingleBackupStream(malId, ep.number, animeTitle, "gogoanime");
+          const targetMode = preferredMode || audioCategory || "hsub";
+          const res = await getSingleBackupStream(malId, ep.number, animeTitle, "gogoanime", targetMode);
           return res;
         };
 
@@ -1045,27 +1070,7 @@ export default function PlayerPage() {
         </div>
       )}
 
-      {/* Server Selector Bar */}
-      {!initialLoading && !error && (
-        <div className="container server-selector-bar">
-          <span className="server-label">Change Server:</span>
-          <div className="server-buttons">
-            {[
-              { id: "hd-1", name: "Server 1 (HD-1)" },
-              { id: "rapidcloud", name: "Server 2 (RapidCloud)" },
-              { id: "megastream", name: "Server 3 (MegaStream)" }
-            ].map((srv) => (
-              <button
-                key={srv.id}
-                className={`server-btn ${selectedServer === srv.id ? "active" : ""}`}
-                onClick={() => setSelectedServer(srv.id)}
-              >
-                {srv.name}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
+
 
       {/* Up Next / Episode Navigation in Player */}
       {!initialLoading && !error && currentEpisode && (

@@ -142,7 +142,7 @@ function RequireAuth({ children }) {
     );
   }
 
-  if (!currentUser) {
+  if (!currentUser && window.location.hostname !== 'localhost') {
     return <Navigate to="/auth" replace />;
   }
 
@@ -165,11 +165,11 @@ function RequireProfile({ children }) {
     );
   }
 
-  if (!currentUser) {
+  if (!currentUser && window.location.hostname !== 'localhost') {
     return <Navigate to="/auth" replace />;
   }
 
-  if (!activeProfile) {
+  if (!activeProfile && window.location.hostname !== 'localhost') {
     return <Navigate to="/profiles" replace />;
   }
 

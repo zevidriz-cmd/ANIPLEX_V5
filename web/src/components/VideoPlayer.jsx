@@ -1,3 +1,10 @@
+import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { 
+  Play, Pause, Volume2, VolumeX, Maximize, Minimize, Settings, 
+  SkipForward, RotateCcw, RotateCw, ArrowLeft, AlertTriangle, Check, 
+  Subtitles, Film, Loader2, FastForward, Sliders, PictureInPicture2, Lock, LockOpen, X
+} from "lucide-react";
+import Hls from "hls.js";
 import { getAniNekoServers } from "../services/api";
 
 export default function VideoPlayer({
@@ -30,7 +37,6 @@ export default function VideoPlayer({
   onServerSelect
 }) {
   const videoRef = useRef(null);
-  const { saveSettings } = useProfile();
   const containerRef = useRef(null);
   const hlsRef = useRef(null);
   const lastSavedTimeRef = useRef(0);
@@ -81,28 +87,36 @@ export default function VideoPlayer({
   // AniNeko Server Enumeration State
   const [aniNekoTree, setAniNekoTree] = useState(null);
   const [aniNekoLoading, setAniNekoLoading] = useState(false);
-  const [selectedAniNekoMode, setSelectedAniNekoMode] = useState("sub");
+  const aniNekoRequestIdRef = useRef(0);
+  const [selectedAniNekoMode, setSelectedAniNekoMode] = useState(() => {
+    const saved = localStorage.getItem("anistream_preferred_mode");
+    return saved && ["sub", "hsub", "dub"].includes(saved) ? saved : "hsub";
+  });
 
   useEffect(() => {
     if (showSettings && (provider === "gogoanime" || provider === "anineko") && animeTitle && episodeNumber && !aniNekoTree && !aniNekoLoading) {
-      let isMounted = true;
+      const requestId = ++aniNekoRequestIdRef.current;
       setAniNekoLoading(true);
+
       getAniNekoServers(animeTitle, episodeNumber)
         .then(data => {
-          if (isMounted && data?.success) {
-            setAniNekoTree(data);
-            if (data.modes && data.modes.length > 0 && !data.modes.includes(selectedAniNekoMode)) {
-              setSelectedAniNekoMode(data.modes[0]);
+          if (requestId === aniNekoRequestIdRef.current) {
+            if (data?.success) {
+              setAniNekoTree(data);
+              if (data.modes && data.modes.length > 0 && !data.modes.includes(selectedAniNekoMode)) {
+                setSelectedAniNekoMode(data.modes[0]);
+              }
             }
           }
         })
         .catch(err => console.warn("[VideoPlayer] Failed to load AniNeko servers:", err))
         .finally(() => {
-          if (isMounted) setAniNekoLoading(false);
+          if (requestId === aniNekoRequestIdRef.current) {
+            setAniNekoLoading(false);
+          }
         });
-      return () => { isMounted = false; };
     }
-  }, [showSettings, provider, animeTitle, episodeNumber, aniNekoTree, aniNekoLoading, selectedAniNekoMode]);
+  }, [showSettings, provider, animeTitle, episodeNumber]);
 
   // Safe arrays to prevent settings crash on null/undefined bindings
   const safeTracks = Array.isArray(tracks) ? tracks : [];
@@ -2178,27 +2192,42 @@ export default function VideoPlayer({
                                       color: "white",
                                       cursor: "pointer"
                                     }}
-                                    onClick={() => setSelectedAniNekoMode(m)}
+                                    onClick={() => {
+                                      setSelectedAniNekoMode(m);
+                                      localStorage.setItem("anistream_preferred_mode", m);
+                                      const serversForMode = aniNekoTree?.servers?.[m] || [];
+                                      if (serversForMode.length > 0 && onServerSelect) {
+                                        onServerSelect({ provider: "gogoanime", mode: m, name: serversForMode[0].name });
+                                      }
+                                    }}
                                   >
                                     {m === "hsub" ? "Hard Sub" : m === "sub" ? "Soft Sub" : "DUB"}
                                   </button>
                                 ))}
                               </div>
                               <div className="settings-options scrollable full-width">
-                                {(aniNekoTree.servers?.[selectedAniNekoMode] || []).map((srv, idx) => (
-                                  <button
-                                    key={idx}
-                                    type="button"
-                                    onClick={() => {
-                                      if (onServerSelect) {
-                                        onServerSelect({ provider: "gogoanime", mode: selectedAniNekoMode, name: srv.name });
-                                      }
-                                      setShowSettings(false);
-                                    }}
-                                  >
-                                    {srv.name}
-                                  </button>
-                                ))}
+                                {(aniNekoTree.servers?.[selectedAniNekoMode] || []).map((srv, idx) => {
+                                  const isServerActive = !!selectedServer && (
+                                    selectedServer === srv.name ||
+                                    srv.name.toLowerCase().includes(selectedServer.toLowerCase()) ||
+                                    selectedServer.toLowerCase().includes(srv.name.toLowerCase().split(' ')[0])
+                                  );
+                                  return (
+                                    <button
+                                      key={idx}
+                                      type="button"
+                                      className={isServerActive ? "active" : ""}
+                                      onClick={() => {
+                                        if (onServerSelect) {
+                                          onServerSelect({ provider: "gogoanime", mode: selectedAniNekoMode, name: srv.name });
+                                        }
+                                        setShowSettings(false);
+                                      }}
+                                    >
+                                      {srv.name}
+                                    </button>
+                                  );
+                                })}
                               </div>
                             </>
                           ) : (

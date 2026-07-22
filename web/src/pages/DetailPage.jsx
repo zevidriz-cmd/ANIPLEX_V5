@@ -173,8 +173,9 @@ export default function DetailPage() {
   const [relationsLoading, setRelationsLoading] = useState(false);
   const [resolvingRelationId, setResolvingRelationId] = useState(null);
   const [audioPreference, setAudioPreference] = useState(() => {
-    return localStorage.getItem("anistream_audio_preference") || "sub";
-  }); // 'sub' or 'dub' loaded from settings
+    const saved = localStorage.getItem("anistream_preferred_mode") || localStorage.getItem("anistream_audio_preference");
+    return (saved && ["sub", "hsub", "dub"].includes(saved)) ? saved : "hsub";
+  });
 
   // Firestore Sync States
   const [isWatchlisted, setIsWatchlisted] = useState(false);
