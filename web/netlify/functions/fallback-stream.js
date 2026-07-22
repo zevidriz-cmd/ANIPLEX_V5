@@ -1,5 +1,6 @@
 import { ANIME, META } from "@consumet/extensions";
 import * as cheerio from "cheerio";
+import { runHealthCheck } from "./anineko-health-check.js";
 
 export function unpackDeanEdwards(code) {
   const match = code.match(/eval\(function\(p,a,c,k,e,d\)[\s\S]*?return p\}\('([\s\S]*?)',(\d+),(\d+),'([\s\S]*?)'\.split\('\|'\)/);
@@ -463,6 +464,11 @@ export async function handler(event, context) {
 
   let { malId, episodeNumber, title: rawTitle, provider, mode, server, action } = event.queryStringParameters || {};
   let targetTitle = rawTitle;
+
+  // Action: health-check — Scraper Monitoring & Telegram Alert Test
+  if (action === "health-check") {
+    return await runHealthCheck(event, context);
+  }
 
   // Action: servers — Cheap Mode & Server Enumeration
   if (action === "servers") {

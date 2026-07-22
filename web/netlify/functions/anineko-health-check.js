@@ -113,7 +113,7 @@ async function validateStreamUrl(streamUrl) {
   }
 }
 
-export async function handler(event, context) {
+export async function runHealthCheck(event, context) {
   console.log(`[Health Check] Invoked at ${new Date().toISOString()}`);
 
   const responseHeaders = {
@@ -243,5 +243,4 @@ export async function handler(event, context) {
   };
 }
 
-
-
+export const handler = runHealthCheck;
