@@ -473,8 +473,13 @@ export async function handler(event, context) {
   let { malId, episodeNumber, title: rawTitle, provider, mode, server, action } = query;
   let targetTitle = rawTitle;
 
+  const isHealthCheck = (action === "health-check") || 
+                        (query && query.action === "health-check") ||
+                        (event.queryStringParameters && event.queryStringParameters.action === "health-check") ||
+                        (event.rawQuery && event.rawQuery.includes("health-check"));
+
   // Action: health-check — Scraper Monitoring & Telegram Alert Test
-  if (action === "health-check") {
+  if (isHealthCheck) {
     return await runHealthCheck(event, context);
   }
 
