@@ -462,7 +462,15 @@ export async function handler(event, context) {
     };
   }
 
-  let { malId, episodeNumber, title: rawTitle, provider, mode, server, action } = event.queryStringParameters || {};
+  const rawUrl = event.rawUrl || `https://anistream-web.netlify.app${event.path || ''}`;
+  let searchParams = {};
+  try {
+    const parsedUrl = new URL(rawUrl);
+    searchParams = Object.fromEntries(parsedUrl.searchParams.entries());
+  } catch (e) {}
+
+  const query = { ...(event.queryStringParameters || {}), ...searchParams };
+  let { malId, episodeNumber, title: rawTitle, provider, mode, server, action } = query;
   let targetTitle = rawTitle;
 
   // Action: health-check — Scraper Monitoring & Telegram Alert Test
