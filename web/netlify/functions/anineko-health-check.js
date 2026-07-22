@@ -131,7 +131,14 @@ export async function runHealthCheck(event, context) {
     };
   }
 
-  const queryParams = event.queryStringParameters || {};
+  const rawUrl = event.rawUrl || `https://anistream-web.netlify.app${event.path || ''}`;
+  let searchParams = {};
+  try {
+    const parsedUrl = new URL(rawUrl);
+    searchParams = Object.fromEntries(parsedUrl.searchParams.entries());
+  } catch (e) {}
+
+  const queryParams = { ...(event.queryStringParameters || {}), ...searchParams };
   const secretKey = process.env.HEALTH_CHECK_SECRET;
   
   // Security guard: Only honor test override params if provided key matches process.env.HEALTH_CHECK_SECRET
