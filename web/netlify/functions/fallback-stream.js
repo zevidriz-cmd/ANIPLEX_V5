@@ -487,6 +487,7 @@ export async function handler(event, context) {
   }
 
   let { malId, episodeNumber, title: rawTitle, provider, mode, server, action } = qs;
+  episodeNumber = episodeNumber || "1";
   let targetTitle = rawTitle;
 
   // Action: servers — Cheap Mode & Server Enumeration
