@@ -1340,8 +1340,8 @@ export default function VideoPlayer({
     };
   }, [src, duration]);
 
-  // If HLS source is not available or has failed to play, render the Iframe Web Player
-  if ((!src || hasPlaybackError) && (embedUrl || malId)) {
+  // If HLS source is not available or has failed to play, render the Iframe Web Player (only when extraction is complete)
+  if (!externalLoading && (!src || hasPlaybackError) && (embedUrl || malId)) {
     const epNum = episodeNumber || 1;
     const season = tmdbEpisodeInfo?.season || 1;
     const episode = tmdbEpisodeInfo?.episode || epNum;

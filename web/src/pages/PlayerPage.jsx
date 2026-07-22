@@ -403,7 +403,6 @@ export default function PlayerPage() {
         lastLoadedAudioRef.current = audioCategory;
         if (failedProviders.length > 0) {
           setFailedProviders([]);
-          return;
         }
       }
       const showChanged = loadedAnimeId !== animeId;
@@ -412,6 +411,10 @@ export default function PlayerPage() {
       } else {
         setScraping(true);
       }
+
+      // Synchronously clear previous episode stream to prevent stale video onEnded triggers
+      setStreamData(null);
+      setDirectStream(null);
 
       try {
         let currentDetail = animeDetail;
@@ -447,7 +450,9 @@ export default function PlayerPage() {
               const hist = histSnap.data();
               setHistoryItem(hist);
               if (hist.episodeId === episodeId) {
-                setInitialSavedProgress(hist.progressPosition || 0);
+                const duration = hist.totalDuration || 1;
+                const isNearEnd = (hist.progressPosition / duration) >= 0.90;
+                setInitialSavedProgress(isNearEnd ? 0 : (hist.progressPosition || 0));
               } else {
                 setInitialSavedProgress(0);
               }
@@ -493,6 +498,9 @@ export default function PlayerPage() {
                 seasons = parsed.seasons || parsed;
               } else {
                 seasons = await getSeasons(malId);
+                if (seasons) {
+                  sessionStorage.setItem(`seasons_v6_${malId}`, JSON.stringify(seasons));
+                }
               }
 
               if (seasons && seasons.length > 1) {
@@ -560,9 +568,9 @@ export default function PlayerPage() {
         const tryZoro = async () => {
           if (isMounted) setLoadingStatus("Connecting to primary server (Zoro)...");
           const stream = await getStreamSources(episodeId, selectedServer, audioCategory);
-          if (isMounted) setStreamData(stream);
           if (isMounted) setLoadingStatus("Extracting high-quality direct stream...");
           const res = await getDirectStream(episodeId, selectedServer, audioCategory, malId, ep.number, animeTitle);
+          if (isMounted) setStreamData(stream);
           return { ...res, provider: "zoro" };
         };
 
@@ -820,15 +828,7 @@ export default function PlayerPage() {
       let finalProgress = progressMs;
       let finalDuration = durationMs;
 
-      // If near end (90%+ watched), automatically prep next episode
-      if (isNearEnd && currentIndex !== -1 && currentIndex < episodes.length - 1) {
-        const nextEp = episodes[currentIndex + 1];
-        finalEpisodeId = nextEp.episodeId;
-        finalEpisodeNumber = nextEp.number;
-        finalEpisodeTitle = nextEp.title || `Episode ${nextEp.number}`;
-        finalProgress = 0;
-        finalDuration = 0; // Clean start
-      }
+
 
       const data = {
         animeId,
@@ -857,11 +857,22 @@ export default function PlayerPage() {
     }
   };
 
+  const hasHandledEndedRef = useRef(false);
+  useEffect(() => {
+    hasHandledEndedRef.current = false;
+  }, [episodeId]);
+
   const handleEpisodeEnded = async (endedEpId) => {
+    if (hasHandledEndedRef.current) return;
     if (!endedEpId || endedEpId !== episodeId) {
       console.log(`[PlayerPage] Guarded handleEpisodeEnded: endedEpId (${endedEpId}) !== route episodeId (${episodeId})`);
       return;
     }
+    hasHandledEndedRef.current = true;
+
+    // Immediately unmount/clear old ended stream state before navigation
+    setStreamData(null);
+    setDirectStream(null);
 
     const currentIndex = episodes.findIndex(e => e.episodeId === episodeId);
     const isLastEpisode = currentIndex !== -1 && currentIndex === episodes.length - 1;
@@ -883,8 +894,12 @@ export default function PlayerPage() {
           if (cached) {
             const parsed = JSON.parse(cached);
             seasons = parsed.seasons || parsed;
-          } else {
+          }
+          if (!seasons) {
             seasons = await getSeasons(malId);
+            if (seasons) {
+              sessionStorage.setItem(`seasons_v6_${malId}`, JSON.stringify(seasons));
+            }
           }
 
           if (seasons && seasons.length > 0) {
@@ -908,6 +923,7 @@ export default function PlayerPage() {
                 if (nextEps.length > 0) {
                   const firstEp = nextEps[0];
                   console.log(`[PlayerPage] Cross-season autoplay to next season: ${nextSeason.title} (animeId: ${targetResolvedId})`);
+                  await markAsCompleted();
                   navigate(`/watch/${targetResolvedId}/${firstEp.episodeId}?audio=${audioCategory}`);
                   return;
                 }
@@ -1016,6 +1032,7 @@ export default function PlayerPage() {
           </div>
         ) : (
           <VideoPlayer
+            key={episodeId}
             src={hlsSource}
             tracks={combinedTracks}
             onSubtitleError={handleSubtitleError}
