@@ -1,4 +1,3 @@
-import { schedule } from "@netlify/functions";
 import { scrapeAniNeko } from "./fallback-stream.js";
 
 const FIRESTORE_DOC_URL = "https://firestore.googleapis.com/v1/projects/aniplex-app-f923b/databases/(default)/documents/system/anineko_health_check";
@@ -114,7 +113,7 @@ async function validateStreamUrl(streamUrl) {
   }
 }
 
-export const handler = schedule("0 */6 * * *", async (event, context) => {
+export async function handler(event, context) {
   console.log(`[Health Check] Invoked at ${new Date().toISOString()}`);
 
   const responseHeaders = {
@@ -242,6 +241,7 @@ export const handler = schedule("0 */6 * * *", async (event, context) => {
       timestamp: new Date().toISOString()
     })
   };
-});
+}
+
 
 
