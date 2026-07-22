@@ -447,6 +447,14 @@ function withTimeout(promise, ms) {
 }
 
 export async function handler(event, context) {
+  const qs = event.queryStringParameters || {};
+  const rawQ = event.rawQuery || event.rawUrl || "";
+  const reqAction = qs.action || (rawQ.match(/action=([^&]+)/) || [])[1];
+
+  if (reqAction === "health-check" || reqAction === "healthcheck" || rawQ.includes("health-check")) {
+    return await runHealthCheck(event, context);
+  }
+
   const responseHeaders = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': '*',
@@ -460,30 +468,6 @@ export async function handler(event, context) {
       headers: responseHeaders,
       body: '',
     };
-  }
-
-  const qs = event.queryStringParameters || {};
-  const rawQ = event.rawQuery || event.rawUrl || "";
-  const reqAction = qs.action || (rawQ.match(/action=([^&]+)/) || [])[1];
-
-  if (qs.diag === "true" || rawQ.includes("diag=true")) {
-    return {
-      statusCode: 200,
-      headers: responseHeaders,
-      body: JSON.stringify({ qs, rawQ, reqAction, rawUrl: event.rawUrl })
-    };
-  }
-
-  if (reqAction === "health-check" || reqAction === "healthcheck" || rawQ.includes("health-check")) {
-    try {
-      return await runHealthCheck(event, context);
-    } catch (e) {
-      return {
-        statusCode: 500,
-        headers: responseHeaders,
-        body: JSON.stringify({ success: false, error: `Health check execution error: ${e.message}` }),
-      };
-    }
   }
 
   let { malId, episodeNumber, title: rawTitle, provider, mode, server, action } = qs;
