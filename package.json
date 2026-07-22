@@ -1,0 +1,14 @@
+{
+  "name": "aniplex-v6-root",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "build": "npm run build --prefix web"
+  },
+  "dependencies": {
+    "@consumet/extensions": "^1.8.8",
+    "@netlify/functions": "^3.0.0",
+    "cheerio": "^1.0.0"
+  }
+}

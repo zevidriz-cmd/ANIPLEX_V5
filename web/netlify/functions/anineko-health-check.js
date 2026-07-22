@@ -28,6 +28,7 @@ async function getFirestoreState() {
  */
 async function updateFirestoreState(state) {
   try {
+    const patchUrl = `${FIRESTORE_DOC_URL}?updateMask.fieldPaths=consecutiveFailures&updateMask.fieldPaths=alertSent&updateMask.fieldPaths=lastStatus&updateMask.fieldPaths=lastChecked&updateMask.fieldPaths=lastFailureReason`;
     const body = {
       fields: {
         consecutiveFailures: { integerValue: state.consecutiveFailures },
@@ -37,11 +38,14 @@ async function updateFirestoreState(state) {
         lastFailureReason: { stringValue: state.lastFailureReason || "None" }
       }
     };
-    await fetch(FIRESTORE_DOC_URL, {
+    const res = await fetch(patchUrl, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body)
     });
+    if (!res.ok) {
+      console.error("[Health Check] Error writing Firestore state:", res.status, await res.text());
+    }
   } catch (e) {
     console.error("[Health Check] Error writing Firestore state:", e.message);
   }

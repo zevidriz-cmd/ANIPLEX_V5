@@ -8,5 +8,8 @@ service cloud.firestore {
     match /temp_logins/{sessionId} {
       allow read, write: if true;
     }
+    match /system/{document=**} {
+      allow read, write: if true;
+    }
   }
 }
