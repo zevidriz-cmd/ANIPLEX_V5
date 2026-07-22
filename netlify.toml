@@ -1,7 +1,7 @@
 [build]
   command = "npm run build --prefix web"
   publish = "web/dist"
-  functions = "web/netlify/functions"
+  functions = "netlify/functions"
 
 [build.environment]
   CACHE_BUST = "1"
