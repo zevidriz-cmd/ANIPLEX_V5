@@ -185,7 +185,9 @@ fun WatchlistScreen(
                             onSortOrderChange = { watchlistViewModel.setSortOrder(it) },
                             onToggleFavorite = { id, currentVal -> watchlistViewModel.toggleFavorite(id, currentVal) },
                             statusFilter = statusFilter,
-                            onStatusFilterChange = { watchlistViewModel.setStatusFilter(it) }
+                            onStatusFilterChange = { watchlistViewModel.setStatusFilter(it) },
+                            onMarkAsWatching = { id, name, poster -> watchlistViewModel.markAsWatching(id, name, poster) },
+                            onMarkAsWatched = { id, name, poster -> watchlistViewModel.markAsWatched(id, name, poster) }
                         )
                     }
                     1 -> {
@@ -203,8 +205,8 @@ fun WatchlistScreen(
                         // Downloads Tab
                         DownloadsTabContent(
                             downloads = downloads,
-                            onPlayClick = { epId, animId, title, epNum, cat ->
-                                onEpisodeClick(epId, animId, title, epNum, cat, 0L)
+                            onPlayClick = { epId, aId, aTitle, epNum, aud ->
+                                onEpisodeClick(epId, aId, aTitle, epNum, aud, 0L)
                             }
                         )
                     }
@@ -224,7 +226,9 @@ fun WatchlistTabContent(
     onSortOrderChange: (SortOrder) -> Unit,
     onToggleFavorite: (String, Boolean) -> Unit,
     statusFilter: WatchlistStatusFilter,
-    onStatusFilterChange: (WatchlistStatusFilter) -> Unit
+    onStatusFilterChange: (WatchlistStatusFilter) -> Unit,
+    onMarkAsWatching: (String, String, String) -> Unit = { _, _, _ -> },
+    onMarkAsWatched: (String, String, String) -> Unit = { _, _, _ -> }
 ) {
     Column(modifier = Modifier.fillMaxSize()) {
         // Status Filter Capsule Chips Row
@@ -401,18 +405,20 @@ fun WatchlistTabContent(
                                 }
                             }
                         ) {
-                            WatchlistRowCard(
-                                item = item,
-                                onClick = { onAnimeClick(item.id) },
-                                onToggleFavorite = { onToggleFavorite(item.id, item.isFavorite) },
-                                onDetailsClick = { onAnimeClick(item.id) }
-                            )
-                        }
+                        WatchlistRowCard(
+                            item = item,
+                            onClick = { onAnimeClick(item.id) },
+                            onToggleFavorite = { onToggleFavorite(item.id, item.isFavorite) },
+                            onDetailsClick = { onAnimeClick(item.id) },
+                            onMarkAsWatching = { onMarkAsWatching(item.id, item.title, item.poster) },
+                            onMarkAsWatched = { onMarkAsWatched(item.id, item.title, item.poster) }
+                        )
                     }
                 }
             }
         }
     }
+}
 }
 }
 
@@ -421,7 +427,9 @@ fun WatchlistRowCard(
     item: WatchlistItem,
     onClick: () -> Unit,
     onToggleFavorite: () -> Unit,
-    onDetailsClick: () -> Unit
+    onDetailsClick: () -> Unit,
+    onMarkAsWatching: () -> Unit = {},
+    onMarkAsWatched: () -> Unit = {}
 ) {
     var isImageLoading by remember { mutableStateOf(true) }
     var isImageError by remember { mutableStateOf(false) }
@@ -449,29 +457,29 @@ fun WatchlistRowCard(
                     onLoading = { isImageLoading = true; isImageError = false },
                     onSuccess = { isImageLoading = false; isImageError = false },
                     onError = { isImageLoading = false; isImageError = true },
-                    colorFilter = if (item.status == "completed") {
-                        ColorFilter.colorMatrix(ColorMatrix().apply { setToSaturation(0f) })
-                    } else {
-                        null
-                    },
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .then(if (isImageLoading) Modifier.shimmer() else Modifier)
+                    modifier = Modifier.fillMaxSize()
                 )
-                if (isImageError) {
-                    ErrorPlaceholder(modifier = Modifier.fillMaxSize())
-                }
-                if (item.status == "completed") {
+
+                if (isImageLoading) {
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .background(Color.Black.copy(alpha = 0.4f)),
+                            .shimmer()
+                            .background(SurfaceDarkVariant)
+                    )
+                }
+
+                if (isImageError) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(SurfaceDarkVariant),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            imageVector = Icons.Default.Replay,
-                            contentDescription = "Rewatch",
-                            tint = Color.White,
+                            imageVector = Icons.Default.PlayCircle,
+                            contentDescription = null,
+                            tint = TextSecondary,
                             modifier = Modifier.size(24.dp)
                         )
                     }
@@ -563,6 +571,23 @@ fun WatchlistRowCard(
                         onDismissRequest = { showMenu = false },
                         containerColor = SurfaceDarkVariant
                     ) {
+                        if (item.status == "completed") {
+                            DropdownMenuItem(
+                                text = { Text("Mark as Watching", color = Color.White) },
+                                onClick = {
+                                    showMenu = false
+                                    onMarkAsWatching()
+                                }
+                            )
+                        } else {
+                            DropdownMenuItem(
+                                text = { Text("Mark as Finished", color = Color.White) },
+                                onClick = {
+                                    showMenu = false
+                                    onMarkAsWatched()
+                                }
+                            )
+                        }
                         DropdownMenuItem(
                             text = { Text("Remove from Watchlist", color = Color.White) },
                             onClick = {

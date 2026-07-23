@@ -222,25 +222,27 @@ class PreferenceManager @Inject constructor(
         prefs.edit().putString("recent_searches", joined).apply()
     }
 
-    fun getLocalWatchProgress(animeId: String, episodeId: String, episodeNumber: Int): Long {
-        val progressById = prefs.getLong("watch_progress_${animeId}_${episodeId}", -1L)
+    fun getLocalWatchProgress(animeId: String, episodeId: String, episodeNumber: Int, profileId: String? = null): Long {
+        val prefix = if (!profileId.isNullOrEmpty()) "p_${profileId}_" else ""
+        val progressById = prefs.getLong("watch_progress_${prefix}${animeId}_${episodeId}", -1L)
         if (progressById != -1L) return progressById
         if (episodeNumber > 0) {
-            val progressByNum = prefs.getLong("watch_progress_${animeId}_ep_${episodeNumber}", -1L)
+            val progressByNum = prefs.getLong("watch_progress_${prefix}${animeId}_ep_${episodeNumber}", -1L)
             if (progressByNum != -1L) return progressByNum
         }
         return 0L
     }
 
-    fun getLocalHistoryItem(animeId: String): com.aniplex.app.domain.model.HistoryItem? {
-        val episodeId = prefs.getString("last_ep_id_$animeId", null) ?: return null
-        val episodeNumber = prefs.getInt("last_ep_num_$animeId", 1)
-        val episodeTitle = prefs.getString("last_ep_title_$animeId", "") ?: ""
-        val progressPosition = prefs.getLong("last_ep_progress_$animeId", 0L)
-        val totalDuration = prefs.getLong("last_ep_duration_$animeId", 0L)
-        val animeTitle = prefs.getString("last_anime_title_$animeId", "") ?: ""
-        val poster = prefs.getString("last_anime_poster_$animeId", "") ?: ""
-        val updatedAt = prefs.getLong("last_updated_$animeId", System.currentTimeMillis())
+    fun getLocalHistoryItem(animeId: String, profileId: String? = null): com.aniplex.app.domain.model.HistoryItem? {
+        val prefix = if (!profileId.isNullOrEmpty()) "p_${profileId}_" else ""
+        val episodeId = prefs.getString("last_ep_id_${prefix}$animeId", null) ?: return null
+        val episodeNumber = prefs.getInt("last_ep_num_${prefix}$animeId", 1)
+        val episodeTitle = prefs.getString("last_ep_title_${prefix}$animeId", "") ?: ""
+        val progressPosition = prefs.getLong("last_ep_progress_${prefix}$animeId", 0L)
+        val totalDuration = prefs.getLong("last_ep_duration_${prefix}$animeId", 0L)
+        val animeTitle = prefs.getString("last_anime_title_${prefix}$animeId", "") ?: ""
+        val poster = prefs.getString("last_anime_poster_${prefix}$animeId", "") ?: ""
+        val updatedAt = prefs.getLong("last_updated_${prefix}$animeId", System.currentTimeMillis())
         return com.aniplex.app.domain.model.HistoryItem(
             animeId = animeId,
             animeTitle = animeTitle,
@@ -254,25 +256,54 @@ class PreferenceManager @Inject constructor(
         )
     }
 
-    fun saveLocalHistoryItem(item: com.aniplex.app.domain.model.HistoryItem) {
+    fun saveLocalHistoryItem(item: com.aniplex.app.domain.model.HistoryItem, profileId: String? = null) {
+        val prefix = if (!profileId.isNullOrEmpty()) "p_${profileId}_" else ""
         prefs.edit()
-            .putString("last_ep_id_${item.animeId}", item.episodeId)
-            .putInt("last_ep_num_${item.animeId}", item.episodeNumber)
-            .putString("last_ep_title_${item.animeId}", item.episodeTitle)
-            .putLong("last_ep_progress_${item.animeId}", item.progressPosition)
-            .putLong("last_ep_duration_${item.animeId}", item.totalDuration)
-            .putString("last_anime_title_${item.animeId}", item.animeTitle)
-            .putString("last_anime_poster_${item.animeId}", item.poster)
-            .putLong("last_updated_${item.animeId}", item.updatedAt)
+            .putString("last_ep_id_${prefix}${item.animeId}", item.episodeId)
+            .putInt("last_ep_num_${prefix}${item.animeId}", item.episodeNumber)
+            .putString("last_ep_title_${prefix}${item.animeId}", item.episodeTitle)
+            .putLong("last_ep_progress_${prefix}${item.animeId}", item.progressPosition)
+            .putLong("last_ep_duration_${prefix}${item.animeId}", item.totalDuration)
+            .putString("last_anime_title_${prefix}${item.animeId}", item.animeTitle)
+            .putString("last_anime_poster_${prefix}${item.animeId}", item.poster)
+            .putLong("last_updated_${prefix}${item.animeId}", item.updatedAt)
             .apply()
         
         prefs.edit()
-            .putLong("watch_progress_${item.animeId}_${item.episodeId}", item.progressPosition)
+            .putLong("watch_progress_${prefix}${item.animeId}_${item.episodeId}", item.progressPosition)
             .apply()
         if (item.episodeNumber > 0) {
             prefs.edit()
-                .putLong("watch_progress_${item.animeId}_ep_${item.episodeNumber}", item.progressPosition)
+                .putLong("watch_progress_${prefix}${item.animeId}_ep_${item.episodeNumber}", item.progressPosition)
                 .apply()
         }
+    }
+
+    fun clearLocalHistoryItem(animeId: String, profileId: String? = null) {
+        val prefix = if (!profileId.isNullOrEmpty()) "p_${profileId}_" else ""
+        val editor = prefs.edit()
+            .remove("last_ep_id_${prefix}$animeId")
+            .remove("last_ep_num_${prefix}$animeId")
+            .remove("last_ep_title_${prefix}$animeId")
+            .remove("last_ep_progress_${prefix}$animeId")
+            .remove("last_ep_duration_${prefix}$animeId")
+            .remove("last_anime_title_${prefix}$animeId")
+            .remove("last_anime_poster_${prefix}$animeId")
+            .remove("last_updated_${prefix}$animeId")
+            .remove("last_ep_id_$animeId")
+            .remove("last_ep_num_$animeId")
+            .remove("last_ep_title_$animeId")
+            .remove("last_ep_progress_$animeId")
+            .remove("last_ep_duration_$animeId")
+            .remove("last_anime_title_$animeId")
+            .remove("last_anime_poster_$animeId")
+            .remove("last_updated_$animeId")
+
+        val progressKeyPrefix = "watch_progress_${prefix}${animeId}_"
+        val legacyProgressKeyPrefix = "watch_progress_${animeId}_"
+        prefs.all.keys.filter { it.startsWith(progressKeyPrefix) || it.startsWith(legacyProgressKeyPrefix) }.forEach { key ->
+            editor.remove(key)
+        }
+        editor.apply()
     }
 }

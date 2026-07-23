@@ -79,6 +79,7 @@ fun HomeScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val continueWatchingList by viewModel.continueWatchingList.collectAsStateWithLifecycle()
     val recentlyAddedEpisodes by viewModel.recentlyAddedEpisodes.collectAsStateWithLifecycle()
+    val watchlistMap by viewModel.watchlistMap.collectAsStateWithLifecycle()
     val isRefreshing = uiState is HomeUiState.Loading && (uiState as? HomeUiState.Success) != null
     
     var dominantColor by remember { mutableStateOf(BackgroundVoid) }
@@ -120,6 +121,7 @@ fun HomeScreen(
                         homeData = state.homeData,
                         continueWatchingList = continueWatchingList,
                         recentlyAddedItems = recentlyAddedEpisodes,
+                        watchlistMap = watchlistMap,
                         onAnimeClick = onAnimeClick,
                         onEpisodeClick = onEpisodeClick,
                         onColorExtracted = { dominantColor = it },
@@ -129,7 +131,8 @@ fun HomeScreen(
                         onRemoveFromHistory = { viewModel.removeFromHistory(it) },
                         onMarkAsFinished = { id, title, poster -> viewModel.markAsWatched(id, title, poster) },
                         onAddToWatchlist = { id, title, poster -> viewModel.addToWatchlist(id, title, poster) },
-                        onMarkAsWatched = { id, title, poster -> viewModel.markAsWatched(id, title, poster) }
+                        onMarkAsWatched = { id, title, poster -> viewModel.markAsWatched(id, title, poster) },
+                        onMarkAsWatching = { id, title, poster -> viewModel.markAsWatching(id, title, poster) }
                     )
                 }
                 is HomeUiState.Error -> {
@@ -149,6 +152,7 @@ fun HomeContent(
     homeData: HomeData,
     continueWatchingList: List<HistoryItem>,
     recentlyAddedItems: List<RecentlyAddedItem>,
+    watchlistMap: Map<String, String> = emptyMap(),
     onAnimeClick: (String) -> Unit,
     onEpisodeClick: (String, String, String, Int, String, Long) -> Unit,
     onColorExtracted: (Color) -> Unit,
@@ -158,7 +162,8 @@ fun HomeContent(
     onRemoveFromHistory: ((String) -> Unit)? = null,
     onMarkAsFinished: ((String, String, String) -> Unit)? = null,
     onAddToWatchlist: ((String, String, String) -> Unit)? = null,
-    onMarkAsWatched: ((String, String, String) -> Unit)? = null
+    onMarkAsWatched: ((String, String, String) -> Unit)? = null,
+    onMarkAsWatching: ((String, String, String) -> Unit)? = null
 ) {
     LazyColumn(
         modifier = modifier.fillMaxSize()
@@ -253,7 +258,9 @@ fun HomeContent(
                     isLandscape = true,
                     onSeeAllClick = { onNavigateToDiscover(0) },
                     onAddToWatchlist = onAddToWatchlist,
-                    onMarkAsWatched = onMarkAsWatched
+                    onMarkAsWatched = onMarkAsWatched,
+                    onMarkAsWatching = onMarkAsWatching,
+                    watchlistMap = watchlistMap
                 )
             }
             item {
@@ -271,7 +278,9 @@ fun HomeContent(
                     isLandscape = false,
                     onSeeAllClick = { onNavigateToDiscover(0) },
                     onAddToWatchlist = onAddToWatchlist,
-                    onMarkAsWatched = onMarkAsWatched
+                    onMarkAsWatched = onMarkAsWatched,
+                    onMarkAsWatching = onMarkAsWatching,
+                    watchlistMap = watchlistMap
                 )
             }
             item {
@@ -294,7 +303,9 @@ fun HomeContent(
                     onAnimeClick = onAnimeClick,
                     onSeeAllClick = { onNavigateToDiscover(1) },
                     onAddToWatchlist = onAddToWatchlist,
-                    onMarkAsWatched = onMarkAsWatched
+                    onMarkAsWatched = onMarkAsWatched,
+                    onMarkAsWatching = onMarkAsWatching,
+                    watchlistMap = watchlistMap
                 )
             }
             item {
@@ -312,7 +323,9 @@ fun HomeContent(
                     isLandscape = false,
                     onSeeAllClick = { onNavigateToDiscover(0) },
                     onAddToWatchlist = onAddToWatchlist,
-                    onMarkAsWatched = onMarkAsWatched
+                    onMarkAsWatched = onMarkAsWatched,
+                    onMarkAsWatching = onMarkAsWatching,
+                    watchlistMap = watchlistMap
                 )
             }
             item {
@@ -330,7 +343,9 @@ fun HomeContent(
                     isLandscape = false,
                     onSeeAllClick = { onNavigateToDiscover(0) },
                     onAddToWatchlist = onAddToWatchlist,
-                    onMarkAsWatched = onMarkAsWatched
+                    onMarkAsWatched = onMarkAsWatched,
+                    onMarkAsWatching = onMarkAsWatching,
+                    watchlistMap = watchlistMap
                 )
             }
             item {
@@ -623,7 +638,9 @@ fun AnimeSectionRow(
     isLandscape: Boolean = false,
     onSeeAllClick: (() -> Unit)? = null,
     onAddToWatchlist: ((String, String, String) -> Unit)? = null,
-    onMarkAsWatched: ((String, String, String) -> Unit)? = null
+    onMarkAsWatched: ((String, String, String) -> Unit)? = null,
+    onMarkAsWatching: ((String, String, String) -> Unit)? = null,
+    watchlistMap: Map<String, String> = emptyMap()
 ) {
     Column(modifier = modifier.fillMaxWidth()) {
         Row(
@@ -676,7 +693,9 @@ fun AnimeSectionRow(
                     onClick = onAnimeClick,
                     isLandscape = isLandscape,
                     onAddToWatchlist = onAddToWatchlist,
-                    onMarkAsWatched = onMarkAsWatched
+                    onMarkAsWatched = onMarkAsWatched,
+                    onMarkAsWatching = onMarkAsWatching,
+                    watchlistStatus = watchlistMap[anime.id]
                 )
             }
         }
@@ -830,7 +849,9 @@ fun RecentlyAddedSectionRow(
     modifier: Modifier = Modifier,
     onSeeAllClick: (() -> Unit)? = null,
     onAddToWatchlist: ((String, String, String) -> Unit)? = null,
-    onMarkAsWatched: ((String, String, String) -> Unit)? = null
+    onMarkAsWatched: ((String, String, String) -> Unit)? = null,
+    onMarkAsWatching: ((String, String, String) -> Unit)? = null,
+    watchlistMap: Map<String, String> = emptyMap()
 ) {
     if (recentlyAddedItems.isEmpty()) return
 
@@ -893,7 +914,6 @@ fun RecentlyAddedSectionRow(
             dayLabelProvider = { currentDayLabel.value },
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp)
         )
-
         LazyRow(
             state = listState,
             contentPadding = PaddingValues(horizontal = 16.dp),
@@ -905,7 +925,9 @@ fun RecentlyAddedSectionRow(
                     item = item,
                     onClick = onAnimeClick,
                     onAddToWatchlist = onAddToWatchlist,
-                    onMarkAsWatched = onMarkAsWatched
+                    onMarkAsWatched = onMarkAsWatched,
+                    onMarkAsWatching = onMarkAsWatching,
+                    watchlistStatus = watchlistMap[item.anime.id]
                 )
             }
         }
@@ -932,7 +954,9 @@ fun RecentlyAddedAnimeCard(
     onClick: (String) -> Unit,
     modifier: Modifier = Modifier,
     onAddToWatchlist: ((String, String, String) -> Unit)? = null,
-    onMarkAsWatched: ((String, String, String) -> Unit)? = null
+    onMarkAsWatched: ((String, String, String) -> Unit)? = null,
+    onMarkAsWatching: ((String, String, String) -> Unit)? = null,
+    watchlistStatus: String? = null
 ) {
     val anime = item.anime
     val cardWidth = 220.dp
@@ -1020,34 +1044,32 @@ fun RecentlyAddedAnimeCard(
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    if (anime.subEpisodes > 0) {
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(4.dp))
-                                .background(MaterialTheme.colorScheme.primary)
-                                .padding(horizontal = 4.dp, vertical = 2.dp)
-                        ) {
-                            Text(
-                                text = "SUB ${anime.subEpisodes}",
-                                fontSize = 8.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFF171329)
-                            )
-                        }
+                    // SUB badge
+                    Box(
+                        modifier = Modifier
+                            .background(Color.Black.copy(alpha = 0.75f), RoundedCornerShape(4.dp))
+                            .padding(horizontal = 5.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = "SUB",
+                            fontSize = 8.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
                     }
+
+                    // DUB badge
                     if (anime.dubEpisodes > 0) {
                         Box(
                             modifier = Modifier
-                                .clip(RoundedCornerShape(4.dp))
-                                .background(Color(0xFF1B1A30))
-                                .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f), RoundedCornerShape(4.dp))
-                                .padding(horizontal = 4.dp, vertical = 2.dp)
+                                .background(Color.Black.copy(alpha = 0.75f), RoundedCornerShape(4.dp))
+                                .padding(horizontal = 5.dp, vertical = 2.dp)
                         ) {
                             Text(
                                 text = "DUB ${anime.dubEpisodes}",
                                 fontSize = 8.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.primary
+                                color = Color.White
                             )
                         }
                     }
@@ -1100,7 +1122,7 @@ fun RecentlyAddedAnimeCard(
                     )
                 }
 
-                if (onAddToWatchlist != null || onMarkAsWatched != null) {
+                if (onAddToWatchlist != null || onMarkAsWatched != null || onMarkAsWatching != null) {
                     Box {
                         IconButton(
                             onClick = { menuExpanded = true },
@@ -1136,7 +1158,23 @@ fun RecentlyAddedAnimeCard(
                                     }
                                 )
                             }
-                            if (onMarkAsWatched != null) {
+                            if (watchlistStatus == "completed" && onMarkAsWatching != null) {
+                                DropdownMenuItem(
+                                    text = { Text("Mark as Watching", color = Color.White, fontSize = 13.sp) },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = Icons.Default.PlayArrow,
+                                            contentDescription = "Mark Watching",
+                                            tint = CrunchyrollOrange,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    },
+                                    onClick = {
+                                        menuExpanded = false
+                                        onMarkAsWatching(anime.id, anime.title, anime.poster)
+                                    }
+                                )
+                            } else if (onMarkAsWatched != null) {
                                 DropdownMenuItem(
                                     text = { Text("Mark as Watched", color = Color.White, fontSize = 13.sp) },
                                     leadingIcon = {

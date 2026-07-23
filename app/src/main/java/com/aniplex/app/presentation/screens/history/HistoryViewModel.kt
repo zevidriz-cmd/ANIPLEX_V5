@@ -103,6 +103,7 @@ class HistoryViewModel @Inject constructor(
         val profileId = profileManager.activeProfile.value?.id
         viewModelScope.launch {
             try {
+                preferenceManager.clearLocalHistoryItem(animeId, profileId)
                 val docRef = if (profileId != null) {
                     firestore.collection("users").document(userId)
                         .collection("profiles").document(profileId)

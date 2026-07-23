@@ -100,6 +100,7 @@ fun DetailScreen(
     val episodesState by viewModel.episodesState.collectAsStateWithLifecycle()
     val charactersState by viewModel.charactersState.collectAsStateWithLifecycle()
     val isWatchlisted by viewModel.isWatchlisted.collectAsStateWithLifecycle()
+    val watchlistStatus by viewModel.watchlistStatus.collectAsStateWithLifecycle()
     val watchHistory by viewModel.watchHistory.collectAsStateWithLifecycle()
     val userRating by viewModel.userRating.collectAsStateWithLifecycle()
     val seasonsState by viewModel.seasonsState.collectAsStateWithLifecycle()
@@ -173,6 +174,7 @@ fun DetailScreen(
                     episodesState = episodesState,
                     charactersState = charactersState,
                     isWatchlisted = isWatchlisted,
+                    watchlistStatus = watchlistStatus,
                     watchHistory = watchHistory,
                     userRating = userRating,
                     seasonsState = seasonsState,
@@ -184,6 +186,7 @@ fun DetailScreen(
                     onSeasonSelected = { malId -> viewModel.resolveMALAndNavigate(malId) },
                     onSeasonRetry = { viewModel.retryLoadSeasons() },
                     onMarkAsWatched = { viewModel.markAsWatched(state.data.id, state.data.name, state.data.poster) },
+                    onMarkAsWatching = { viewModel.markAsWatching(state.data.id, state.data.name, state.data.poster) },
                     onRemoveFromHistory = { viewModel.removeFromHistory(state.data.id) },
                     selectedVersion = selectedVersion,
                     onVersionChange = { viewModel.setSelectedVersion(it) },
@@ -282,6 +285,7 @@ fun DetailContent(
     episodesState: DetailState<List<Episode>>,
     charactersState: DetailState<List<Character>>,
     isWatchlisted: Boolean,
+    watchlistStatus: String? = null,
     watchHistory: HistoryItem?,
     userRating: Int,
     seasonsState: DetailState<List<Season>>,
@@ -293,6 +297,7 @@ fun DetailContent(
     onSeasonSelected: (String) -> Unit,
     onSeasonRetry: () -> Unit,
     onMarkAsWatched: () -> Unit,
+    onMarkAsWatching: () -> Unit = {},
     onRemoveFromHistory: () -> Unit,
     selectedVersion: String,
     onVersionChange: (String) -> Unit,
@@ -426,21 +431,39 @@ fun DetailContent(
                             onDismissRequest = { showMoreMenu = false },
                             modifier = Modifier.background(SurfaceDark)
                         ) {
-                            DropdownMenuItem(
-                                text = { Text("Mark as Finished", color = Color.White) },
-                                onClick = {
-                                    showMoreMenu = false
-                                    onMarkAsWatched()
-                                    Toast.makeText(context, "Marked as Watched", Toast.LENGTH_SHORT).show()
-                                },
-                                leadingIcon = {
-                                    Icon(Icons.Default.Check, contentDescription = null, tint = CrunchyrollOrange)
-                                },
-                                colors = MenuDefaults.itemColors(
-                                    textColor = Color.White,
-                                    leadingIconColor = CrunchyrollOrange
+                            if (watchlistStatus == "completed") {
+                                DropdownMenuItem(
+                                    text = { Text("Mark as Watching", color = Color.White) },
+                                    onClick = {
+                                        showMoreMenu = false
+                                        onMarkAsWatching()
+                                        Toast.makeText(context, "Marked as Watching", Toast.LENGTH_SHORT).show()
+                                    },
+                                    leadingIcon = {
+                                        Icon(Icons.Default.PlayArrow, contentDescription = null, tint = CrunchyrollOrange)
+                                    },
+                                    colors = MenuDefaults.itemColors(
+                                        textColor = Color.White,
+                                        leadingIconColor = CrunchyrollOrange
+                                    )
                                 )
-                            )
+                            } else {
+                                DropdownMenuItem(
+                                    text = { Text("Mark as Finished", color = Color.White) },
+                                    onClick = {
+                                        showMoreMenu = false
+                                        onMarkAsWatched()
+                                        Toast.makeText(context, "Marked as Watched", Toast.LENGTH_SHORT).show()
+                                    },
+                                    leadingIcon = {
+                                        Icon(Icons.Default.Check, contentDescription = null, tint = CrunchyrollOrange)
+                                    },
+                                    colors = MenuDefaults.itemColors(
+                                        textColor = Color.White,
+                                        leadingIconColor = CrunchyrollOrange
+                                    )
+                                )
+                            }
 
                             if (watchHistory != null) {
                                 DropdownMenuItem(
@@ -596,7 +619,11 @@ fun DetailContent(
                     val nextSeason = if (currentSeasonIdx != -1 && currentSeasonIdx < mainSeasons.size - 1) mainSeasons[currentSeasonIdx + 1] else null
 
                     val hasHistory = watchHistory != null
-                    val isSeasonFinished = watchHistory != null && episodes.isNotEmpty() && watchHistory.episodeNumber >= episodes.size
+                    val isSeasonFinished = if (watchHistory != null) {
+                        episodes.isNotEmpty() && (watchHistory.episodeNumber >= episodes.size || (watchHistory.totalDuration > 0 && watchHistory.progressPosition.toFloat() / watchHistory.totalDuration.toFloat() >= 0.95f && watchHistory.episodeNumber == episodes.size))
+                    } else {
+                        watchlistStatus == "completed"
+                    }
 
                     Row(
                         modifier = Modifier.fillMaxWidth().height(48.dp),

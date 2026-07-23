@@ -346,6 +346,9 @@ fun PlayerScreen(
     var interceptedOrigin by remember { mutableStateOf<String?>(null) }
     var playbackPosition by remember { mutableStateOf(0L) }
     var serverSwitchPosition by remember { mutableStateOf<Long?>(null) }
+    var lastAnimeId by remember { mutableStateOf("") }
+    var lastAnimeTitle by remember { mutableStateOf("") }
+    var lastPosterUrl by remember { mutableStateOf("") }
     var lastEpisodeId by remember { mutableStateOf("") }
     var lastCategory by remember { mutableStateOf("") }
     var lastServer by remember { mutableStateOf("") }
@@ -708,14 +711,16 @@ fun PlayerScreen(
                     DebugLogManager.log("ANIPLEX_PLAYER", "Cached current position $pos in resetPlayerState for server switch (duration: $dur).")
                     if (dur > 0) {
                         val ep = currentEpisode ?: episodes.find { it.id == episodeId }
+                        val targetPoster = animeDetail?.poster ?: ""
                         viewModel.saveProgress(
-                            animeId = animeId,
+                            animeId = activeAnimeId,
                             animeTitle = animeTitle,
                             episodeId = ep?.id ?: episodeId,
                             episodeNumber = ep?.number ?: episodeNumber,
                             episodeTitle = ep?.title ?: "Episode ${ep?.number ?: episodeNumber}",
                             progress = pos,
-                            duration = dur
+                            duration = dur,
+                            overridePosterUrl = targetPoster
                         )
                     }
                 }
@@ -982,7 +987,7 @@ fun PlayerScreen(
         }
         localResumePlayback = resumePlayback
         
-        val isNewEpisode = (activeEpisodeId != lastEpisodeId || activeAnimeId != animeId)
+        val isNewEpisode = (activeEpisodeId != lastEpisodeId || (lastAnimeId.isNotEmpty() && activeAnimeId != lastAnimeId))
         val isFirstLoad = lastEpisodeId.isEmpty()
         
         // Caching current position of ExoPlayer if it's a server or category switch
@@ -1005,20 +1010,36 @@ fun PlayerScreen(
                 val dur = player.duration
                 if (pos > 0 && dur > 0) {
                     val prevEp = episodes.find { it.id == lastEpisodeId }
+                    val targetAnimeId = if (lastAnimeId.isNotEmpty()) lastAnimeId else activeAnimeId
+                    val targetAnimeTitle = if (lastAnimeTitle.isNotEmpty()) lastAnimeTitle else animeTitle
+                    val targetPosterUrl = if (lastPosterUrl.isNotEmpty()) lastPosterUrl else (animeDetail?.poster ?: "")
                     viewModel.saveProgress(
-                        animeId = activeAnimeId,
-                        animeTitle = animeTitle,
+                        animeId = targetAnimeId,
+                        animeTitle = targetAnimeTitle,
                         episodeId = prevEp?.id ?: lastEpisodeId,
                         episodeNumber = prevEp?.number ?: episodeNumber,
                         episodeTitle = prevEp?.title ?: "Episode ${prevEp?.number ?: episodeNumber}",
                         progress = pos,
-                        duration = dur
+                        duration = dur,
+                        overridePosterUrl = targetPosterUrl
                     )
-                    DebugLogManager.log("ANIPLEX_PLAYER", "Saved progress for previous episode $lastEpisodeId: $pos/$dur")
+                    DebugLogManager.log("ANIPLEX_PLAYER", "Saved progress for previous episode $lastEpisodeId (animeId: $targetAnimeId, title: $targetAnimeTitle, poster: $targetPosterUrl): $pos/$dur")
                 }
             }
         }
         
+        if (lastAnimeId.isNotEmpty() && activeAnimeId != lastAnimeId) {
+            lastPosterUrl = ""
+            lastAnimeTitle = ""
+        }
+        lastAnimeId = activeAnimeId
+        if (animeTitle.isNotEmpty()) {
+            lastAnimeTitle = animeTitle
+        }
+        val currentPoster = animeDetail?.poster
+        if (!currentPoster.isNullOrEmpty()) {
+            lastPosterUrl = currentPoster
+        }
         lastEpisodeId = activeEpisodeId
         lastCategory = activeCategory
         lastServer = selectedServer
@@ -1031,7 +1052,8 @@ fun PlayerScreen(
             else -> "hd-1"
         }
         val flowStartProgress = if (isFirstLoad) initialProgressParam else 0L
-        viewModel.initialize(activeAnimeId, activeEpisodeId, activeCategory, apiServer, flowStartProgress, currentEpNum)
+        val targetEpNum = episodes.find { it.id == activeEpisodeId }?.number ?: if (activeAnimeId == lastAnimeId || lastAnimeId.isEmpty()) episodeNumber else 0
+        viewModel.initialize(activeAnimeId, activeEpisodeId, activeCategory, apiServer, flowStartProgress, targetEpNum)
     }
 
     // Timeout sniffer LaunchedEffect
@@ -1067,7 +1089,7 @@ fun PlayerScreen(
                 DownloadManager.startDownload(
                     context = context,
                     episodeId = epId,
-                    animeId = animeId,
+                    animeId = activeAnimeId,
                     animeTitle = animeTitle,
                     episodeNumber = currentEpNum,
                     episodeTitle = epTitle,
@@ -1328,14 +1350,16 @@ fun PlayerScreen(
             val dur = exoPlayer.duration
             if (pos > 0 && dur > 0) {
                 val ep = currentEpisode ?: episodes.find { it.id == activeEpisodeId }
+                val targetPoster = animeDetail?.poster ?: ""
                 viewModel.saveProgress(
-                    animeId = animeId,
+                    animeId = activeAnimeId,
                     animeTitle = animeTitle,
                     episodeId = ep?.id ?: activeEpisodeId,
                     episodeNumber = ep?.number ?: episodeNumber,
                     episodeTitle = ep?.title ?: "Episode ${ep?.number ?: episodeNumber}",
                     progress = pos,
-                    duration = dur
+                    duration = dur,
+                    overridePosterUrl = targetPoster
                 )
             }
             
@@ -1550,14 +1574,16 @@ fun PlayerScreen(
             if (now - lastSavedProgressTime >= 10000L && player.isPlaying) {
                 lastSavedProgressTime = now
                 val ep = currentEpisode ?: episodes.find { it.id == activeEpisodeId }
+                val targetPoster = animeDetail?.poster ?: ""
                 viewModel.saveProgress(
-                    animeId = animeId,
+                    animeId = activeAnimeId,
                     animeTitle = animeTitle,
                     episodeId = ep?.id ?: activeEpisodeId,
                     episodeNumber = ep?.number ?: episodeNumber,
                     episodeTitle = ep?.title ?: "Episode ${ep?.number ?: episodeNumber}",
                     progress = player.currentPosition,
-                    duration = player.duration
+                    duration = player.duration,
+                    overridePosterUrl = targetPoster
                 )
             }
         }
@@ -1701,7 +1727,7 @@ fun PlayerScreen(
         },
         onAnimeClick = {
             DebugLogManager.log("USER_ACTION", "Clicked Anime Meta Details Link")
-            onAnimeClick(animeId)
+            onAnimeClick(activeAnimeId)
         },
         toggleLike = {
             DebugLogManager.log("USER_ACTION", "Toggled Like state")
@@ -1812,14 +1838,16 @@ fun PlayerScreen(
         onPlaybackPositionChanged = { playbackPosition = it },
         onSaveProgress = { pos, dur ->
             val ep = currentEpisode ?: episodes.find { it.id == activeEpisodeId }
+            val targetPoster = animeDetail?.poster ?: ""
             viewModel.saveProgress(
-                animeId = animeId,
+                animeId = activeAnimeId,
                 animeTitle = animeTitle,
                 episodeId = ep?.id ?: activeEpisodeId,
                 episodeNumber = ep?.number ?: episodeNumber,
                 episodeTitle = ep?.title ?: "Episode ${ep?.number ?: episodeNumber}",
                 progress = pos,
-                duration = dur
+                duration = dur,
+                overridePosterUrl = targetPoster
             )
         },
         onPlaybackErrorChanged = { playbackError = it },
@@ -1985,7 +2013,7 @@ fun PlayerScreen(
                                     DownloadManager.startDownload(
                                         context = context,
                                         episodeId = epId,
-                                        animeId = animeId,
+                                        animeId = activeAnimeId,
                                         animeTitle = animeTitle,
                                         episodeNumber = currentEpNum,
                                         episodeTitle = epTitle,
@@ -2031,7 +2059,7 @@ fun PlayerScreen(
         val reportText = remember(showDebugExportDialog, state) {
             DebugLogManager.generateDebugReport(
                 context = context,
-                animeId = animeId,
+                animeId = activeAnimeId,
                 episodeId = currentEpisode?.id ?: episodeId,
                 selectedServer = selectedServer,
                 activeCategory = activeCategory,

@@ -260,6 +260,9 @@ class DetailViewModel @Inject constructor(
     private val _isWatchlisted = MutableStateFlow(false)
     val isWatchlisted: StateFlow<Boolean> = _isWatchlisted.asStateFlow()
 
+    private val _watchlistStatus = MutableStateFlow<String?>(null)
+    val watchlistStatus: StateFlow<String?> = _watchlistStatus.asStateFlow()
+
     private val _watchHistory = MutableStateFlow<HistoryItem?>(null)
     val watchHistory: StateFlow<HistoryItem?> = _watchHistory.asStateFlow()
 
@@ -382,8 +385,10 @@ class DetailViewModel @Inject constructor(
                     }
                     val watchDoc = docRef.get().await()
                     _isWatchlisted.value = watchDoc.exists()
+                    _watchlistStatus.value = if (watchDoc.exists()) watchDoc.getString("status") ?: "watching" else null
                 } catch (e: Exception) {
                     _isWatchlisted.value = false
+                    _watchlistStatus.value = null
                 }
             }
 
@@ -425,6 +430,7 @@ class DetailViewModel @Inject constructor(
                 try {
                     docRef.delete().await()
                     _isWatchlisted.value = false
+                    _watchlistStatus.value = null
                 } catch (e: Exception) {
                     // Handle failure
                 }
@@ -439,9 +445,39 @@ class DetailViewModel @Inject constructor(
                 try {
                     docRef.set(data).await()
                     _isWatchlisted.value = true
+                    _watchlistStatus.value = "planning"
                 } catch (e: Exception) {
                     // Handle failure
                 }
+            }
+        }
+    }
+
+    fun markAsWatching(animeId: String, title: String, poster: String) {
+        val userId = auth.currentUser?.uid ?: return
+        val profileId = profileManager.activeProfile.value?.id
+        viewModelScope.launch {
+            try {
+                val watchlistRef = if (profileId != null) {
+                    firestore.collection("users").document(userId)
+                        .collection("profiles").document(profileId)
+                        .collection("watchlist").document(animeId)
+                } else {
+                    firestore.collection("users").document(userId)
+                        .collection("watchlist").document(animeId)
+                }
+                val watchlistData = hashMapOf(
+                    "id" to animeId,
+                    "name" to title,
+                    "poster" to poster,
+                    "status" to "watching",
+                    "addedAt" to System.currentTimeMillis()
+                )
+                watchlistRef.set(watchlistData, com.google.firebase.firestore.SetOptions.merge()).await()
+                _isWatchlisted.value = true
+                _watchlistStatus.value = "watching"
+            } catch (e: Exception) {
+                // Squelch
             }
         }
     }
@@ -569,39 +605,7 @@ class DetailViewModel @Inject constructor(
         val profileId = profileManager.activeProfile.value?.id
         viewModelScope.launch {
             try {
-                val docRef = if (profileId != null) {
-                    firestore.collection("users").document(userId)
-                        .collection("profiles").document(profileId)
-                        .collection("history").document(animeId)
-                } else {
-                    firestore.collection("users").document(userId)
-                        .collection("history").document(animeId)
-                }
-                val data = hashMapOf(
-                    "animeId" to animeId,
-                    "animeTitle" to title,
-                    "poster" to poster,
-                    "episodeId" to "",
-                    "episodeNumber" to 1,
-                    "episodeTitle" to "Finished Watching",
-                    "progressPosition" to 100L,
-                    "totalDuration" to 100L,
-                    "updatedAt" to System.currentTimeMillis()
-                )
-                docRef.set(data).await()
-                _watchHistory.value = HistoryItem(
-                    animeId = animeId,
-                    animeTitle = title,
-                    poster = poster,
-                    episodeId = "",
-                    episodeNumber = 1,
-                    episodeTitle = "Finished Watching",
-                    progressPosition = 100L,
-                    totalDuration = 100L,
-                    updatedAt = System.currentTimeMillis()
-                )
-
-                // Also update watchlist status to completed
+                // 1. Update watchlist status to completed
                 val watchlistRef = if (profileId != null) {
                     firestore.collection("users").document(userId)
                         .collection("profiles").document(profileId)
@@ -619,6 +623,32 @@ class DetailViewModel @Inject constructor(
                 )
                 watchlistRef.set(watchlistData, com.google.firebase.firestore.SetOptions.merge()).await()
                 _isWatchlisted.value = true
+
+                // 2. Only update History if an active history record already exists
+                val historyRef = if (profileId != null) {
+                    firestore.collection("users").document(userId)
+                        .collection("profiles").document(profileId)
+                        .collection("history").document(animeId)
+                } else {
+                    firestore.collection("users").document(userId)
+                        .collection("history").document(animeId)
+                }
+                val existingDoc = historyRef.get().await()
+                if (existingDoc.exists()) {
+                    val existingDuration = existingDoc.getLong("totalDuration") ?: 100L
+                    val targetDuration = if (existingDuration > 0L) existingDuration else 100L
+                    val data = hashMapOf<String, Any>(
+                        "progressPosition" to targetDuration,
+                        "totalDuration" to targetDuration,
+                        "updatedAt" to System.currentTimeMillis()
+                    )
+                    historyRef.update(data).await()
+                    _watchHistory.value = _watchHistory.value?.copy(
+                        progressPosition = targetDuration,
+                        totalDuration = targetDuration,
+                        updatedAt = System.currentTimeMillis()
+                    )
+                }
             } catch (e: Exception) {
                 // Squelch
             }
@@ -630,6 +660,7 @@ class DetailViewModel @Inject constructor(
         val profileId = profileManager.activeProfile.value?.id
         viewModelScope.launch {
             try {
+                preferenceManager.clearLocalHistoryItem(animeId, profileId)
                 val docRef = if (profileId != null) {
                     firestore.collection("users").document(userId)
                         .collection("profiles").document(profileId)
@@ -663,15 +694,15 @@ class DetailViewModel @Inject constructor(
     }
 
     fun refreshWatchHistory(animeId: String) {
+        val profileId = profileManager.activeProfile.value?.id
         // 1. Try local cache first for instant UI response
-        val localItem = preferenceManager.getLocalHistoryItem(animeId)
+        val localItem = preferenceManager.getLocalHistoryItem(animeId, profileId)
         if (localItem != null) {
             _watchHistory.value = localItem
         }
 
         // 2. Fetch from Firestore in the background to sync
         val userId = auth.currentUser?.uid ?: return
-        val profileId = profileManager.activeProfile.value?.id
         viewModelScope.launch {
             try {
                 val docRef = if (profileId != null) {
@@ -699,7 +730,7 @@ class DetailViewModel @Inject constructor(
                     // Only update UI if Firestore has a newer update or local cache is empty
                     if (localItem == null || dbItem.updatedAt > localItem.updatedAt) {
                         _watchHistory.value = dbItem
-                        preferenceManager.saveLocalHistoryItem(dbItem)
+                        preferenceManager.saveLocalHistoryItem(dbItem, profileId)
                     }
                 } else {
                     if (localItem == null) {

@@ -2,6 +2,7 @@ package com.aniplex.app.presentation.screens.home
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.aniplex.app.data.local.preferences.PreferenceManager
 import com.aniplex.app.data.local.preferences.ProfileManager
 import com.aniplex.app.domain.model.Anime
 import com.aniplex.app.domain.model.HistoryItem
@@ -37,6 +38,7 @@ class HomeViewModel @Inject constructor(
     private val repository: AnimeRepository,
     private val firestore: FirebaseFirestore,
     private val auth: FirebaseAuth,
+    private val preferenceManager: PreferenceManager,
     private val profileManager: ProfileManager
 ) : ViewModel() {
 
@@ -76,17 +78,25 @@ class HomeViewModel @Inject constructor(
                 if (snapshot != null) {
                     val items = snapshot.documents.mapNotNull { doc ->
                         try {
-                            HistoryItem(
-                                animeId = doc.getString("animeId") ?: doc.id,
-                                animeTitle = doc.getString("animeTitle") ?: "",
-                                poster = doc.getString("poster") ?: "",
-                                episodeId = doc.getString("episodeId") ?: "",
-                                episodeNumber = doc.getLong("episodeNumber")?.toInt() ?: 1,
-                                episodeTitle = doc.getString("episodeTitle") ?: "",
-                                progressPosition = doc.getLong("progressPosition") ?: 0L,
-                                totalDuration = doc.getLong("totalDuration") ?: 0L,
-                                updatedAt = doc.getLong("updatedAt") ?: 0L
-                            )
+                            val progress = doc.getLong("progressPosition") ?: 0L
+                            val duration = doc.getLong("totalDuration") ?: 0L
+                            // Filter out completed episodes/seasons (progress >= 95% of total duration)
+                            val isFinished = duration > 0L && (progress.toFloat() / duration.toFloat() >= 0.95f)
+                            if (isFinished) {
+                                null
+                            } else {
+                                HistoryItem(
+                                    animeId = doc.getString("animeId") ?: doc.id,
+                                    animeTitle = doc.getString("animeTitle") ?: "",
+                                    poster = doc.getString("poster") ?: "",
+                                    episodeId = doc.getString("episodeId") ?: "",
+                                    episodeNumber = doc.getLong("episodeNumber")?.toInt() ?: 1,
+                                    episodeTitle = doc.getString("episodeTitle") ?: "",
+                                    progressPosition = progress,
+                                    totalDuration = duration,
+                                    updatedAt = doc.getLong("updatedAt") ?: 0L
+                                )
+                            }
                         } catch (e: Exception) {
                             null
                         }
@@ -344,6 +354,7 @@ class HomeViewModel @Inject constructor(
         val profileId = profileManager.activeProfile.value?.id
         viewModelScope.launch {
             try {
+                preferenceManager.clearLocalHistoryItem(animeId, profileId)
                 val docRef = if (profileId != null) {
                     firestore.collection("users").document(userId)
                         .collection("profiles").document(profileId)
@@ -364,7 +375,26 @@ class HomeViewModel @Inject constructor(
         val profileId = profileManager.activeProfile.value?.id
         viewModelScope.launch {
             try {
-                val docRef = if (profileId != null) {
+                // 1. Update Watchlist status to "completed"
+                val watchlistRef = if (profileId != null) {
+                    firestore.collection("users").document(userId)
+                        .collection("profiles").document(profileId)
+                        .collection("watchlist").document(animeId)
+                } else {
+                    firestore.collection("users").document(userId)
+                        .collection("watchlist").document(animeId)
+                }
+                val watchlistData = hashMapOf(
+                    "id" to animeId,
+                    "name" to title,
+                    "poster" to poster,
+                    "status" to "completed",
+                    "addedAt" to System.currentTimeMillis()
+                )
+                watchlistRef.set(watchlistData, com.google.firebase.firestore.SetOptions.merge()).await()
+
+                // 2. Only update History if an active history record already exists (avoid creating fake history records for unstarted shows)
+                val historyRef = if (profileId != null) {
                     firestore.collection("users").document(userId)
                         .collection("profiles").document(profileId)
                         .collection("history").document(animeId)
@@ -372,18 +402,82 @@ class HomeViewModel @Inject constructor(
                     firestore.collection("users").document(userId)
                         .collection("history").document(animeId)
                 }
-                val data = hashMapOf(
-                    "animeId" to animeId,
-                    "animeTitle" to title,
+                val existingDoc = historyRef.get().await()
+                if (existingDoc.exists()) {
+                    val existingDuration = existingDoc.getLong("totalDuration") ?: 100L
+                    val targetDuration = if (existingDuration > 0L) existingDuration else 100L
+                    val data = hashMapOf<String, Any>(
+                        "progressPosition" to targetDuration,
+                        "totalDuration" to targetDuration,
+                        "updatedAt" to System.currentTimeMillis()
+                    )
+                    historyRef.update(data).await()
+                }
+            } catch (e: Exception) {
+                // Squelch
+            }
+        }
+    }
+
+    val watchlistMap: StateFlow<Map<String, String>> = callbackFlow {
+        val userId = auth.currentUser?.uid
+        if (userId == null) {
+            trySend(emptyMap())
+            close()
+            return@callbackFlow
+        }
+
+        val profileId = profileManager.activeProfile.value?.id
+        val collectionRef = if (profileId != null) {
+            firestore.collection("users").document(userId)
+                .collection("profiles").document(profileId)
+                .collection("watchlist")
+        } else {
+            firestore.collection("users").document(userId)
+                .collection("watchlist")
+        }
+
+        val listener = collectionRef.addSnapshotListener { snapshot, error ->
+            if (error != null || snapshot == null) {
+                trySend(emptyMap())
+                return@addSnapshotListener
+            }
+            val map = snapshot.documents.mapNotNull { doc ->
+                val id = doc.getString("id") ?: doc.id
+                val status = doc.getString("status") ?: "watching"
+                id to status
+            }.toMap()
+            trySend(map)
+        }
+
+        awaitClose { listener.remove() }
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = emptyMap()
+    )
+
+    fun markAsWatching(animeId: String, title: String, poster: String) {
+        val userId = auth.currentUser?.uid ?: return
+        val profileId = profileManager.activeProfile.value?.id
+        viewModelScope.launch {
+            try {
+                val watchlistRef = if (profileId != null) {
+                    firestore.collection("users").document(userId)
+                        .collection("profiles").document(profileId)
+                        .collection("watchlist").document(animeId)
+                } else {
+                    firestore.collection("users").document(userId)
+                        .collection("watchlist").document(animeId)
+                }
+                val watchlistData = hashMapOf(
+                    "id" to animeId,
+                    "name" to title,
                     "poster" to poster,
-                    "episodeId" to "",
-                    "episodeNumber" to 1,
-                    "episodeTitle" to "Finished Watching",
-                    "progressPosition" to 100L,
-                    "totalDuration" to 100L,
-                    "updatedAt" to System.currentTimeMillis()
+                    "status" to "watching",
+                    "addedAt" to System.currentTimeMillis()
                 )
-                docRef.set(data).await()
+                watchlistRef.set(watchlistData, com.google.firebase.firestore.SetOptions.merge()).await()
             } catch (e: Exception) {
                 // Squelch
             }

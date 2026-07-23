@@ -207,4 +207,58 @@ class WatchlistViewModel @Inject constructor(
             }
         }
     }
+
+    fun markAsWatching(animeId: String, name: String, poster: String) {
+        val userId = auth.currentUser?.uid ?: return
+        val profileId = profileManager.activeProfile.value?.id
+        viewModelScope.launch {
+            try {
+                val docRef = if (profileId != null) {
+                    firestore.collection("users").document(userId)
+                        .collection("profiles").document(profileId)
+                        .collection("watchlist").document(animeId)
+                } else {
+                    firestore.collection("users").document(userId)
+                        .collection("watchlist").document(animeId)
+                }
+                val data = hashMapOf(
+                    "id" to animeId,
+                    "name" to name,
+                    "poster" to poster,
+                    "status" to "watching",
+                    "addedAt" to System.currentTimeMillis()
+                )
+                docRef.set(data, SetOptions.merge()).await()
+            } catch (e: Exception) {
+                // Ignore failure
+            }
+        }
+    }
+
+    fun markAsWatched(animeId: String, name: String, poster: String) {
+        val userId = auth.currentUser?.uid ?: return
+        val profileId = profileManager.activeProfile.value?.id
+        viewModelScope.launch {
+            try {
+                val docRef = if (profileId != null) {
+                    firestore.collection("users").document(userId)
+                        .collection("profiles").document(profileId)
+                        .collection("watchlist").document(animeId)
+                } else {
+                    firestore.collection("users").document(userId)
+                        .collection("watchlist").document(animeId)
+                }
+                val data = hashMapOf(
+                    "id" to animeId,
+                    "name" to name,
+                    "poster" to poster,
+                    "status" to "completed",
+                    "addedAt" to System.currentTimeMillis()
+                )
+                docRef.set(data, SetOptions.merge()).await()
+            } catch (e: Exception) {
+                // Ignore failure
+            }
+        }
+    }
 }

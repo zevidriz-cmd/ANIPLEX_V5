@@ -32,6 +32,7 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.aniplex.app.domain.model.Anime
 import com.valentinilk.shimmer.shimmer
+import com.aniplex.app.theme.CrunchyrollOrange
 import com.aniplex.app.theme.GoldStar
 import com.aniplex.app.theme.SurfaceDark
 import com.aniplex.app.theme.TextSecondary
@@ -43,7 +44,9 @@ fun AnimeCard(
     modifier: Modifier = Modifier,
     isLandscape: Boolean = false,
     onAddToWatchlist: ((String, String, String) -> Unit)? = null,
-    onMarkAsWatched: ((String, String, String) -> Unit)? = null
+    onMarkAsWatched: ((String, String, String) -> Unit)? = null,
+    onMarkAsWatching: ((String, String, String) -> Unit)? = null,
+    watchlistStatus: String? = null
 ) {
     val cardWidth = if (isLandscape) 200.dp else 145.dp
     val imageHeight = if (isLandscape) 115.dp else 195.dp
@@ -226,7 +229,23 @@ fun AnimeCard(
                                     }
                                 )
                             }
-                            if (onMarkAsWatched != null) {
+                            if (watchlistStatus == "completed" && onMarkAsWatching != null) {
+                                DropdownMenuItem(
+                                    text = { Text("Mark as Watching", color = Color.White, fontSize = 13.sp) },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = Icons.Default.PlayArrow,
+                                            contentDescription = "Mark Watching",
+                                            tint = CrunchyrollOrange,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    },
+                                    onClick = {
+                                        menuExpanded = false
+                                        onMarkAsWatching(anime.id, anime.title, anime.poster)
+                                    }
+                                )
+                            } else if (onMarkAsWatched != null) {
                                 DropdownMenuItem(
                                     text = { Text("Mark as Watched", color = Color.White, fontSize = 13.sp) },
                                     leadingIcon = {

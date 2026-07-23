@@ -409,11 +409,17 @@ class PlayerViewModel @Inject constructor(
         lastAnimeId = animeId
 
         if (isNewAnime) {
+            posterUrl = ""
             _animeDetail.value = null
             _currentEpisode.value = null
             _episodes.value = emptyList()
+            _aniNekoTree.value = null
+            _isEnumeratingAniNeko.value = false
+            _isLiked.value = false
+            _isDisliked.value = false
             detailsJob?.cancel()
             episodesJob?.cancel()
+            progressSaveJob?.cancel()
 
             detailsJob = viewModelScope.launch {
                 // 1. Fetch Anime Detail (for poster image)
@@ -442,9 +448,12 @@ class PlayerViewModel @Inject constructor(
         }
 
         viewModelScope.launch {
+            val userId = auth.currentUser?.uid
+            val profileId = profileManager.activeProfile.value?.id
+
             // 1. Try local cache first for zero-latency resume
             try {
-                val localItem = preferenceManager.getLocalHistoryItem(animeId)
+                val localItem = preferenceManager.getLocalHistoryItem(animeId, profileId)
                 if (localItem != null) {
                     val epNum = if (episodeNumber > 0) episodeNumber else (_currentEpisode.value?.number ?: 0)
                     val matchesEpisode = (localItem.episodeId == episodeId) || (localItem.episodeNumber > 0 && epNum > 0 && localItem.episodeNumber == epNum)
@@ -456,7 +465,7 @@ class PlayerViewModel @Inject constructor(
                 
                 // If not matched or still 0, try specific local progress by ID/Number
                 if (_initialProgress.value <= 0L) {
-                    val localProgress = preferenceManager.getLocalWatchProgress(animeId, episodeId, episodeNumber)
+                    val localProgress = preferenceManager.getLocalWatchProgress(animeId, episodeId, episodeNumber, profileId)
                     if (localProgress > 0L) {
                         _initialProgress.value = localProgress
                         DebugLogManager.log("ANIPLEX_PROGRESS", "Successfully resolved and loaded initialProgress from local progress cache: $localProgress")
@@ -467,8 +476,6 @@ class PlayerViewModel @Inject constructor(
             }
 
             // 2. Fetch Watch History from Firestore (to sync with other devices)
-            val userId = auth.currentUser?.uid
-            val profileId = profileManager.activeProfile.value?.id
             if (userId != null) {
                 try {
                     val docRef = if (profileId != null) {
@@ -494,7 +501,7 @@ class PlayerViewModel @Inject constructor(
                             }
                             
                             // Keep local cache synced if db has a newer/different value
-                            val localProgress = preferenceManager.getLocalWatchProgress(animeId, episodeId, episodeNumber)
+                            val localProgress = preferenceManager.getLocalWatchProgress(animeId, episodeId, episodeNumber, profileId)
                             if (dbProgress > 0L && dbProgress != localProgress) {
                                 val animeTitle = doc.getString("animeTitle") ?: ""
                                 val poster = doc.getString("poster") ?: ""
@@ -510,7 +517,7 @@ class PlayerViewModel @Inject constructor(
                                     totalDuration = doc.getLong("totalDuration") ?: 0L,
                                     updatedAt = doc.getLong("updatedAt") ?: System.currentTimeMillis()
                                 )
-                                preferenceManager.saveLocalHistoryItem(item)
+                                preferenceManager.saveLocalHistoryItem(item, profileId)
                             }
                         }
                     } else {
@@ -823,7 +830,8 @@ class PlayerViewModel @Inject constructor(
         episodeNumber: Int,
         episodeTitle: String,
         progress: Long,
-        duration: Long
+        duration: Long,
+        overridePosterUrl: String? = null
     ) {
         val userId = auth.currentUser?.uid ?: return
         val profileId = profileManager.activeProfile.value?.id
@@ -841,7 +849,7 @@ class PlayerViewModel @Inject constructor(
                 var finalProgress = progress
                 var finalDuration = duration
 
-                val isNearEnd = (duration > 0L) && (progress.toFloat() / duration.toFloat() >= 0.90f || (duration - progress) <= 120_000L)
+                val isNearEnd = (duration > 0L) && (progress.toFloat() / duration.toFloat() >= 0.95f || (duration - progress) <= 60_000L)
                 if (isNearEnd && currentIndex != -1 && currentIndex < currentList.size - 1) {
                     val nextEp = currentList[currentIndex + 1]
                     finalEpisodeId = nextEp.id
@@ -851,10 +859,12 @@ class PlayerViewModel @Inject constructor(
                     finalDuration = 0L // clean resume state for the next episode
                 }
 
+                val finalPoster = overridePosterUrl?.ifEmpty { null } ?: (if (posterUrl.isNotEmpty()) posterUrl else _animeDetail.value?.poster ?: "")
+
                 val historyItem = com.aniplex.app.domain.model.HistoryItem(
                     animeId = animeId,
                     animeTitle = animeTitle,
-                    poster = posterUrl ?: "",
+                    poster = finalPoster,
                     episodeId = finalEpisodeId,
                     episodeNumber = finalEpisodeNumber,
                     episodeTitle = finalEpisodeTitle,
@@ -862,13 +872,13 @@ class PlayerViewModel @Inject constructor(
                     totalDuration = finalDuration,
                     updatedAt = System.currentTimeMillis()
                 )
-                preferenceManager.saveLocalHistoryItem(historyItem)
+                preferenceManager.saveLocalHistoryItem(historyItem, profileId)
                 DebugLogManager.log("ANIPLEX_PROGRESS", "Saved progress locally: $finalProgress / $finalDuration")
 
                 val data = hashMapOf(
                     "animeId" to animeId,
                     "animeTitle" to animeTitle,
-                    "poster" to (posterUrl ?: ""),
+                    "poster" to finalPoster,
                     "episodeId" to finalEpisodeId,
                     "episodeNumber" to finalEpisodeNumber,
                     "episodeTitle" to finalEpisodeTitle,
@@ -904,7 +914,7 @@ class PlayerViewModel @Inject constructor(
                 val watchlistData = hashMapOf(
                     "id" to animeId,
                     "name" to animeTitle,
-                    "poster" to posterUrl,
+                    "poster" to finalPoster,
                     "status" to targetStatus,
                     "addedAt" to System.currentTimeMillis()
                 )
